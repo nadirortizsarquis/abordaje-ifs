@@ -1,0 +1,3328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Planificador de Abordaje IFS</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz48c3ZnIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iNzAwMCAyNDAwIDk2MDAgNDgwMCI+PHBvbHlnb24gZmlsbD0iIzVDQzZEMCIgcG9pbnRzPSI4OTYyLjc4LDYxMDEuOTMgOTMwMy44LDcwNTkuNzUgOTMxMS4xOCw1OTEyLjMzIDkxNjcuMzEsNTkxNi4wMiA5MDc2LjE3LDU4MDguMzIiLz48cG9seWdvbiBmaWxsPSIjOTFEOEY3IiBwb2ludHM9IjkzMDMuOCw3MDU5Ljc1IDg5NjIuNzgsNjEwMS45MyA4NzkzLjc1LDY2MTYuMDkiLz48cG9seWdvbiBmaWxsPSIjMDA5OERBIiBwb2ludHM9Ijg3OTMuNzUsNjYxNi4wOSA5MDc2LjE3LDU4MDguMzIgODk5Mi45OSw1NzM2LjE2IDg5OTYuNjgsNTYyNy4zMiA4OTE5LjE4LDU1MjAuMzMgODkwOC4xMSw1NjU0Ljk5IDg2MjQuMDUsNjEwMy4yNiIvPjxwYXRoIGZpbGw9IiM5MUQ4RjciIGQ9Ik05Njc5LjI2IDcwMTQuNzZsMzAxLjc2IDAgMCAtMjU3NS45OCAtMzAxLjc2IDAgMCAyNTc1Ljk4em02MzIuOTcgMGwzMDEuNzUgMCAwIC0xMjU4LjU1IDM5Ny40MyAwIDAgLTY2LjI0IC0zOTcuNDMgMCAwIC0xMTQwLjc5IDU1MiAwIDAgLTExMC40IC04NTMuNzUgMCAwIDEyNTEuMTkgLTExMC40MSAwIDAgNjYuMjQgMTEwLjQxIDAgMCAxMjU4LjU1eiIvPjwvc3ZnPg==">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --azul-oscuro: #3E4095;
+    --azul: #0098DA;
+    --teal: #5CC6D0;
+    --celeste: #91D8F7;
+    --navy: #1e1b4b;
+    --bg: #f0f2f7;
+    --bg-card: #ffffff;
+    --texto: #1a1a2e;
+    --texto-suave: #5a5a7a;
+    --borde: #e2e4ef;
+    --header-h: 64px;
+
+    /* Estados de prospecto (paleta para Parte 2) */
+    --estado-nuevo: #9ca3af;
+    --estado-pendiente: #f59e0b;
+    --estado-largo-plazo: #fb923c;
+    --estado-agendado: #10b981;
+    --estado-rechazado: #ef4444;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--texto);
+    line-height: 1.6;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ── */
+  .header {
+    position: fixed; top: 0; left: 0; right: 0; height: var(--header-h);
+    background: linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 100%);
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px;
+    z-index: 100;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
+  }
+  .header-logo {
+    height: 40px;
+    width: auto;
+    max-width: 200px;
+    display: block;
+    flex-shrink: 0;
+  }
+  .header-title {
+    color: white; font-size: 1.1rem; font-weight: 600;
+    border-left: 2px solid rgba(255,255,255,0.3); padding-left: 16px;
+    letter-spacing: 0.3px;
+  }
+  .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
+  .header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .header-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: white;
+    padding: 7px 14px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  .header-btn:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.35); }
+
+  /* ── MAIN ── */
+  .main {
+    margin-top: var(--header-h);
+    padding: 18px 22px;
+    max-width: 1520px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .main-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+    gap: 16px;
+  }
+  .main-head h1 {
+    font-size: 1.5rem;
+    color: var(--azul-oscuro);
+    font-weight: 700;
+    letter-spacing: 0.2px;
+  }
+  .main-head .subhead {
+    font-size: 0.85rem;
+    color: var(--texto-suave);
+    margin-top: 4px;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, var(--azul) 0%, var(--azul-oscuro) 100%);
+    color: white;
+    border: none;
+    padding: 11px 20px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+    box-shadow: 0 4px 14px rgba(0,152,218,0.25);
+    transition: transform 0.1s, box-shadow 0.15s;
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,152,218,0.35); }
+  .btn-primary:active { transform: translateY(0); }
+
+  .btn-secondary {
+    background: white;
+    color: var(--azul-oscuro);
+    border: 1.5px solid var(--borde);
+    padding: 9px 16px;
+    border-radius: 9px;
+    font-size: 0.83rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn-secondary:hover { border-color: var(--azul); color: var(--azul); }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--texto-suave);
+    border: none;
+    padding: 8px 12px;
+    font-size: 0.83rem;
+    cursor: pointer;
+  }
+  .btn-ghost:hover { color: var(--azul); }
+
+  /* ── EMPTY STATE ── */
+  .empty {
+    background: var(--bg-card);
+    border: 2px dashed var(--borde);
+    border-radius: 14px;
+    padding: 60px 32px;
+    text-align: center;
+  }
+  .empty-icon {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--celeste) 0%, var(--teal) 100%);
+    margin: 0 auto 18px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 1.6rem; font-weight: 700;
+  }
+  .empty-title { font-size: 1.05rem; color: var(--azul-oscuro); font-weight: 600; margin-bottom: 6px; }
+  .empty-text { color: var(--texto-suave); font-size: 0.9rem; margin-bottom: 22px; max-width: 420px; margin-left: auto; margin-right: auto; }
+
+  /* ── TABLA ── */
+  .table-wrap {
+    background: var(--bg-card);
+    border-radius: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+    overflow: hidden;
+    border: 1px solid var(--borde);
+  }
+  table.prospectos {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+  }
+  table.prospectos thead {
+    background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
+    color: white;
+  }
+  table.prospectos thead th {
+    padding: 13px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 0.78rem;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+  }
+  table.prospectos tbody tr {
+    border-top: 1px solid var(--borde);
+    transition: background 0.12s;
+  }
+  table.prospectos tbody tr:hover { background: #f7f9fd; }
+  table.prospectos td {
+    padding: 14px 16px;
+    vertical-align: middle;
+  }
+  table.prospectos td.col-nombre {
+    font-weight: 600;
+    color: var(--azul-oscuro);
+  }
+  table.prospectos td.col-telefono {
+    font-family: 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    color: var(--texto-suave);
+  }
+  .badge-estado {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: white;
+    background: var(--estado-nuevo);
+  }
+  .badge-pref {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 10px;
+    font-size: 0.72rem;
+    background: #eef4fb;
+    color: var(--azul-oscuro);
+    font-weight: 600;
+  }
+  .pill-action {
+    background: transparent;
+    border: 1px solid var(--borde);
+    color: var(--texto-suave);
+    padding: 5px 10px;
+    border-radius: 8px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    margin-right: 4px;
+    transition: all 0.12s;
+  }
+  .pill-action:hover { border-color: var(--azul); color: var(--azul); }
+  .pill-action.danger:hover { border-color: var(--estado-rechazado); color: var(--estado-rechazado); }
+
+  /* ── MODAL ── */
+  .modal-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(30, 27, 75, 0.55);
+    backdrop-filter: blur(3px);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+    padding: 24px;
+    animation: fadeIn 0.18s ease;
+  }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    background: var(--bg-card);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.25);
+    animation: slideUp 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  .modal-header {
+    background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
+    color: white;
+    padding: 20px 28px;
+    border-radius: 16px 16px 0 0;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .modal-header h3 { font-size: 1.05rem; font-weight: 700; }
+  .modal-close {
+    background: rgba(255,255,255,0.12);
+    border: none;
+    color: white;
+    width: 30px; height: 30px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.1rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+  }
+  .modal-close:hover { background: rgba(255,255,255,0.25); }
+  .modal-body { padding: 24px 28px; }
+  .modal-footer {
+    padding: 16px 28px;
+    border-top: 1px solid var(--borde);
+    display: flex; justify-content: flex-end; gap: 10px;
+  }
+
+  /* ── FORM ── */
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+  }
+  .field label .req { color: var(--estado-rechazado); margin-left: 2px; }
+  .field input[type=text], .field input[type=tel], .field select, .field textarea {
+    width: 100%;
+    padding: 10px 13px;
+    border: 1.5px solid var(--borde);
+    border-radius: 9px;
+    font-size: 0.92rem;
+    font-family: inherit;
+    color: var(--texto);
+    background: white;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus {
+    border-color: var(--azul);
+    box-shadow: 0 0 0 3px rgba(0,152,218,0.12);
+  }
+  .field textarea { resize: vertical; min-height: 80px; }
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field-error {
+    color: var(--estado-rechazado);
+    font-size: 0.78rem;
+    margin-top: 4px;
+  }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed;
+    bottom: 24px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--azul-oscuro);
+    color: white;
+    padding: 12px 22px;
+    border-radius: 10px;
+    font-size: 0.88rem;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(30,27,75,0.35);
+    z-index: 300;
+    animation: toastIn 0.22s ease;
+  }
+  @keyframes toastIn { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+  /* ── ESTADO BADGE (col Estado) ── */
+  .estado-cell { white-space: nowrap; }
+  .estado-badge-wrap { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+  .estado-badge {
+    display: inline-block;
+    padding: 4px 11px;
+    border-radius: 12px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    line-height: 1.2;
+  }
+  .estado-subtxt {
+    font-size: 0.7rem;
+    color: var(--texto-suave);
+    font-weight: 500;
+    letter-spacing: 0.2px;
+  }
+  .estado-subtxt.urgente { color: var(--estado-rechazado); font-weight: 600; }
+  .estado-subtxt.hoy     { color: #c2410c; font-weight: 600; }
+
+  /* ── TIMELINE CELL (col Último contacto / Observación) ── */
+  .timeline-cell {
+    display: flex; flex-direction: column; gap: 0;
+    min-width: 220px;
+  }
+  .timeline-row {
+    display: flex; align-items: flex-start; gap: 9px;
+    font-size: 0.78rem;
+    line-height: 1.4;
+    padding: 8px 0;
+  }
+  .timeline-row + .timeline-row {
+    border-top: 1px dashed rgba(60, 60, 90, 0.28);
+  }
+  .timeline-row .chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    flex-shrink: 0;
+    line-height: 1.4;
+    margin-top: 1px;
+    align-self: flex-start;
+  }
+  .timeline-row .body {
+    display: flex; flex-direction: row; flex-wrap: wrap;
+    align-items: baseline;
+    column-gap: 8px; row-gap: 2px;
+    min-width: 0; flex: 1;
+  }
+  .timeline-row .fecha {
+    font-size: 0.72rem;
+    color: var(--texto-suave);
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .timeline-row .obs {
+    color: var(--texto);
+    font-style: italic;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-word;
+    flex: 1 1 100px;
+    min-width: 0;
+  }
+  .timeline-row .obs:empty { display: none; }
+  .timeline-mas {
+    font-size: 0.7rem;
+    color: var(--texto-suave);
+    font-style: italic;
+    padding-left: 4px;
+  }
+  .timeline-vacio {
+    color: var(--texto-suave);
+    font-size: 0.82rem;
+    font-style: italic;
+  }
+
+  /* ── FILA CLICKEABLE + tints por estado ── */
+  table.prospectos tbody tr.fila-clickeable { cursor: pointer; }
+  table.prospectos tbody tr.tint-pendiente   { background: rgba(245, 158, 11, 0.05); }
+  table.prospectos tbody tr.tint-pendiente:hover { background: rgba(245, 158, 11, 0.10); }
+  table.prospectos tbody tr.tint-programado  { background: rgba(251, 146, 60, 0.05); }
+  table.prospectos tbody tr.tint-programado:hover { background: rgba(251, 146, 60, 0.10); }
+  table.prospectos tbody tr.tint-agendado    { background: rgba(16, 185, 129, 0.06); }
+  table.prospectos tbody tr.tint-agendado:hover { background: rgba(16, 185, 129, 0.12); }
+  table.prospectos tbody tr.tint-rechazado   { background: rgba(239, 68, 68, 0.05); opacity: 0.82; }
+  table.prospectos tbody tr.tint-rechazado:hover { background: rgba(239, 68, 68, 0.10); }
+
+  /* ── PANEL LATERAL ── */
+  .panel-backdrop {
+    position: fixed; inset: 0;
+    background: rgba(30, 27, 75, 0.5);
+    backdrop-filter: blur(2px);
+    z-index: 200;
+    display: flex; justify-content: flex-end;
+    animation: fadeIn 0.18s ease;
+  }
+  .panel-side {
+    width: 100%;
+    max-width: 540px;
+    background: var(--bg);
+    height: 100%;
+    overflow-y: auto;
+    box-shadow: -10px 0 30px rgba(0,0,0,0.18);
+    animation: slideInRight 0.24s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  @keyframes slideInRight {
+    from { transform: translateX(40px); opacity: 0.5; }
+    to   { transform: translateX(0); opacity: 1; }
+  }
+
+  .panel-header {
+    background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
+    color: white;
+    padding: 22px 28px;
+    display: flex; align-items: center; justify-content: space-between;
+    position: sticky; top: 0; z-index: 10;
+  }
+  .panel-header h2 {
+    font-size: 1.1rem; font-weight: 700;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .panel-close {
+    background: rgba(255,255,255,0.15);
+    border: none;
+    color: white;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    cursor: pointer;
+    font-size: 1.2rem;
+    display: flex; align-items: center; justify-content: center;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .panel-close:hover { background: rgba(255,255,255,0.28); }
+
+  .panel-section {
+    padding: 22px 28px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .panel-section:last-child { border-bottom: none; }
+  .panel-section h4 {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 14px;
+  }
+
+  .field-inline { margin-bottom: 12px; }
+  .field-inline label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--texto-suave);
+    font-weight: 600;
+    margin-bottom: 4px;
+    letter-spacing: 0.3px;
+  }
+  .field-inline input, .field-inline select, .field-inline textarea {
+    width: 100%;
+    padding: 8px 11px;
+    border: 1.5px solid var(--borde);
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-family: inherit;
+    color: var(--texto);
+    background: white;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .field-inline input:focus, .field-inline select:focus, .field-inline textarea:focus {
+    border-color: var(--azul);
+    box-shadow: 0 0 0 3px rgba(0,152,218,0.10);
+  }
+  .field-inline textarea { resize: vertical; min-height: 64px; }
+  .field-inline-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+  /* ── TIPOS GRID (botones rápidos) ── */
+  .tipos-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 8px;
+  }
+  .tipo-button {
+    border: 2px solid;
+    padding: 11px 6px;
+    border-radius: 10px;
+    background: white;
+    font-size: 0.74rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-align: center;
+    line-height: 1.2;
+    letter-spacing: 0.2px;
+  }
+  .tipo-button:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.06); }
+  .tipo-button:active { transform: translateY(0); }
+
+  /* Form de gestión que aparece debajo de la grid */
+  .gestion-form {
+    margin-top: 16px;
+    padding: 16px;
+    background: white;
+    border: 2px solid var(--borde);
+    border-radius: 12px;
+    animation: fadeIn 0.18s ease;
+  }
+  .gestion-form-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--azul-oscuro);
+    margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .gestion-form-title .chip { font-size: 0.66rem; padding: 2px 8px; }
+  .gestion-form .actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px;
+  }
+
+  /* ── HISTORIAL ── */
+  .historial-list {
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .historial-item {
+    background: white;
+    border: 1px solid var(--borde);
+    border-radius: 10px;
+    padding: 11px 14px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .historial-item .top {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .historial-item .obs {
+    font-size: 0.85rem;
+    color: var(--texto);
+    line-height: 1.4;
+  }
+  .historial-item .obs:empty { display: none; }
+  .historial-item .agendado-line {
+    font-size: 0.78rem;
+    color: var(--azul-oscuro);
+    font-weight: 600;
+  }
+  .historial-vacio {
+    color: var(--texto-suave);
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+
+  /* ── BOTONES extra ── */
+  .btn-danger {
+    background: white;
+    color: var(--estado-rechazado);
+    border: 1.5px solid var(--estado-rechazado);
+    padding: 9px 16px;
+    border-radius: 9px;
+    font-size: 0.83rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .btn-danger:hover { background: var(--estado-rechazado); color: white; }
+
+  .btn-mini {
+    padding: 6px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    border-radius: 7px;
+    cursor: pointer;
+    border: 1.5px solid var(--borde);
+    background: white;
+    color: var(--texto);
+    transition: all 0.12s;
+  }
+  .btn-mini:hover { border-color: var(--azul); color: var(--azul); }
+  .btn-mini.primary {
+    background: var(--azul-oscuro); color: white; border-color: var(--azul-oscuro);
+  }
+  .btn-mini.primary:hover { background: var(--azul); border-color: var(--azul); }
+
+  /* ── BACKUP INDICATOR ── */
+  .backup-info {
+    font-size: 0.75rem;
+    color: var(--texto-suave);
+    margin-top: 4px;
+  }
+  .backup-info.warn { color: #c2410c; font-weight: 500; }
+
+  /* ── BACKUP INFO en header ── */
+  .header-backup {
+    font-size: 0.72rem;
+    color: rgba(255,255,255,0.65);
+    letter-spacing: 0.3px;
+    padding: 6px 12px;
+    border-radius: 8px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.14);
+    white-space: nowrap;
+    user-select: none;
+  }
+  .header-backup.warn {
+    color: #fdba74;
+    background: rgba(251, 146, 60, 0.14);
+    border-color: rgba(251, 146, 60, 0.42);
+  }
+
+  /* ── FILTER BAR ── */
+  .filter-bar {
+    display: flex;
+    gap: 14px;
+    align-items: center;
+    flex-wrap: wrap;
+    background: var(--bg-card);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+    border: 1px solid var(--borde);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .filter-group { display: flex; align-items: center; gap: 8px; }
+  .filter-group label {
+    font-size: 0.75rem;
+    color: var(--texto-suave);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .filter-group select {
+    padding: 6px 11px;
+    border: 1px solid var(--borde);
+    border-radius: 7px;
+    font-size: 0.83rem;
+    font-family: inherit;
+    color: var(--texto);
+    background: white;
+    cursor: pointer;
+    outline: none;
+  }
+  .filter-group select:focus { border-color: var(--azul); }
+  .filter-count {
+    margin-left: auto;
+    font-size: 0.78rem;
+    color: var(--texto-suave);
+    font-weight: 500;
+  }
+
+  /* ── COLUMN WIDTHS ── */
+  table.prospectos col.col-w-tel       { width: 130px; }
+  table.prospectos col.col-w-estado    { width: 160px; }
+  table.prospectos col.col-w-referente { width: 120px; }
+  table.prospectos col.col-w-pref      { width: 90px; }
+
+  /* ── EDIT BUTTON en historial ── */
+  .btn-edit-mini {
+    background: transparent;
+    border: 1px solid var(--borde);
+    color: var(--texto-suave);
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: all 0.12s;
+    margin-left: auto;
+  }
+  .btn-edit-mini:hover { border-color: var(--azul); color: var(--azul); }
+
+  .historial-edit-form {
+    background: #f7f9fd;
+    border: 2px solid var(--azul);
+    border-radius: 10px;
+    padding: 14px;
+    animation: fadeIn 0.18s ease;
+  }
+  .historial-edit-form .actions {
+    display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px;
+  }
+  .historial-edit-tipo {
+    font-size: 0.78rem;
+    color: var(--texto-suave);
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+    font-weight: 600;
+  }
+
+  /* ── VIEW TABS (Lista | Calendario) ── */
+  .view-tabs {
+    display: inline-flex;
+    background: var(--bg-card);
+    border: 1px solid var(--borde);
+    border-radius: 10px;
+    padding: 4px;
+    margin-bottom: 14px;
+    gap: 2px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.03);
+  }
+  .view-tab {
+    padding: 7px 18px;
+    border: none;
+    background: transparent;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--texto-suave);
+    cursor: pointer;
+    border-radius: 7px;
+    transition: all 0.15s;
+    letter-spacing: 0.2px;
+  }
+  .view-tab:hover { color: var(--azul-oscuro); }
+  .view-tab.active {
+    background: linear-gradient(135deg, var(--azul-oscuro), var(--azul));
+    color: white;
+    box-shadow: 0 2px 8px rgba(0,152,218,0.25);
+  }
+
+  /* ── CALENDARIO ── */
+  .cal-wrap {
+    background: var(--bg-card);
+    border-radius: 14px;
+    border: 1px solid var(--borde);
+    overflow: hidden;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+  }
+  .cal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 22px;
+    background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
+    color: white;
+  }
+  .cal-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: capitalize;
+    position: relative;
+  }
+  .cal-title.clickable {
+    cursor: pointer;
+    padding: 4px 10px;
+    border-radius: 8px;
+    transition: background 0.14s;
+    user-select: none;
+  }
+  .cal-title.clickable:hover { background: rgba(255,255,255,0.14); }
+  .cal-title-caret {
+    font-size: 0.7rem;
+    margin-left: 6px;
+    opacity: 0.7;
+  }
+
+  /* Picker mes/año popover */
+  .myp-pop {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    background: white;
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    box-shadow: 0 12px 30px rgba(0,0,0,0.18);
+    padding: 14px;
+    z-index: 30;
+    min-width: 240px;
+    color: var(--texto);
+    text-transform: none;
+    font-weight: 500;
+    letter-spacing: 0;
+    animation: fadeIn 0.14s ease;
+  }
+  .myp-year {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 10px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--azul-oscuro);
+  }
+  .myp-year-btn {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    border: 1px solid var(--borde);
+    background: white;
+    color: var(--texto-suave);
+    cursor: pointer;
+    font-size: 0.92rem;
+    transition: all 0.14s;
+  }
+  .myp-year-btn:hover { background: var(--azul); color: white; border-color: var(--azul); }
+  .myp-year input {
+    width: 80px;
+    padding: 4px 8px;
+    text-align: center;
+    border: 1px solid var(--borde);
+    border-radius: 7px;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--azul-oscuro);
+    outline: none;
+    font-family: inherit;
+  }
+  .myp-year input:focus { border-color: var(--azul); }
+  .myp-months {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .myp-month {
+    border: 1px solid var(--borde);
+    background: white;
+    color: var(--texto);
+    padding: 8px 4px;
+    border-radius: 7px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+    text-transform: capitalize;
+  }
+  .myp-month:hover { background: #f0f4fc; border-color: var(--azul); color: var(--azul); }
+  .myp-month.active {
+    background: linear-gradient(135deg, var(--azul-oscuro), var(--azul));
+    color: white;
+    border-color: var(--azul-oscuro);
+  }
+  .cal-nav { display: flex; gap: 6px; align-items: center; }
+  .cal-nav-btn {
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: white;
+    padding: 6px 14px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.2px;
+    transition: background 0.15s;
+  }
+  .cal-nav-btn:hover { background: rgba(255,255,255,0.22); }
+  .cal-nav-arrow {
+    width: 32px; height: 32px;
+    border-radius: 8px;
+    padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+  }
+
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+  .cal-dow {
+    padding: 10px 8px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--texto-suave);
+    text-align: center;
+    background: #f7f9fd;
+    border-bottom: 1px solid var(--borde);
+    letter-spacing: 0.6px;
+  }
+  .cal-day {
+    min-height: 100px;
+    padding: 6px 6px 8px;
+    border-right: 1px solid var(--borde);
+    border-bottom: 1px solid var(--borde);
+    cursor: pointer;
+    transition: background 0.12s;
+    display: flex; flex-direction: column; gap: 3px;
+    position: relative;
+  }
+  .cal-day:hover { background: #f7f9fd; }
+  .cal-day:nth-child(7n) { border-right: none; }
+  .cal-day.out { background: #fafbfd; }
+  .cal-day.out .cal-day-num { color: #c7c9d4; }
+  .cal-day.today .cal-day-num {
+    background: var(--azul);
+    color: white;
+  }
+  .cal-day.selected {
+    background: rgba(0,152,218,0.07);
+    box-shadow: inset 0 0 0 2px var(--azul);
+  }
+  .cal-day-num {
+    font-size: 0.78rem;
+    font-weight: 700;
+    width: 24px; height: 24px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--texto);
+    margin-bottom: 2px;
+  }
+  .cal-event {
+    font-size: 0.66rem;
+    padding: 2px 6px;
+    border-radius: 5px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    line-height: 1.3;
+    border-left: 3px solid;
+    font-weight: 500;
+    transition: filter 0.12s, transform 0.12s;
+  }
+  .cal-event:hover { filter: brightness(0.96); transform: translateX(1px); }
+  .cal-event.vencido {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .cal-event-time {
+    font-weight: 700;
+    margin-right: 4px;
+    font-variant-numeric: tabular-nums;
+  }
+  .cal-more {
+    font-size: 0.65rem;
+    color: var(--texto-suave);
+    padding: 1px 5px;
+    font-style: italic;
+  }
+  .cal-empty-month {
+    padding: 60px 24px;
+    text-align: center;
+    color: var(--texto-suave);
+    font-size: 0.92rem;
+    background: #fafbfd;
+  }
+
+  /* ── DAY DETAILS DRAWER ── */
+  .day-details {
+    background: var(--bg-card);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin-top: 14px;
+    box-shadow: 0 1px 6px rgba(0,0,0,0.05);
+    animation: fadeIn 0.18s ease;
+  }
+  .day-details-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .day-details-header h3 {
+    font-size: 1rem;
+    color: var(--azul-oscuro);
+    font-weight: 700;
+    text-transform: capitalize;
+  }
+  .day-details-list {
+    display: flex; flex-direction: column; gap: 9px;
+  }
+  .day-event {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: white;
+    border: 1px solid var(--borde);
+    border-left: 4px solid;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.12s, transform 0.12s;
+  }
+  .day-event:hover { background: #f7f9fd; transform: translateX(2px); }
+  .day-event-time {
+    font-weight: 700;
+    color: var(--azul-oscuro);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.92rem;
+    min-width: 50px;
+  }
+  .day-event-name { font-weight: 600; flex: 1; }
+  .day-event-obs {
+    color: var(--texto-suave);
+    font-size: 0.82rem;
+    font-style: italic;
+    flex: 2;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .day-event .chip {
+    padding: 2px 8px;
+    border-radius: 8px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
+  /* ── CALENDARIO SUB-TABS (Mes | Semana | Hoy) ── */
+  .cal-sub-tabs {
+    display: inline-flex;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .cal-sub-tab {
+    padding: 5px 14px;
+    border: none;
+    background: transparent;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: rgba(255,255,255,0.65);
+    cursor: pointer;
+    border-radius: 5px;
+    transition: all 0.14s;
+    letter-spacing: 0.2px;
+  }
+  .cal-sub-tab:hover { color: white; }
+  .cal-sub-tab.active {
+    background: rgba(255,255,255,0.95);
+    color: var(--azul-oscuro);
+  }
+
+  /* ── VISTA SEMANA / HOY (grid de horas) ── */
+  .cal-week-wrap {
+    display: flex;
+    flex-direction: column;
+    background: white;
+    overflow: hidden;
+  }
+  .cal-week-header {
+    display: grid;
+    border-bottom: 1px solid var(--borde);
+    background: #f7f9fd;
+  }
+  .cal-week-corner {
+    border-right: 1px solid var(--borde);
+  }
+  .cal-week-day-h {
+    padding: 10px 8px;
+    text-align: center;
+    border-right: 1px solid var(--borde);
+    display: flex; flex-direction: column;
+    gap: 2px;
+  }
+  .cal-week-day-h:last-child { border-right: none; }
+  .cal-week-day-h .dow {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--texto-suave);
+    letter-spacing: 0.5px;
+  }
+  .cal-week-day-h .num {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--texto);
+    width: 28px; height: 28px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    margin: 0 auto;
+  }
+  .cal-week-day-h.today .num {
+    background: var(--azul); color: white;
+  }
+  .cal-week-day-h.today .dow {
+    color: var(--azul-oscuro);
+  }
+
+  .cal-week-body {
+    display: grid;
+    overflow: auto;
+    max-height: 70vh;
+    background: white;
+  }
+  .cal-hours-col {
+    border-right: 1px solid var(--borde);
+    background: #fafbfd;
+  }
+  .cal-hour-label {
+    font-size: 0.68rem;
+    color: var(--texto-suave);
+    font-weight: 600;
+    text-align: right;
+    padding: 2px 8px 0 0;
+    border-bottom: 1px dashed var(--borde);
+    box-sizing: border-box;
+    font-variant-numeric: tabular-nums;
+  }
+  .cal-day-col {
+    position: relative;
+    border-right: 1px solid var(--borde);
+  }
+  .cal-day-col:last-child { border-right: none; }
+  .cal-hour-cell {
+    border-bottom: 1px dashed var(--borde);
+    box-sizing: border-box;
+  }
+  .cal-now-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: var(--estado-rechazado);
+    z-index: 5;
+    pointer-events: none;
+  }
+  .cal-now-line::before {
+    content: '';
+    position: absolute;
+    left: -5px; top: -4px;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--estado-rechazado);
+  }
+  .cal-week-event {
+    position: absolute;
+    left: 3px; right: 3px;
+    border-radius: 6px;
+    padding: 4px 7px;
+    font-size: 0.72rem;
+    cursor: pointer;
+    overflow: hidden;
+    border-left: 3px solid;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    transition: transform 0.12s, box-shadow 0.12s;
+    z-index: 2;
+    line-height: 1.3;
+  }
+  .cal-week-event:hover {
+    transform: translateX(1px);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    z-index: 3;
+  }
+  .cal-week-event.vencido {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .cal-week-event .event-time {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.7rem;
+  }
+  .cal-week-event .event-name {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cal-week-event .event-obs {
+    font-size: 0.68rem;
+    font-style: italic;
+    opacity: 0.85;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── SETTINGS MODAL ── */
+  .settings-section {
+    margin-bottom: 18px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .settings-section:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
+  .settings-section h4 {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-bottom: 10px;
+  }
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 0;
+  }
+  .toggle-row label { font-size: 0.9rem; color: var(--texto); }
+  .toggle-switch {
+    position: relative;
+    width: 44px; height: 24px;
+    background: #d4d6e0;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background 0.18s;
+  }
+  .toggle-switch.on { background: var(--azul); }
+  .toggle-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 20px; height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.18s;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  }
+  .toggle-switch.on::after { transform: translateX(20px); }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .col-referente, .col-pref { display: none; }
+    .header-backup { display: none; }
+  }
+  @media (max-width: 720px) {
+    .main { padding: 20px 16px; }
+    .header { padding: 0 14px; }
+    .header-title { font-size: 0.95rem; padding-left: 12px; }
+    .header-subtitle { display: none; }
+    table.prospectos { font-size: 0.8rem; }
+    table.prospectos td, table.prospectos th { padding: 10px 8px; }
+    .field-row, .field-inline-row { grid-template-columns: 1fr; }
+    .tipos-grid { grid-template-columns: 1fr 1fr; }
+    .panel-side { max-width: 100%; }
+    .panel-section { padding: 18px 18px; }
+    .panel-header { padding: 18px 18px; }
+    .cal-day { min-height: 70px; padding: 4px; }
+    .cal-day-num { font-size: 0.72rem; width: 20px; height: 20px; }
+    .cal-event { font-size: 0.6rem; padding: 1px 4px; }
+    .cal-title { font-size: 0.95rem; }
+    .day-event { flex-wrap: wrap; gap: 6px; }
+    .day-event-obs { flex: 1 100%; }
+  }
+  @media (max-width: 560px) {
+    .col-telefono { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ─────────────────── CONTENIDO PRINCIPAL ─────────────────── -->
+<div id="appContent">
+
+  <header class="header">
+    <img class="header-logo" alt="IFS - Insurance Financial Solutions" src="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4KPCFET0NUWVBFIHN2ZyBQVUJMSUMgIi0vL1czQy8vRFREIFNWRyAxLjEvL0VOIiAiaHR0cDovL3d3dy53My5vcmcvR3JhcGhpY3MvU1ZHLzEuMS9EVEQvc3ZnMTEuZHRkIj4KPCEtLSBDcmVhdG9yOiBDb3JlbERSQVcgLS0+CjxzdmcgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWw6c3BhY2U9InByZXNlcnZlIiB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiB2ZXJzaW9uPSIxLjEiCnZpZXdCb3g9IjcwMDAgMjQwMCA5NjAwIDQ4MDAiCiB4bWxuczp4bGluaz0iaHR0cDovL3d3dy53My5vcmcvMTk5OS94bGluayIKIHhtbG5zOnhvZG09Imh0dHA6Ly93d3cuY29yZWwuY29tL2NvcmVsZHJhdy9vZG0vMjAwMyI+CiA8ZGVmcz4KICA8c3R5bGUgdHlwZT0idGV4dC9jc3MiPgogICA8IVtDREFUQVsKICAgIC5maWwxIHtmaWxsOiM5MUQ4Rjd9CiAgICAuZmlsMCB7ZmlsbDojNUNDNkQwfQogICAgLmZpbDIge2ZpbGw6IzAwOThEQX0KICAgIC5maWwzIHtmaWxsOiMzRTQwOTV9CiAgICAuZmlsNCB7ZmlsbDojOTFEOEY3O2ZpbGwtcnVsZTpub256ZXJvfQogICBdXT4KICA8L3N0eWxlPgogPC9kZWZzPgogPGcgaWQ9IkNhcGFfeDAwMjBfMSI+CiAgPG1ldGFkYXRhIGlkPSJDb3JlbENvcnBJRF8wQ29yZWwtTGF5ZXIiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMCIgcG9pbnRzPSI4OTYyLjc4LDYxMDEuOTMgOTMwMy44LDcwNTkuNzUgOTMxMS4xOCw1OTEyLjMzIDkxNjcuMzEsNTkxNi4wMiA5MDc2LjE3LDU4MDguMzIgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDEiIHBvaW50cz0iOTMwMy44LDcwNTkuNzUgODk2Mi43OCw2MTAxLjkzIDg3OTMuNzUsNjYxNi4wOSAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMiIgcG9pbnRzPSI4NzkzLjc1LDY2MTYuMDkgOTA3Ni4xNyw1ODA4LjMyIDg5OTIuOTksNTczNi4xNiA4OTk2LjY4LDU2MjcuMzIgODkxOS4xOCw1NTIwLjMzIDg5MDguMTEsNTY1NC45OSA4NjI0LjA1LDYxMDMuMjYgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDEiIHBvaW50cz0iODkwOC4xMSw1NjU0Ljk5IDg5MTkuMTgsNTUyMC4zMyA4ODAzLDUyMjYuMSA4ODEwLjM3LDU1MzQuMTYgODY1OS4xMSw1ODcxLjc1IDg3MDAuOTcsNTk4MS44OSAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMiIgcG9pbnRzPSI5MTY3LjMxLDU5MTYuMDIgOTA5Ny4yNyw1ODMzLjI2IDkxNTYuMjQsNTc4NC4xMiA5MzA1LjY4LDU3ODUuMDQgOTMwOC45NCw1OTEyLjM5ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwzIiBwb2ludHM9IjkxNzMuMyw1NjM3LjQ3IDkyODQuOTIsNTc0NS4zOCA5MzMyLjg4LDU3NDUuMzggOTQ0OC4xNiw1NjMzLjc4IDk0NDguMTYsNTU1NS4zOCA5MTc0LjI0LDU1NTYuMyAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMCIgcG9pbnRzPSI5MTExLjk3LDU0MDcuOCA5MTU2LjI0LDUwODkuNTggOTMwOS4zNyw1MTQzLjA4IDkzMTIuNTgsNTU1NS44NCA5MTc1LjYzLDU1NTYuMyA5MTc0LjY5LDU2MzcuNDcgOTI4Ni4zMiw1NzQ1LjM4IDkzMDcuOTcsNTc0NS4zOCA5MzA1LjY4LDU3ODUuMDQgOTE1Ni4yNCw1Nzg0LjEyIDkwOTcuMjcsNTgzMy4yNiA5MDc2LjE3LDU4MDguMzIgODk5Mi45OSw1NzM2LjE2IDg5OTYuNjgsNTYyNy4zMiAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMiIgcG9pbnRzPSI4OTAzLjA5LDQ5NTkuMDcgOTA0NS4xMyw1MDI2LjQgODk5OS45Miw1MTMwLjYyIDkxMTEuOTcsNTQwNy44IDg5OTYuNjgsNTYyNy4zMiA4OTE5LjE4LDU1MjAuMzMgODgwMy4yNCw1MjM2LjcyIDg3NTcuMzQsNTEzNi4xNiA4NzkxLjQ2LDUwMzYuNTQgODc3Ni43Myw0OTkxLjM1ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwxIiBwb2ludHM9IjkxMTEuOTcsNTQwNy44IDkxNTYuMjQsNTA4OS41OCA5MTA2Ljk0LDQ4NDAuMDcgODk5OS45Miw1MTMwLjYyICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwxIiBwb2ludHM9Ijg3NzYuNzMsNDk5MS4zNSA4OTAzLjA5LDQ5NTkuMDcgODg2Ny4xMSw0Nzk5Ljk1IDg3NTMuNjYsNDYzOS40NiA4NjU0Ljk5LDQ1NzMuMDUgODM4OS4zNCw0NDk5LjI2IDgyNjAuMjIsNDQwNy4wMiA4MzE3LjM4LDQ3MDQuOTUgODUwNy4zOSw0OTQxLjA3ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwyIiBwb2ludHM9IjgzODkuMzQsNDQ5OS4yNiA4MjYwLjIyLDQ0MDcuMDIgODU1My4wNSw0NzQ0LjE1IDg3MDMuMzksNDgyOC4wOCA4Nzc2LjczLDQ5OTEuMzUgODkwMy4wOSw0OTU5LjA3IDg4NjMuNTMsNDc5NC44NiA4NzUzLjY2LDQ2MzkuNDYgODY1NC45OSw0NTczLjA1ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwyIiBwb2ludHM9IjkxMDYuOTQsNDg0MC4wNyA5MTU2LjI0LDUwODkuNTggOTMwOS4zNyw1MTQzLjA4IDkzMDguNDcsNDQxMy45NCA5MDk4LjE4LDQ0NjkuMjggIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDAiIHBvaW50cz0iOTAyMCw0NDM1Ljg0IDkwOTguMTgsNDQ2OS4yOCA5MTA2Ljk0LDQ4NDAuMDcgOTAzOS4zMyw1MDIzLjY1IDg5MDMuMDksNDk1OS4wNyA4ODYzLjUzLDQ3OTQuODYgODc3Mi41Miw0NjY2LjEyIDg3NzAuMDQsNDU3Ni4wNCAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMyIgcG9pbnRzPSI4ODg3LjQxLDUxMjcuODYgODgzMC4yMSw1MDY3LjkgODgzNS43Niw1MDQxLjE2IDg5MTUuMDYsNTAzMi44NSA4OTg0LjI1LDUwOTcuNDIgODk3NC4wOSw1MTIzLjI0ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwyIiBwb2ludHM9Ijg0NTYuNDUsNDEyOC4yOSA4NjYxLjkxLDQzNjcuNTQgODM3MC4zNSw0MjUwLjcxIDgxNTEuODksMzkyOC40IDgxNjEuOTksMzQ4Mi4yNyA4MjUzLjYzLDM5MDMuNjYgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDEiIHBvaW50cz0iODI2MS4xMiw0MDg5LjU2IDgzNzAuMzUsNDI1MC43MSA3OTU4LjgsNDA5OC4zOCA3ODI1Ljc2LDM5NTMuNzkgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDIiIHBvaW50cz0iNzk1OC44LDQwOTguMzggODM3MC4zNSw0MjUwLjcxIDc2ODcuOCw0MjA2LjQ3IDc1NTIuMSw0MDQ3LjI2ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwxIiBwb2ludHM9Ijc1NTIuMSw0MDQ3LjI2IDc2ODcuOCw0MjA2LjQ3IDc1NzguOTEsNDE4NS43NiA3MzIwLjgsMzkzOC4yMyA3MTkwLjQ1LDM2NDIuMTEgNzM3Ni4zNCwzODk2LjkgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDIiIHBvaW50cz0iODEyMC4zOCw0MDQ1LjY3IDc4MzcuNDUsMzk2Ni41MiA3NjYzLjAyLDM3MjAuMzMgNzU4MS4zMywzNjgzLjYgNzI4MC4xNSwzMzkwLjM4IDc2NzMuMDYsMzYwNi41MSA3NzAwLjk0LDM2NTAuOTMgNzc4NS4yMywzNjc2LjI1IDc5NDcuOTksMzkzNS43NSAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI3NjczLjA2LDM2MDYuNTEgNzU1OC42OSwzNTQzLjU5IDc1MjUuMDIsMzEzNC4xNiA3NjkzLjc4LDM1NjQuMjEgNzc4NS4yMywzNjc2LjI1IDc3MDAuOTQsMzY1MC45MyAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI3NTI1LjAyLDMxMzQuMTYgNzU1OC42OSwzNTQzLjU5IDczODkuNDcsMzA2Ni4wOCA3NTA0LjYzLDI0NzUuODUgNzUwNS4zNCwzMDg0LjYxICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwxIiBwb2ludHM9IjcyODAuMTUsMzM5MC4zOCA3NTgxLjMzLDM2ODMuNiA3MTcxLjI4LDM0NTAuNTMgNzA0Ny4zNywzMDAzLjc0IDcyNTguMjUsMzM3OC44NiAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI4MjM4LjYzLDQwNTYuMzggODI1My42MywzOTAzLjY2IDgxNjEuNzEsMzQ5NC44OCA4MTUxLjg5LDM5MjguNCAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI4OTE3LjEyLDQzNTcuOTggODg4Mi41LDQ1MjguMTYgODk3MS40Miw0NDk4LjI1ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwyIiBwb2ludHM9Ijg4ODIuNSw0NTI4LjE2IDg5MTcuMTIsNDM1Ny45OCA4NzcwLjUxLDQxMzYuODIgODgzNC4yLDQzOTcuMzQgODgxNC4xOCw0NTUxLjI4ICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwyIiBwb2ludHM9Ijg2NzMuNDQsNDE0MC43MyA4NzIxLjI0LDM5NzguOSA4NzcwLjUxLDQxMzYuODIgODgzNC4yLDQzOTcuMzQgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDEiIHBvaW50cz0iODcyMS4yNCwzOTc4LjkgODY3My40NCw0MTQwLjczIDg2NTQuNzcsMzk2Mi4xNSA4ODA3LjUyLDM3ODQuNyAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI4NjU0Ljc3LDM5NjIuMTUgODgwNy41MiwzNzg0LjcgODc4NC4xNCwzNjg0LjQ3IDg3NjUuNDIsMzc4My40NSAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI4ODM0LjIsNDM5Ny4zNCA4ODE0LjE4LDQ1NTEuMjggODU3MC45Myw0MjY3LjkyIDg1NjQuMzEsNDEyOC40OCA4NzcyLjk0LDQyOTkuNTcgIi8+CiAgPHBvbHlnb24gY2xhc3M9ImZpbDIiIHBvaW50cz0iODU2NC4zMSw0MTI4LjQ4IDg1NzAuOTMsNDI2Ny45MiA4NDMxLjczLDQxMDkuMTIgODQ4Mi45MSwzOTY4LjMxICIvPgogIDxwb2x5Z29uIGNsYXNzPSJmaWwxIiBwb2ludHM9Ijg0ODIuOTEsMzk2OC4zMSA4NDMxLjczLDQxMDkuMTIgODQyMS42MywzOTM5LjE1IDg1MjAuNjUsMzc5Ny45NyAiLz4KICA8cG9seWdvbiBjbGFzcz0iZmlsMSIgcG9pbnRzPSI4NDIxLjYzLDM5MzkuMTUgODUyMC42NSwzNzk3Ljk3IDg1MDIuOTYsMzcyNi4xNSA4NDkxLjkyLDM3OTcuNDUgIi8+CiAgPHBhdGggY2xhc3M9ImZpbDQiIGQ9Ik05Njc5LjI2IDcwMTQuNzZsMzAxLjc2IDAgMCAtMjU3NS45OCAtMzAxLjc2IDAgMCAyNTc1Ljk4em02MzIuOTcgMGwzMDEuNzUgMCAwIC0xMjU4LjU1IDM5Ny40MyAwIDAgLTY2LjI0IC0zOTcuNDMgMCAwIC0xMTQwLjc5IDU1MiAwIDAgLTExMC40IC04NTMuNzUgMCAwIDEyNTEuMTkgLTExMC40MSAwIDAgNjYuMjQgMTEwLjQxIDAgMCAxMjU4LjU1eiIvPgogIDxwYXRoIGNsYXNzPSJmaWw0IiBkPSJNMTE2MDMuODUgNjkzMy44Yy0xMTAuMzksMy42OCAtMjY0Ljk2LC05NS42OCAtMjY4LjY0LC0yMTcuMTJsLTEwMy4wNCAwYzE4LjQxLDE0Ny4yIDE2NS42MSwyODMuMzYgMzc1LjM2LDI5OC4wOCA0MDQuOCwyOS40NCA2MTguMjQsLTI0Ni41NiA1ODEuNDMsLTcyNC45NSAtMzMuMTEsLTQxNS44NCAtNjE0LjU0LC04NTAuMDggLTY2Mi4zOCwtMTI2OS41OSAtMTguNDEsLTE2NS42IDcuMzUsLTQ4Mi4wOCAyNjQuOTUsLTUwMC40OCAxMTAuMzksLTcuMzYgMjc5LjY3LDkyIDI4Ny4wNCwyMTMuNDRsMTAzLjA0IDBjLTI1Ljc2LC0xNDcuMiAtMTg0LjAxLC0yOTguMDggLTM5MC4wOCwtMjk4LjA4bC03LjM2IDBjLTQ3MS4wNCwwIC01ODguNzksMzcxLjY4IC01NTkuMzUsNzI4LjY0IDQwLjQ3LDQ3NC43MSA2NzMuNDIsODQyLjcxIDY1OC43MSwxNDEzLjEgLTMuNjgsMTcyLjk2IC00Ny44NCwzODYuNCAtMjc5LjY4LDM1Ni45NnoiLz4KICA8cGF0aCBjbGFzcz0iZmlsNCIgZD0iTTEyNTk5LjYgNTMzMC45NWwwIC00MjQuNzYgNTMuMyAwIDAgNDI0Ljc2IC01My4zIDB6bTE3My4yMSAwbDAgLTMyNi44IDI2LjY0IDAgMjA3LjY4IDIyOS42MiAwIC0yMjkuNjIgNTAuMTUgMCAwIDMyNi44IC0yNi42NCAwIC0yMDcuNjggLTIyOC44NCAwIDIyOC44NCAtNTAuMTUgMHptMzY4LjMzIC00MS41NGwyNS4wNyAtNDMuMWMyMS45NiwxNC44OSA0Ny4wMiwyNi42NSA3My42OCwzNS4yNyAyNi42NSw4LjYyIDUxLjcxLDEyLjU0IDc2LjAxLDEyLjU0IDI5LDAgNTIuNTIsLTYuMjcgNzAuNTQsLTE4LjAzIDE4LjAyLC0xMS43NSAyNi42NCwtMjYuNjQgMjYuNjQsLTQ1LjQ1IDAsLTE4LjgxIC03LjgzLC0zMi4xNCAtMjQuMjksLTQxLjU0IC0xNi40NiwtOC42MiAtNDIuMzIsLTE0LjExIC03Ny41OSwtMTQuODkgLTU5LjU2LC0wLjc4IC0xMDAuMzEsLTcuODQgLTEyMi4yNiwtMjAuMzcgLTIyLjczLC0xMy4zMiAtMzMuNjksLTM1LjI3IC0zMy42OSwtNjUuMDUgMCwtMjguMjEgMTIuNTQsLTUwLjk0IDM2LjgzLC02Ny40IDI0LjI5LC0xNy4yNCA1Ny4yLC0yNS44NiA5Ny45NywtMjUuODYgMjguMiwwIDU1LjY0LDMuOTIgODIuMjgsMTEuNzYgMjUuODUsNy44NCA1MS43MiwxOS41OSA3Ni4wMiwzNS4yN2wtMjUuODYgNDIuMzFjLTIwLjM4LC0xNC4xIC00Mi4zMywtMjQuMjkgLTY1LjgzLC0zMi4xMyAtMjMuNTEsLTcuMDYgLTQ1LjQ2LC0xMC45NyAtNjcuNCwtMTAuOTcgLTI0LjMsMCAtNDQuNjcsMy45MSAtNTkuNTcsMTIuNTQgLTE0Ljg4LDkuNCAtMjIuNzEsMjAuMzggLTIyLjcxLDM0LjQ4IDAsMTQuMTEgNy44MywyNC4zIDIyLjcxLDMwLjU2IDE0LjksNi4yOCA0MS41NCw5LjQxIDc5LjE3LDkuNDEgNTEuNzEsMCA5MC45LDguNjIgMTE3LjU0LDI2LjY0IDI2LjY0LDE3LjI1IDM5Ljk3LDQzLjEgMzkuOTcsNzguMzcgMCwzMC41NyAtMTMuMzMsNTYuNDMgLTM5Ljk3LDc2LjgxIC0yNy40MiwyMC4zNyAtNjEuOTEsMzAuNTYgLTEwNS4wMSwzMC41NiAtMzEuMzQsMCAtNjIuNywtNC43MSAtOTQuMDQsLTEzLjMyIC0zMS4zNiwtOS40MSAtNjAuMzUsLTIxLjk0IC04Ni4yMSwtMzguNDF6bTQxNi45MiAtMjg0LjQ4bDUwLjk0IDAgMCAyMDkuMjVjMCwzMS4zNSA3Ljg1LDUyLjUxIDIxLjk1LDYzLjQ4IDE0LjksMTAuOTcgNDQuNjcsMTYuNDYgODguNTYsMTYuNDYgNDMuODgsMCA3My42NiwtNS40OSA4OC41NiwtMTYuNDYgMTQuODgsLTEwLjk3IDIxLjkzLC0zMi4xMyAyMS45MywtNjMuNDhsMCAtMjA5LjI1IDUwLjk1IDAgMCAyMjIuNThjMCwzOS45NiAtMTIuNTUsNjguOTYgLTM3LjYxLDg2Ljk5IC0yNS44NywxOC4wMiAtNjcuNDEsMjYuNjQgLTEyNC42MSwyNi42NCAtNTcuMjEsMCAtOTcuOTcsLTguNjIgLTEyMy4wNCwtMjYuNjQgLTI1LjA4LC0xNy4yNSAtMzcuNjMsLTQ2LjI0IC0zNy42MywtODYuOTlsMCAtMjIyLjU4em00ODYuNjggMTM1LjU5bDE3My45OSAwYzE3LjI0LDAgMzAuNTYsLTMuOTIgMzkuOTcsLTExLjc2IDkuMzksLTcuODMgMTQuMSwtMTguODEgMTQuMSwtMzIuOTIgMCwtMTQuMSAtNC43MSwtMjUuMDcgLTE0LjEsLTMyLjkxIC05LjQxLC03LjA2IC0yMi43MywtMTAuOTcgLTM5Ljk3LC0xMC45N2wtMTczLjk5IDAgMCA4OC41NnptMCA0Ny44bDAgMTQyLjYzIC01MC45NCAwIDAgLTMyNi4wMiAyMjQuOTMgMGMzMi45LDAgNTkuNTYsNy44NCA3OC4zNSwyNC4zIDE4LjgyLDE1LjY3IDI4LjIzLDM4LjQgMjguMjMsNjYuNjEgMCwyMy41MSAtNy4wNSw0My4xMSAtMjIuNzMsNjAuMzUgLTE0LjksMTcuMjQgLTMzLjcsMjcuNDMgLTU4LDMxLjM1bDkwLjkxIDE0My40MSAtNTUuNjQgMCAtOTIuNDggLTE0Mi42MyAtMTQyLjYzIDB6Ii8+CiAgPHBhdGggY2xhc3M9ImZpbDQiIGQ9Ik0xNDQ1OS44NCA1MjA0Ljc4bDEyNy43NSAwIC02My40NyAtMTI1LjM5IC02NC4yOCAxMjUuMzl6bS0xMTguMzMgMTI2LjE3bDE2Ni4xNCAtMzI2LjggMzIuMTQgMCAxNjcuNzEgMzI2LjggLTU0Ljg2IDAgLTQyLjMyIC04My4wNyAtMTcyLjQxIDAgLTQyLjMyIDgzLjA3IC01NC4wOCAwem00MTUuMzUgMGwwIC0zMjYuOCAyNi42NSAwIDIwNy42OCAyMjkuNjIgMCAtMjI5LjYyIDUwLjE2IDAgMCAzMjYuOCAtMjYuNjUgMCAtMjA3LjY4IC0yMjguODQgMCAyMjguODQgLTUwLjE2IDB6bTc0Mi4xNiAtNzkuOTNjLTE4LjAyLDI4Ljk5IC00My4xMSw1MS43MiAtNzIuODksNjYuNjEgLTMwLjU2LDE1LjY4IC02NS4wMywyMy41MSAtMTAzLjQ1LDIzLjUxIC01Ny4xOSwwIC0xMDQuMjIsLTE2LjQ2IC0xNDEuODQsLTQ4LjU5IC0zNi44MywtMzIuOTEgLTU1LjY0LC03My42NiAtNTUuNjQsLTEyMy44MiAwLC01MC4xNiAxOC44MSwtOTEuNyA1NS42NCwtMTIzLjgzIDM3LjYyLC0zMi45MSA4NC42NSwtNDkuMzcgMTQxLjg0LC00OS4zNyAzNi4wNiwwIDY4LjIsNi4yNyA5Ny4xOSwyMC4zOCAyOC45OSwxMy4zMiA1Mi41LDMyLjEzIDcwLjU0LDU2LjQybC00MC43NyAyOC4yMWMtMTMuMzIsLTE4LjggLTMxLjM0LC0zMi45MSAtNTMuMjksLTQzLjEgLTIxLjk0LC0xMC4xOCAtNDYuMjQsLTE0Ljg4IC03My42NywtMTQuODggLTQxLjUyLDAgLTc2LjAxLDExLjc1IC0xMDMuNDMsMzYuMDQgLTI3LjQ0LDIzLjUxIC00MS41NSw1My4yOSAtNDEuNTUsODkuMzUgMCwzNi4wNSAxNC4xMSw2NS44MiA0MS41NSw4OS4zMyAyNy40MiwyNC4zIDYxLjkxLDM2LjA1IDEwMy40MywzNi4wNSAyOS4wMSwwIDU0Ljg3LC01LjQ4IDc2LjgxLC0xNy4yNCAyMi43MiwtMTEuNzUgNDIuMzEsLTI4Ljk5IDU4Ljc4LC01My4yOGw0MC43NSAyOC4yMXptODYuMjEgNzkuOTNsMCAtMzI2LjggMzA2LjQzIDAgMCA0Ny44MSAtMjU1LjUgMCAwIDgxLjUgMTY3LjcyIDAgMCA0Ny4wMiAtMTY3LjcyIDAgMCAxMDMuNDUgMjY5LjYxIDAgMCA0Ny4wMiAtMzIwLjU0IDB6Ii8+CiAgPHBhdGggY2xhc3M9ImZpbDQiIGQ9Ik0xMjg3Ny44MiA2MDY5Ljk4bC0xMzAuMSAtMTUyLjgyYy0zNC40NywxNC44OSAtNjEuMTIsMzIuMTMgLTc4LjM3LDUyLjUxIC0xNy4yNCwxOS41OSAtMjUuODYsNDIuMzIgLTI1Ljg2LDY3LjQgMCwyNi42NCA5LjQxLDQ4LjU5IDI4LjIyLDY1LjA0IDE4LjAyLDE2LjQ2IDQzLjEsMjUuMDggNzIuODgsMjUuMDggMjIuNzIsMCA0NS40NSwtNC43IDY3LjQsLTE0LjEgMjIuNzMsLTEwLjE5IDQ0LjY3LC0yNC4zIDY1LjgzLC00My4xMXptMTEyLjA3IC00MS41NGMtNS40OSw3Ljg0IC0xMi41NCwxNi40NyAtMTguODEsMjMuNTEgLTcuMDUsNy44NCAtMTQuOSwxNC45IC0yMi43MywyMi43M2w3NS4yNCA4Ni45OSAtNjcuNDEgMCAtNDcuMDIgLTUzLjI4Yy0yOC4yLDIzLjUxIC01NS42NCw0MC43NSAtODEuNSw1MS43MiAtMjUuODUsMTAuOTcgLTUzLjI5LDE2LjQ1IC04Mi4yOSwxNi40NSAtNDcuODEsMCAtODUuNDEsLTEyLjUzIC0xMTQuNDEsLTM3LjYyIC0yOSwtMjUuMDcgLTQzLjExLC01Ny45OCAtNDMuMTEsLTk5LjUyIDAsLTMzLjcgMTAuMTksLTYyLjcgMzEuMzQsLTg4LjU2IDIwLjM4LC0yNS44NiA1Mi41MiwtNTAuMTUgOTUuNjIsLTcxLjMybC0xMTUuOTkgLTEzNy4xNCAyNzcuNDMgMCAyOC45OSA0Ni4yMyAtMTk4LjI2IDAgMjA2Ljg5IDI0My43M2MxMC45NywtMTAuOTYgMTkuNTksLTE5LjU5IDI1Ljg3LC0yNi42NCA1LjQ3LC03LjA1IDExLjc0LC0xMy4zMiAxNi40NCwtMjAuMzhsMzMuNzEgNDMuMXptMzU0LjIyIDEzNi4zN2wwIC00MjIuNDEgMzMyLjMgMCAwIDQ4LjU5IC0yNzkuNzkgMCAwIDEyMy44MiAxNjkuMjggMCAwIDQ4LjU5IC0xNjkuMjggMCAwIDIwMS40MSAtNTIuNTEgMHoiLz4KICA8cGF0aCBjbGFzcz0iZmlsNCIgZD0iTTEzNjY4LjE5IDYxNjQuODFsMCAtMzI3LjU4IDUxLjcxIDAgMCAzMjcuNTggLTUxLjcxIDB6bTE2NS4zNSAwbDAgLTMyNi44IDI2LjY1IDAgMjA3LjY4IDIyOS42MiAwIC0yMjkuNjIgNTAuMTUgMCAwIDMyNi44IC0yNi42NCAwIC0yMDcuNjggLTIyOC44NCAwIDIyOC44NCAtNTAuMTYgMHptNDUyLjIgLTEyNi4xN2wxMjcuNzQgMCAtNjMuNDggLTEyNS40IC02NC4yNiAxMjUuNHptLTExOC4zNCAxMjYuMTdsMTY2LjEzIC0zMjYuOCAzMi4xNCAwIDE2Ny43MSAzMjYuOCAtNTQuODYgMCAtNDIuMzEgLTgzLjA3IC0xNzIuNDIgMCAtNDIuMzIgODMuMDcgLTU0LjA3IDB6bTQxNS4zNSAwbDAgLTMyNi44IDI2LjY1IDAgMjA3LjY4IDIyOS42MiAwIC0yMjkuNjIgNTAuMTUgMCAwIDMyNi44IC0yNi42NSAwIC0yMDcuNjggLTIyOC44NCAwIDIyOC44NCAtNTAuMTUgMHptNzQyLjE2IC03OS45M2MtMTguMDQsMjguOTkgLTQzLjEsNTEuNzIgLTcyLjg5LDY2LjYxIC0zMC41NSwxNS42NyAtNjUuMDUsMjMuNTEgLTEwMy40NSwyMy41MSAtNTcuMiwwIC0xMDQuMjIsLTE2LjQ2IC0xNDEuODUsLTQ4LjU5IC0zNi44MywtMzIuOTIgLTU1LjYzLC03My42NyAtNTUuNjMsLTEyMy44MiAwLC01MC4xNiAxOC44LC05MS43IDU1LjYzLC0xMjMuODMgMzcuNjMsLTMyLjkxIDg0LjY1LC00OS4zNyAxNDEuODUsLTQ5LjM3IDM2LjA1LDAgNjguMTksNi4yNyA5Ny4xOSwyMC4zOCAyOC45OSwxMy4zMiA1Mi41LDMyLjEzIDcwLjUyLDU2LjQybC00MC43NSAyOC4yMWMtMTMuMzIsLTE4LjggLTMxLjM1LC0zMi45MSAtNTMuMjgsLTQzLjEgLTIxLjk2LC0xMC4xOSAtNDYuMjQsLTE0Ljg5IC03My42OCwtMTQuODkgLTQxLjUyLDAgLTc2LjAyLDExLjc2IC0xMDMuNDQsMzYuMDUgLTI3LjQzLDIzLjUxIC00MS41NCw1My4yOSAtNDEuNTQsODkuMzQgMCwzNi4wNSAxNC4xMSw2NS44MyA0MS41NCw4OS4zNCAyNy40MiwyNC4yOSA2MS45MiwzNi4wNSAxMDMuNDQsMzYuMDUgMjksMCA1NC44NiwtNS40OCA3Ni44MSwtMTcuMjQgMjIuNzMsLTExLjc2IDQyLjMyLC0yOC45OSA1OC43OCwtNTMuMjlsNDAuNzUgMjguMjJ6bTg2Ljk4IDc5LjkzbDAgLTMyNy41OCA1MS43MiAwIDAgMzI3LjU4IC01MS43MiAwem0yMjAuMjIgLTEyNi4xN2wxMjcuNzUgMCAtNjMuNDcgLTEyNS40IC02NC4yOCAxMjUuNHptLTExOC4zNCAxMjYuMTdsMTY2LjE1IC0zMjYuOCAzMi4xMyAwIDE2Ny43MSAzMjYuOCAtNTQuODUgMCAtNDIuMzIgLTgzLjA3IC0xNzIuNDEgMCAtNDIuMzIgODMuMDcgLTU0LjA5IDB6bTQxNC41OCAwbDAgLTMyNi44IDUwLjkzIDAgMCAyNzkuNzggMjQyLjk1IDAgMCA0Ny4wMiAtMjkzLjg4IDB6Ii8+CiAgPHBhdGggY2xhc3M9ImZpbDQiIGQ9Ik0xMjU1OC44NiA2OTM1LjE5bDMwLjU2IC00NS40NmMyOS43NywyMi43MyA2MS4xMyw0MC43NiA5My4yNSw1My4zIDMyLjE0LDExLjc1IDY0LjI3LDE4LjAyIDk1LjYzLDE4LjAyIDM5LjE3LDAgNzAuNTMsLTguNjIgOTQuODEsLTI1LjA4IDI1LjA5LC0xNi40NiAzNi44MywtMzcuNjIgMzYuODMsLTYzLjQ4IDAsLTIxLjE1IC04LjYxLC0zNy42MiAtMjUuODQsLTUwLjk0IC0xOC4wNCwtMTMuMzIgLTQyLjMzLC0yMS4xNSAtNzIuODksLTI0LjI5IC03LjA2LC0wLjc4IC0xOC4wMywtMS41NyAtMzIuMTMsLTIuMzYgLTY5Ljc1LC00LjcgLTExNi43OCwtMTIuNTMgLTE0MS44NSwtMjQuMjkgLTE5LjU5LC05LjQgLTM0LjQ5LC0yMS45NCAtNDQuNjgsLTM2LjgzIC0xMC4xOSwtMTQuODkgLTE1LjY2LC0zMS4zNSAtMTUuNjYsLTUwLjE2IDAsLTMzLjcgMTQuODgsLTYxLjkxIDQ1LjQ0LC04My44NSAzMC41NywtMjEuOTUgNjkuNzUsLTMyLjkyIDExOC4zNCwtMzIuOTIgMzUuMjcsMCA2OS43NSw1LjQ5IDEwNC4yNCwxNy4yNSAzNC40NywxMS43NSA2Ny4zOSwyOC45OSA5Ny45Niw1MS43MmwtMzAuNTcgNDMuODhjLTI1Ljg3LC0yMS4xNSAtNTMuMjksLTM2LjgzIC04Mi4yOSwtNDcuOCAtMjguMiwtMTAuMTkgLTU3Ljk5LC0xNS42NyAtODguNTYsLTE1LjY3IC0zMS4zNCwwIC01Ny45OCw2LjI2IC03OC4zNiwxOC44MSAtMjEuMTcsMTIuNTMgLTMxLjM1LDI3LjQzIC0zMS4zNSw0Ni4yMyAwLDcuODQgMS41NywxNC4xMSA0LjcxLDIwLjM3IDMuOTIsNi4yOCA4LjYxLDExLjc2IDE1LjY2LDE3LjI1IDE3LjI0LDEzLjMyIDU0Ljg3LDIxLjE2IDExMi44NSwyNS4wNyAyNS44NywxLjU4IDQ3LjAzLDMuMTQgNjEuMTMsNC43MSA0My4xMSw0LjcgNzYuOCwxOC44MSAxMDEuODksNDEuNTMgMjUuMDgsMjIuNzMgMzcuNjEsNTAuMTYgMzcuNjEsODMuODYgMCwzOS4xOCAtMTcuMjQsNzIuMSAtNTEuNzIsOTcuMTggLTMzLjcsMjUuODYgLTc5LjE1LDM4LjQgLTEzNC43OSwzOC40IC00Mi4zMiwwIC04MS41MiwtNi4yNyAtMTE3LjU2LC0xOC4wMyAtMzYuMDUsLTEyLjU0IC03MC41MywtMzEuMzUgLTEwMi42NiwtNTYuNDJ6bTY3MS42MyAyNS44NmM0My44NywwIDc5LjE1LC0xMS43NiAxMDYuNTcsLTM1LjI3IDI4LjIyLC0yMy41MSA0MS41NCwtNTQuMDcgNDEuNTQsLTkwLjEyIDAsLTM2LjA1IC0xNC4xMSwtNjUuODMgLTQxLjU0LC05MC4xMiAtMjcuNDIsLTIzLjUxIC02My40NywtMzUuMjcgLTEwNi41NywtMzUuMjcgLTQzLjExLDAgLTc4LjM3LDExLjc2IC0xMDUuOCwzNS4yNyAtMjcuNDQsMjMuNTEgLTQxLjU0LDUzLjI4IC00MS41NCw5MC4xMiAwLDM2LjA1IDE0LjEsNjYuNjEgNDEuNTQsOTAuMTIgMjcuNDMsMjMuNTEgNjIuNjksMzUuMjcgMTA1LjgsMzUuMjd6bTAgNDcuODFjLTU4LjAxLDAgLTEwNS44LC0xNi40NyAtMTQzLjQzLC00OS4zOCAtMzcuNjEsLTMyLjkxIC01Ni40MiwtNzQuNDUgLTU2LjQyLC0xMjMuODIgMCwtNTAuMTYgMTguODEsLTkwLjkxIDU2LjQyLC0xMjMuODMgMzYuODQsLTMyLjEzIDg1LjQyLC00OC41OCAxNDMuNDMsLTQ4LjU4IDU4Ljc3LDAgMTA3LjM1LDE2LjQ1IDE0NC45OCw0OC41OCAzNi44MywzMi4xMyA1NS42NCw3My42NyA1NS42NCwxMjMuODMgMCw1MC4xNSAtMTguODEsOTAuOTEgLTU2LjQ0LDEyMy44MiAtMzcuNjEsMzIuOTEgLTg1LjQxLDQ5LjM4IC0xNDQuMTgsNDkuMzh6bTI4My42OSAtMTAuMTlsMCAtMzI2LjggNTAuOTQgMCAwIDI3OS43NyAyNDIuOTUgMCAwIDQ3LjAzIC0yOTMuODkgMHptMzUyLjY2IC0zMjYuMDJsNTAuOTMgMCAwIDIwOS4yNGMwLDMxLjM1IDcuODQsNTIuNTIgMjEuOTYsNjMuNDggMTQuODgsMTAuOTggNDQuNjYsMTYuNDcgODguNTUsMTYuNDcgNDMuODksMCA3My42NywtNS40OSA4OC41NSwtMTYuNDcgMTQuODksLTEwLjk2IDIxLjk0LC0zMi4xMyAyMS45NCwtNjMuNDhsMCAtMjA5LjI0IDUwLjk0IDAgMCAyMjIuNTdjMCwzOS45NyAtMTIuNTMsNjguOTYgLTM3LjYxLDg2Ljk5IC0yNS44NywxOC4wMiAtNjcuMzksMjYuNjUgLTEyNC42MSwyNi42NSAtNTcuMjEsMCAtOTcuOTUsLTguNjMgLTEyMy4wNCwtMjYuNjUgLTI1LjA2LC0xNy4yNSAtMzcuNjEsLTQ2LjI0IC0zNy42MSwtODYuOTlsMCAtMjIyLjU3em01MTIuNTMgMzI2LjAybDAgLTI4MS4zNSAtMTM3LjkzIDAgMCAtNDUuNDUgMzI2LjggMCAwIDQ1LjQ1IC0xMzcuOTIgMCAwIDI4MS4zNSAtNTAuOTUgMHptMjQwLjU5IDBsMCAtMzI3LjU4IDUxLjc0IDAgMCAzMjcuNTggLTUxLjc0IDB6bTMzNi4yMSAtMzcuNjJjNDMuODksMCA3OS4xNiwtMTEuNzYgMTA2LjU4LC0zNS4yNyAyOC4yMiwtMjMuNTEgNDEuNTQsLTU0LjA3IDQxLjU0LC05MC4xMiAwLC0zNi4wNSAtMTQuMSwtNjUuODMgLTQxLjU0LC05MC4xMiAtMjcuNDIsLTIzLjUxIC02My40NywtMzUuMjcgLTEwNi41OCwtMzUuMjcgLTQzLjEsMCAtNzguMzcsMTEuNzYgLTEwNS44LDM1LjI3IC0yNy40MiwyMy41MSAtNDEuNTQsNTMuMjggLTQxLjU0LDkwLjEyIDAsMzYuMDUgMTQuMTIsNjYuNjEgNDEuNTQsOTAuMTIgMjcuNDMsMjMuNTEgNjIuNywzNS4yNyAxMDUuOCwzNS4yN3ptMCA0Ny44MWMtNTcuOTksMCAtMTA1LjgsLTE2LjQ3IC0xNDMuNDEsLTQ5LjM4IC0zNy42MiwtMzIuOTEgLTU2LjQzLC03NC40NSAtNTYuNDMsLTEyMy44MiAwLC01MC4xNiAxOC44MSwtOTAuOTEgNTYuNDMsLTEyMy44MyAzNi44NCwtMzIuMTMgODUuNDIsLTQ4LjU4IDE0My40MSwtNDguNTggNTguNzksMCAxMDcuMzcsMTYuNDUgMTQ0Ljk5LDQ4LjU4IDM2LjgzLDMyLjEzIDU1LjY1LDczLjY3IDU1LjY1LDEyMy44MyAwLDUwLjE1IC0xOC44Miw5MC45MSAtNTYuNDMsMTIzLjgyIC0zNy42MywzMi45MSAtODUuNDIsNDkuMzggLTE0NC4yMSw0OS4zOHptMjg0LjQ4IC0xMC4xOWwwIC0zMjYuOCAyNi42NSAwIDIwNy42OCAyMjkuNjIgMCAtMjI5LjYyIDUwLjE3IDAgMCAzMjYuOCAtMjYuNjUgMCAtMjA3LjY4IC0yMjguODQgMCAyMjguODQgLTUwLjE3IDB6bTM2OC4zNCAtNDEuNTRsMjUuMDggLTQzLjExYzIxLjk0LDE0LjkgNDcuMDIsMjYuNjUgNzMuNjYsMzUuMjcgMjYuNjUsOC42MyA1MS43MywxMi41NSA3Ni4wMiwxMi41NSAyOS4wMSwwIDUyLjUxLC02LjI4IDcwLjUzLC0xOC4wMyAxOC4wNCwtMTEuNzYgMjYuNjYsLTI2LjY1IDI2LjY2LC00NS40NiAwLC0xOC44IC03Ljg1LC0zMi4xMyAtMjQuMywtNDEuNTMgLTE2LjQ2LC04LjYyIC00Mi4zMiwtMTQuMTEgLTc3LjU4LC0xNC44OSAtNTkuNTYsLTAuNzkgLTEwMC4zMiwtNy44NCAtMTIyLjI2LC0yMC4zOCAtMjIuNzMsLTEzLjMyIC0zMy43LC0zNS4yNiAtMzMuNywtNjUuMDUgMCwtMjguMjEgMTIuNTQsLTUwLjk0IDM2Ljg0LC02Ny4zOSAyNC4yOSwtMTcuMjQgNTcuMiwtMjUuODYgOTcuOTUsLTI1Ljg2IDI4LjIyLDAgNTUuNjQsMy45MiA4Mi4yOSwxMS43NSAyNS44Nyw3Ljg0IDUxLjczLDE5LjYgNzYuMDIsMzUuMjdsLTI1Ljg3IDQyLjMxYy0yMC4zNywtMTQuMSAtNDIuMywtMjQuMjkgLTY1LjgyLC0zMi4xMyAtMjMuNTEsLTcuMDUgLTQ1LjQ1LC0xMC45NyAtNjcuNCwtMTAuOTcgLTI0LjI5LDAgLTQ0LjY4LDMuOTIgLTU5LjU2LDEyLjU1IC0xNC44OSw5LjQgLTIyLjczLDIwLjM3IC0yMi43MywzNC40NyAwLDE0LjExIDcuODQsMjQuMyAyMi43MywzMC41NyAxNC44OCw2LjI3IDQxLjU0LDkuNDEgNzkuMTUsOS40MSA1MS43MywwIDkwLjkyLDguNjIgMTE3LjU2LDI2LjY0IDI2LjY1LDE3LjI0IDM5Ljk3LDQzLjEgMzkuOTcsNzguMzcgMCwzMC41NiAtMTMuMzIsNTYuNDMgLTM5Ljk3LDc2LjggLTI3LjQzLDIwLjM4IC02MS45MSwzMC41NyAtMTA1LjAxLDMwLjU3IC0zMS4zNiwwIC02Mi43LC00LjcxIC05NC4wNSwtMTMuMzMgLTMxLjM0LC05LjQgLTYwLjM0LC0yMS45NCAtODYuMjEsLTM4LjR6Ii8+CiA8L2c+Cjwvc3ZnPgo=">
+    <div class="header-title">
+      Planificador de Abordaje
+      <span class="header-subtitle">Gestión de prospectos · IFS</span>
+    </div>
+    <div class="header-actions" id="headerActions"></div>
+  </header>
+
+  <main class="main" id="reactRoot"></main>
+
+</div>
+
+<!-- ─────────────────── React + Babel ─────────────────── -->
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<!-- ─────────────────── CAPA DE DATOS (storage) ─────────────────── -->
+<!-- Toda lectura/escritura va por aquí. En v2 reemplazamos el cuerpo por Supabase
+     sin tocar la UI. Mantener firma de los métodos. -->
+<script>
+const STORAGE_KEY = 'abordaje_v1';
+const SCHEMA_VERSION = 1;
+
+const storage = {
+  loadState() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { version: SCHEMA_VERSION, prospectos: [], agendados: [] };
+      const parsed = JSON.parse(raw);
+      if (!parsed.prospectos) parsed.prospectos = [];
+      if (!parsed.agendados) parsed.agendados = [];
+      return parsed;
+    } catch (e) {
+      console.error('storage.loadState falló:', e);
+      return { version: SCHEMA_VERSION, prospectos: [], agendados: [] };
+    }
+  },
+  saveState(state) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
+    } catch (e) {
+      console.error('storage.saveState falló:', e);
+      return false;
+    }
+  },
+  exportJSON() {
+    const state = storage.loadState();
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const ts = new Date().toISOString().slice(0,10);
+    a.href = url;
+    a.download = `abordaje_backup_${ts}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+  importJSON(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(reader.result);
+          if (!parsed.prospectos || !Array.isArray(parsed.prospectos)) {
+            return reject(new Error('Formato inválido: falta prospectos[]'));
+          }
+          storage.saveState(parsed);
+          resolve(parsed);
+        } catch (e) { reject(e); }
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(file);
+    });
+  }
+};
+
+// Schema factory — campos pensados para multi-asesor desde v1
+function newProspecto(input) {
+  const now = new Date().toISOString();
+  return {
+    id: (crypto.randomUUID && crypto.randomUUID()) || ('p_' + Date.now() + '_' + Math.random().toString(36).slice(2,8)),
+    nombre: input.nombre || '',
+    telefono: input.telefono || '',
+    preferenciaContacto: input.preferenciaContacto || '',
+    detalle: input.detalle || '',
+    referente: input.referente || '',
+    observaciones: input.observaciones || '',
+    agenteId: 'nadir',           // v1: hardcoded · v2: del usuario logueado
+    createdAt: now,
+    updatedAt: now,
+    contactos: [],               // historial de gestiones (Parte 2)
+    proximoContacto: null,       // ISO date · setea botones rápidos (Parte 2)
+    estado: 'nuevo'              // nuevo|pendiente|largo-plazo|agendado|rechazado (Parte 2)
+  };
+}
+
+// Capa calendario — stub v1, se completa en Parte 3 / v2 Google Calendar
+const calendarApi = {
+  agendar(prospectoId, fechaISO, nota) {
+    const state = storage.loadState();
+    state.agendados = state.agendados || [];
+    state.agendados.push({
+      id: 'a_' + Date.now(),
+      prospectoId,
+      fecha: fechaISO,
+      nota: nota || '',
+      sincGoogle: false  // v2: marcar true cuando se sincronice con Google Calendar
+    });
+    storage.saveState(state);
+  },
+  listar() {
+    return (storage.loadState().agendados || []).slice().sort((a,b) => a.fecha.localeCompare(b.fecha));
+  },
+  remover(id) {
+    const state = storage.loadState();
+    state.agendados = (state.agendados || []).filter(a => a.id !== id);
+    storage.saveState(state);
+  }
+};
+</script>
+
+<!-- ─────────────────── REACT APP ─────────────────── -->
+<script type="text/babel">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+const PREFS_CONTACTO = ['Llamada', 'WhatsApp', 'Email', 'Presencial', 'Otro'];
+
+// ── SETTINGS (rango horario laboral, duración default, finde en calendario) ─
+const SETTINGS_KEY = 'abordaje_settings';
+const DEFAULT_SETTINGS = {
+  workStartHour: 9,
+  workStartMin: 0,
+  workEndHour: 19,
+  workEndMin: 0,
+  slotDurationMin: 60,
+  includeWeekends: true
+};
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_SETTINGS };
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch { return { ...DEFAULT_SETTINGS }; }
+}
+function persistSettings(s) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+}
+
+// ── TIPOS DE GESTIÓN (orden de grid: agendado primero, rechazado al final) ─
+const TIPOS_CONTACTO = [
+  { id: 'agendado',          label: 'AGENDADO',            color: '#065f46', bg: '#d1fae5', estado: 'agendado',   input: 'fechahora' },
+  { id: 'contestador',       label: 'Contestador',         color: '#374151', bg: '#f3f4f6', estado: 'pendiente',  input: 'none' },
+  { id: 'fecha_exacta',      label: 'Fecha exacta',        color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'fecha' },
+  { id: 'llamar_15min',      label: 'Llamar en 15 min',    color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
+  { id: 'llamar_tarde',      label: 'Llamar por la tarde', color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
+  { id: 'llamar_manana',     label: 'Llamar mañana',       color: '#a16207', bg: '#fef9c3', estado: 'pendiente',  input: 'none' },
+  { id: 'llamar_semana',     label: 'Llamar semana próx',  color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
+  { id: 'llamar_dentro_de',  label: 'Llamar dentro de…',   color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'plazo' },
+  { id: 'rechazado',         label: 'RECHAZADO',           color: '#991b1b', bg: '#fee2e2', estado: 'rechazado',  input: 'none' }
+];
+
+const ESTADO_META = {
+  nuevo:      { label: 'Nuevo',      color: '#374151', bg: '#e5e7eb', tint: '' },
+  pendiente:  { label: 'En gestión', color: '#b45309', bg: '#fef3c7', tint: 'tint-pendiente' },
+  programado: { label: 'Programado', color: '#9a3412', bg: '#fed7aa', tint: 'tint-programado' },
+  agendado:   { label: 'Agendado',   color: '#065f46', bg: '#d1fae5', tint: 'tint-agendado' },
+  rechazado:  { label: 'Rechazado',  color: '#991b1b', bg: '#fee2e2', tint: 'tint-rechazado' }
+};
+
+const tipoConfig = (id) => TIPOS_CONTACTO.find(t => t.id === id) || null;
+
+// ── HELPERS DE FECHA ───────────────────────────────────────────
+const MESES_CORTOS = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+
+function startOfDay(d) { const x = new Date(d); x.setHours(0,0,0,0); return x; }
+function diasEntre(a, b) {
+  return Math.round((startOfDay(a) - startOfDay(b)) / (1000*60*60*24));
+}
+function pad2(n) { return String(n).padStart(2,'0'); }
+
+function formatFechaCorta(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const hoy = new Date();
+  const diff = diasEntre(d, hoy);
+  if (diff === 0) return 'hoy';
+  if (diff === -1) return 'ayer';
+  if (diff === 1) return 'mañana';
+  return `${d.getDate()}/${MESES_CORTOS[d.getMonth()]}`;
+}
+
+function formatFechaHora(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${formatFechaCorta(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function describeProximo(iso) {
+  if (!iso) return { texto: '', urgencia: null };
+  const d = new Date(iso);
+  const hoy = new Date();
+  const diffMs = d - hoy;
+  const diffDias = diasEntre(d, hoy);
+  if (diffMs < 0) return { texto: `vencido ${formatFechaCorta(iso)}`, urgencia: 'pasado' };
+  if (diffDias === 0) return { texto: `hoy ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, urgencia: 'hoy' };
+  return { texto: `para ${formatFechaHora(iso)}`, urgencia: 'futuro' };
+}
+
+// ── PARSERS FLEXIBLES ──────────────────────────────────────────
+// Acepta dd/mm/aa, dd/mm/aaaa, d/m/aa, dd-mm-yyyy, dd.mm.aa, etc.
+function parseFechaFlex(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  const parts = s.split(/[^\d]+/).filter(p => p.length > 0);
+  if (parts.length < 2) return null;
+  let [d, m, y] = parts.map(p => parseInt(p, 10));
+  if (!d || !m) return null;
+  if (y === undefined || isNaN(y)) y = new Date().getFullYear();
+  else if (y < 100) y = 2000 + y;
+  if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1900 || y > 2200) return null;
+  const date = new Date(y, m-1, d);
+  if (date.getFullYear() !== y || date.getMonth() !== m-1 || date.getDate() !== d) return null;
+  return date;
+}
+
+// Acepta "9", "9:30", "930", "1430", "14:30", "14.30"
+function parseHoraFlex(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  const cleaned = s.replace(/[^\d]/g, '');
+  if (cleaned.length === 0) return null;
+  let h, m;
+  if (cleaned.length <= 2) { h = parseInt(cleaned, 10); m = 0; }
+  else if (cleaned.length === 3) { h = parseInt(cleaned[0], 10); m = parseInt(cleaned.slice(1), 10); }
+  else if (cleaned.length === 4) { h = parseInt(cleaned.slice(0,2), 10); m = parseInt(cleaned.slice(2), 10); }
+  else return null;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return null;
+  return { h, m };
+}
+
+function dateToDDMMYYYY(d) {
+  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+}
+function isoToDDMMYYYY(iso) {
+  if (!iso) return '';
+  return dateToDDMMYYYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
+}
+function dateToYMD(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+}
+
+// ── DERIVACIÓN DE ESTADO ───────────────────────────────────────
+function deriveEstado(prospecto) {
+  const arr = prospecto.contactos || [];
+  if (arr.length === 0) return 'nuevo';
+  const ultimo = arr[arr.length - 1];
+  const cfg = tipoConfig(ultimo.tipo);
+  return cfg ? cfg.estado : 'nuevo';
+}
+
+function calcAgendadoPara(tipo, custom) {
+  const now = new Date();
+  switch (tipo) {
+    case 'llamar_15min':
+      now.setMinutes(now.getMinutes() + 15);
+      return now.toISOString();
+    case 'llamar_tarde': {
+      const d = new Date();
+      if (d.getHours() < 16) { d.setHours(17, 0, 0, 0); }
+      else { d.setDate(d.getDate() + 1); d.setHours(17, 0, 0, 0); }
+      return d.toISOString();
+    }
+    case 'llamar_manana': {
+      const d = new Date();
+      d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
+      return d.toISOString();
+    }
+    case 'llamar_semana': {
+      const d = new Date();
+      d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
+      return d.toISOString();
+    }
+    case 'llamar_dentro_de':
+    case 'fecha_exacta':
+    case 'agendado':
+      return custom || null;
+    default:
+      return null;
+  }
+}
+
+// ── BACKUP HELPERS ─────────────────────────────────────────────
+const LAST_BACKUP_KEY = 'abordaje_last_backup';
+function getLastBackup() {
+  const v = localStorage.getItem(LAST_BACKUP_KEY);
+  return v ? new Date(v) : null;
+}
+function markBackup() {
+  localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+}
+function backupAge() {
+  const last = getLastBackup();
+  if (!last) return { texto: 'Sin backup', warn: true };
+  const dias = diasEntre(new Date(), last);
+  if (dias === 0) return { texto: 'Backup hoy', warn: false };
+  if (dias === 1) return { texto: 'Backup ayer', warn: false };
+  return { texto: `Backup hace ${dias}d`, warn: dias > 5 };
+}
+
+function showToast(msg) {
+  const existing = document.querySelector('.toast');
+  if (existing) existing.remove();
+  const el = document.createElement('div');
+  el.className = 'toast';
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2400);
+}
+
+// ── INPUTS DE TEXTO TOLERANTES ─────────────────────────────────
+function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aa' }) {
+  // valueIso es "yyyy-mm-dd" (date input) o ISO completo o ''
+  const [text, setText] = useState(() => valueIso ? isoToDDMMYYYY(valueIso) : '');
+  const [valido, setValido] = useState(true);
+
+  useEffect(() => {
+    setText(valueIso ? isoToDDMMYYYY(valueIso) : '');
+    setValido(true);
+  }, [valueIso]);
+
+  const onBlur = () => {
+    if (!text.trim()) { onChange(''); setValido(true); return; }
+    const d = parseFechaFlex(text);
+    if (d) {
+      setText(dateToDDMMYYYY(d));
+      onChange(dateToYMD(d));
+      setValido(true);
+    } else {
+      setValido(false);
+    }
+  };
+
+  return (
+    <input type="text" placeholder={placeholder} value={text}
+      onChange={e => { setText(e.target.value); setValido(true); }}
+      onBlur={onBlur}
+      style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
+    />
+  );
+}
+
+function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
+  // value es "HH:MM" o ''
+  const [text, setText] = useState(value || '');
+  const [valido, setValido] = useState(true);
+
+  useEffect(() => { setText(value || ''); setValido(true); }, [value]);
+
+  const onBlur = () => {
+    if (!text.trim()) { onChange(''); setValido(true); return; }
+    const t = parseHoraFlex(text);
+    if (t) {
+      const hhmm = `${pad2(t.h)}:${pad2(t.m)}`;
+      setText(hhmm);
+      onChange(hhmm);
+      setValido(true);
+    } else {
+      setValido(false);
+    }
+  };
+
+  return (
+    <input type="text" placeholder={placeholder} value={text}
+      onChange={e => { setText(e.target.value); setValido(true); }}
+      onBlur={onBlur}
+      style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
+    />
+  );
+}
+
+// ── FILTROS ────────────────────────────────────────────────────
+function aplicarFiltros(prospectos, filterEstado, filterFecha) {
+  const hoy = new Date();
+  return prospectos.filter(p => {
+    const estado = deriveEstado(p);
+    if (filterEstado !== 'todos' && estado !== filterEstado) return false;
+    if (filterFecha === 'todos') return true;
+    const proxIso = p.proximoContacto;
+    if (filterFecha === 'sin_fecha') return !proxIso;
+    if (!proxIso) return false;
+    const prox = new Date(proxIso);
+    const diff = diasEntre(prox, hoy);
+    if (filterFecha === 'vencidos') return prox < hoy;
+    if (filterFecha === 'hoy') return diff === 0;
+    if (filterFecha === 'semana') return diff >= 0 && diff <= 7;
+    return true;
+  });
+}
+
+// ── APP ────────────────────────────────────────────────────────
+function App() {
+  const [state, setState] = useState(() => storage.loadState());
+  const [settings, setSettings] = useState(() => loadSettings());
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
+  const [view, setView] = useState('lista');
+  const [filterEstado, setFilterEstado] = useState('todos');
+  const [filterFecha, setFilterFecha] = useState('todos');
+  const [, forceUpdate] = useState(0);
+
+  const persist = useCallback((next) => {
+    setState(next);
+    storage.saveState(next);
+  }, []);
+
+  const upsertProspecto = useCallback((id, patch) => {
+    setState(s => {
+      const next = {
+        ...s,
+        prospectos: s.prospectos.map(p =>
+          p.id === id ? { ...p, ...patch, updatedAt: new Date().toISOString() } : p
+        )
+      };
+      storage.saveState(next);
+      return next;
+    });
+  }, []);
+
+  const handleAdd = (data) => {
+    const prospecto = newProspecto(data);
+    persist({ ...state, prospectos: [prospecto, ...state.prospectos] });
+    setShowAddModal(false);
+    showToast('Prospecto agregado');
+  };
+
+  const handleDelete = (id) => {
+    if (!confirm('¿Eliminar este prospecto? No se puede deshacer.')) return;
+    persist({ ...state, prospectos: state.prospectos.filter(p => p.id !== id) });
+    setSelectedId(null);
+    showToast('Prospecto eliminado');
+  };
+
+  const handleAddContacto = (prospectoId, contacto) => {
+    setState(s => {
+      const next = {
+        ...s,
+        prospectos: s.prospectos.map(p => {
+          if (p.id !== prospectoId) return p;
+          const nuevoContacto = {
+            id: 'c_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
+            ...contacto
+          };
+          const contactos = [...(p.contactos || []), nuevoContacto];
+          return {
+            ...p,
+            contactos,
+            proximoContacto: nuevoContacto.agendadoPara || null,
+            estado: tipoConfig(nuevoContacto.tipo)?.estado || 'nuevo',
+            updatedAt: new Date().toISOString()
+          };
+        })
+      };
+      storage.saveState(next);
+      if (contacto.tipo === 'agendado' && contacto.agendadoPara) {
+        calendarApi.agendar(prospectoId, contacto.agendadoPara, contacto.observacion || '');
+      }
+      return next;
+    });
+    showToast('Gestión registrada');
+  };
+
+  const handleEditContacto = (prospectoId, contactoId, patch) => {
+    setState(s => {
+      const next = {
+        ...s,
+        prospectos: s.prospectos.map(p => {
+          if (p.id !== prospectoId) return p;
+          const contactos = (p.contactos || []).map(c =>
+            c.id === contactoId ? { ...c, ...patch } : c
+          );
+          const ultimo = contactos[contactos.length - 1];
+          return {
+            ...p,
+            contactos,
+            proximoContacto: ultimo?.agendadoPara || null,
+            estado: ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo',
+            updatedAt: new Date().toISOString()
+          };
+        })
+      };
+      storage.saveState(next);
+      return next;
+    });
+    showToast('Gestión actualizada');
+  };
+
+  const handleDeleteContacto = (prospectoId, contactoId) => {
+    if (!confirm('¿Eliminar este registro de gestión?')) return;
+    setState(s => {
+      const next = {
+        ...s,
+        prospectos: s.prospectos.map(p => {
+          if (p.id !== prospectoId) return p;
+          const contactos = (p.contactos || []).filter(c => c.id !== contactoId);
+          const ultimo = contactos[contactos.length - 1];
+          return {
+            ...p,
+            contactos,
+            proximoContacto: ultimo?.agendadoPara || null,
+            estado: ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo',
+            updatedAt: new Date().toISOString()
+          };
+        })
+      };
+      storage.saveState(next);
+      return next;
+    });
+  };
+
+  const handleExport = () => {
+    storage.exportJSON();
+    markBackup();
+    forceUpdate(x => x + 1);
+    showToast('Backup descargado');
+  };
+
+  const handleEmailBackup = () => {
+    const count = (state.prospectos || []).length;
+    const ts = new Date().toISOString().slice(0,10);
+    storage.exportJSON();
+    markBackup();
+    forceUpdate(x => x + 1);
+    setTimeout(() => {
+      const subject = `Backup Planificador de Abordaje - ${ts}`;
+      const body = `Backup del Planificador de Abordaje al ${ts}.\n\nProspectos: ${count}\n\nAdjuntá el archivo "abordaje_backup_${ts}.json" (descargado a tu carpeta de Descargas) y enviá este mail a tu cuenta de email.`;
+      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    }, 250);
+    showToast('Backup descargado, abriendo mail');
+  };
+
+  const handleImportClick = () => document.getElementById('importInput').click();
+
+  const handleImportFile = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!confirm('Importar este archivo va a reemplazar todos los datos actuales. ¿Continuar?')) {
+      e.target.value = '';
+      return;
+    }
+    try {
+      const next = await storage.importJSON(file);
+      setState(next);
+      showToast('Datos importados');
+    } catch (err) {
+      alert('Error al importar: ' + err.message);
+    }
+    e.target.value = '';
+  };
+
+  const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
+  const backupStatus = backupAge();
+
+  const filtrados = useMemo(
+    () => aplicarFiltros(state.prospectos, filterEstado, filterFecha),
+    [state.prospectos, filterEstado, filterFecha]
+  );
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos';
+
+  return (
+    <>
+      <HeaderActions
+        onExport={handleExport}
+        onImport={handleImportClick}
+        onMail={handleEmailBackup}
+        onOpenSettings={() => setShowSettings(true)}
+        backupTexto={backupStatus.texto}
+        backupWarn={backupStatus.warn}
+      />
+      <input
+        id="importInput"
+        type="file"
+        accept=".json,application/json"
+        style={{display:'none'}}
+        onChange={handleImportFile}
+      />
+
+      <div className="main-head">
+        <div>
+          <h1>Mi lista de abordaje</h1>
+          <div className="subhead">
+            {state.prospectos.length === 0
+              ? 'Sin prospectos cargados todavía'
+              : `${state.prospectos.length} ${state.prospectos.length === 1 ? 'prospecto' : 'prospectos'} en gestión`
+            }
+          </div>
+        </div>
+        <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+          + Nuevo prospecto
+        </button>
+      </div>
+
+      {state.prospectos.length === 0 ? (
+        <EmptyState onAdd={() => setShowAddModal(true)} />
+      ) : (
+        <>
+          <ViewTabs view={view} setView={setView} />
+          <FilterBar
+            filterEstado={filterEstado}
+            setFilterEstado={setFilterEstado}
+            filterFecha={filterFecha}
+            setFilterFecha={setFilterFecha}
+            mostrandoCount={filtrados.length}
+            totalCount={state.prospectos.length}
+          />
+          {view === 'lista' ? (
+            filtrados.length === 0 ? (
+              <div className="empty">
+                <div className="empty-title">Ningún prospecto coincide con los filtros</div>
+                <div className="empty-text">Ajustá los filtros o limpiálos para ver toda la lista.</div>
+                <button className="btn-secondary"
+                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); }}>
+                  Limpiar filtros
+                </button>
+              </div>
+            ) : (
+              <ProspectosTable prospectos={filtrados} onSelect={setSelectedId} />
+            )
+          ) : (
+            <CalendarioView
+              prospectos={filtrados}
+              settings={settings}
+              onSelectProspecto={setSelectedId}
+            />
+          )}
+        </>
+      )}
+
+      {showAddModal && (
+        <NuevoProspectoModal
+          onCancel={() => setShowAddModal(false)}
+          onSave={handleAdd}
+        />
+      )}
+
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onCancel={() => setShowSettings(false)}
+          onSave={(s) => { setSettings(s); persistSettings(s); setShowSettings(false); showToast('Ajustes guardados'); }}
+        />
+      )}
+
+      {selectedProspecto && (
+        <PanelLateral
+          prospecto={selectedProspecto}
+          settings={settings}
+          onClose={() => setSelectedId(null)}
+          onUpdate={(patch) => upsertProspecto(selectedProspecto.id, patch)}
+          onDelete={() => handleDelete(selectedProspecto.id)}
+          onAddContacto={(c) => handleAddContacto(selectedProspecto.id, c)}
+          onEditContacto={(cid, patch) => handleEditContacto(selectedProspecto.id, cid, patch)}
+          onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
+        />
+      )}
+    </>
+  );
+}
+
+// ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
+function HeaderActions({ onExport, onImport, onMail, onOpenSettings, backupTexto, backupWarn }) {
+  useEffect(() => {
+    const target = document.getElementById('headerActions');
+    if (!target) return;
+    target.innerHTML = '';
+    // Backup indicator (a la izquierda de los botones)
+    const bk = document.createElement('div');
+    bk.className = 'header-backup' + (backupWarn ? ' warn' : '');
+    bk.textContent = backupTexto;
+    bk.title = 'Estado del último backup local';
+    target.appendChild(bk);
+    // Botones
+    const mk = (txt, title, fn) => {
+      const b = document.createElement('button');
+      b.className = 'header-btn';
+      b.textContent = txt;
+      b.title = title;
+      b.onclick = fn;
+      return b;
+    };
+    target.appendChild(mk('Ajustes', 'Configurar rango horario, duración y vista', onOpenSettings));
+    target.appendChild(mk('Enviar por mail', 'Descargar backup y abrir cliente de mail', onMail));
+    target.appendChild(mk('Exportar', 'Descargar backup JSON', onExport));
+    target.appendChild(mk('Importar', 'Restaurar desde backup JSON', onImport));
+  }, [onExport, onImport, onMail, onOpenSettings, backupTexto, backupWarn]);
+  return null;
+}
+
+// ── EMPTY STATE ────────────────────────────────────────────────
+function EmptyState({ onAdd }) {
+  return (
+    <div className="empty">
+      <div className="empty-icon">+</div>
+      <div className="empty-title">Tu lista de abordaje está vacía</div>
+      <div className="empty-text">
+        Agregá el primer prospecto para empezar a planificar tus contactos de la semana.
+      </div>
+      <button className="btn-primary" onClick={onAdd}>+ Nuevo prospecto</button>
+    </div>
+  );
+}
+
+// ── FILTER BAR ─────────────────────────────────────────────────
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, mostrandoCount, totalCount }) {
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos';
+  return (
+    <div className="filter-bar">
+      <div className="filter-group">
+        <label>Estado</label>
+        <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
+          <option value="todos">Todos</option>
+          <option value="nuevo">Nuevos</option>
+          <option value="pendiente">En gestión</option>
+          <option value="programado">Programados</option>
+          <option value="agendado">Agendados</option>
+          <option value="rechazado">Rechazados</option>
+        </select>
+      </div>
+      <div className="filter-group">
+        <label>Próximo contacto</label>
+        <select value={filterFecha} onChange={e => setFilterFecha(e.target.value)}>
+          <option value="todos">Cualquier momento</option>
+          <option value="vencidos">Vencidos</option>
+          <option value="hoy">Hoy</option>
+          <option value="semana">Próximos 7 días</option>
+          <option value="sin_fecha">Sin fecha</option>
+        </select>
+      </div>
+      {hayFiltros && (
+        <button className="btn-mini"
+          onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); }}>
+          Limpiar
+        </button>
+      )}
+      <div className="filter-count">
+        {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
+      </div>
+    </div>
+  );
+}
+
+// ── TABLA ──────────────────────────────────────────────────────
+function ProspectosTable({ prospectos, onSelect }) {
+  return (
+    <div className="table-wrap">
+      <table className="prospectos">
+        <colgroup>
+          <col />
+          <col className="col-w-tel" />
+          <col className="col-w-estado" />
+          <col />
+          <col className="col-w-referente" />
+          <col className="col-w-pref" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th className="col-telefono">Teléfono</th>
+            <th>Estado</th>
+            <th>Último contacto / Observación</th>
+            <th className="col-referente">Referente</th>
+            <th className="col-pref">Pref.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {prospectos.map(p => (
+            <FilaProspecto key={p.id} prospecto={p} onClick={() => onSelect(p.id)} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FilaProspecto({ prospecto, onClick }) {
+  const estado = deriveEstado(prospecto);
+  const meta = ESTADO_META[estado];
+  return (
+    <tr className={`fila-clickeable ${meta.tint}`} onClick={onClick}>
+      <td className="col-nombre">
+        {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
+      </td>
+      <td className="col-telefono">{prospecto.telefono || '—'}</td>
+      <td className="estado-cell"><BadgeEstado prospecto={prospecto} /></td>
+      <td><TimelineCell contactos={prospecto.contactos || []} /></td>
+      <td className="col-referente">{prospecto.referente || <span style={{color:'var(--texto-suave)'}}>—</span>}</td>
+      <td className="col-pref">
+        {prospecto.preferenciaContacto
+          ? <span className="badge-pref">{prospecto.preferenciaContacto}</span>
+          : <span style={{color:'var(--texto-suave)'}}>—</span>
+        }
+      </td>
+    </tr>
+  );
+}
+
+// ── BADGE ESTADO ───────────────────────────────────────────────
+function BadgeEstado({ prospecto }) {
+  const estado = deriveEstado(prospecto);
+  const meta = ESTADO_META[estado];
+  const proximo = describeProximo(prospecto.proximoContacto);
+  const subClass = proximo.urgencia === 'pasado' ? 'urgente'
+                  : proximo.urgencia === 'hoy' ? 'hoy' : '';
+  return (
+    <div className="estado-badge-wrap">
+      <span className="estado-badge" style={{ color: meta.color, background: meta.bg }}>
+        {meta.label}
+      </span>
+      {proximo.texto && (
+        <span className={`estado-subtxt ${subClass}`}>{proximo.texto}</span>
+      )}
+    </div>
+  );
+}
+
+// ── TIMELINE CELL ──────────────────────────────────────────────
+function TimelineCell({ contactos }) {
+  if (!contactos || contactos.length === 0) {
+    return <span className="timeline-vacio">Sin contactos aún</span>;
+  }
+  const ultimos = [...contactos].reverse().slice(0, 3);
+  const restantes = contactos.length - ultimos.length;
+  return (
+    <div className="timeline-cell">
+      {ultimos.map(c => {
+        const cfg = tipoConfig(c.tipo);
+        return (
+          <div key={c.id} className="timeline-row">
+            <span className="chip" style={{color: cfg?.color, background: cfg?.bg}}>
+              {cfg?.label || c.tipo}
+            </span>
+            <div className="body">
+              <span className="fecha">{formatFechaCorta(c.fecha)}</span>
+              {c.observacion && (
+                <span className="obs" title={c.observacion}>{c.observacion}</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      {restantes > 0 && (
+        <div className="timeline-mas">… y {restantes} {restantes === 1 ? 'gestión más' : 'gestiones más'}</div>
+      )}
+    </div>
+  );
+}
+
+// ── PANEL LATERAL (gestión arriba, datos abajo, historial abajo) ─
+function PanelLateral({ prospecto, settings, onClose, onUpdate, onDelete, onAddContacto, onEditContacto, onDeleteContacto }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = '';
+    };
+  }, [onClose]);
+
+  return (
+    <div className="panel-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="panel-side" role="dialog" aria-modal="true">
+        <div className="panel-header">
+          <h2>{prospecto.nombre || '(sin nombre)'}</h2>
+          <button className="panel-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+
+        <div className="panel-section">
+          <h4>Registrar gestión</h4>
+          <RegistrarGestion onSubmit={onAddContacto} settings={settings} />
+        </div>
+
+        <div className="panel-section">
+          <h4>Historial de gestiones</h4>
+          <HistorialList
+            contactos={prospecto.contactos || []}
+            settings={settings}
+            onEdit={onEditContacto}
+            onDelete={onDeleteContacto}
+          />
+        </div>
+
+        <div className="panel-section">
+          <h4>Datos del prospecto</h4>
+          <FieldsProspecto prospecto={prospecto} onUpdate={onUpdate} />
+        </div>
+
+        <div className="panel-section" style={{display:'flex', justifyContent:'flex-end'}}>
+          <button className="btn-danger" onClick={onDelete}>Eliminar prospecto</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── FIELDS PROSPECTO (autosave on blur) ────────────────────────
+function FieldsProspecto({ prospecto, onUpdate }) {
+  const [draft, setDraft] = useState({
+    nombre: prospecto.nombre || '',
+    telefono: prospecto.telefono || '',
+    preferenciaContacto: prospecto.preferenciaContacto || '',
+    detalle: prospecto.detalle || '',
+    referente: prospecto.referente || '',
+    observaciones: prospecto.observaciones || ''
+  });
+
+  useEffect(() => {
+    setDraft({
+      nombre: prospecto.nombre || '',
+      telefono: prospecto.telefono || '',
+      preferenciaContacto: prospecto.preferenciaContacto || '',
+      detalle: prospecto.detalle || '',
+      referente: prospecto.referente || '',
+      observaciones: prospecto.observaciones || ''
+    });
+  }, [prospecto.id]);
+
+  const upd = (k, v) => setDraft(d => ({...d, [k]: v}));
+  const commit = (k) => { if (draft[k] !== prospecto[k]) onUpdate({ [k]: draft[k] }); };
+
+  return (
+    <div>
+      <div className="field-inline">
+        <label>Nombre</label>
+        <input type="text" value={draft.nombre}
+          onChange={e => upd('nombre', e.target.value)}
+          onBlur={() => commit('nombre')} />
+      </div>
+      <div className="field-inline-row">
+        <div className="field-inline">
+          <label>Teléfono</label>
+          <input type="tel" value={draft.telefono}
+            onChange={e => upd('telefono', e.target.value)}
+            onBlur={() => commit('telefono')} />
+        </div>
+        <div className="field-inline">
+          <label>Preferencia</label>
+          <select value={draft.preferenciaContacto}
+            onChange={e => { upd('preferenciaContacto', e.target.value); setTimeout(() => onUpdate({ preferenciaContacto: e.target.value }), 0); }}>
+            <option value="">— Seleccionar —</option>
+            {PREFS_CONTACTO.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+      </div>
+      <div className="field-inline">
+        <label>Detalle</label>
+        <input type="text" value={draft.detalle}
+          onChange={e => upd('detalle', e.target.value)}
+          onBlur={() => commit('detalle')} />
+      </div>
+      <div className="field-inline">
+        <label>Referente</label>
+        <input type="text" value={draft.referente}
+          onChange={e => upd('referente', e.target.value)}
+          onBlur={() => commit('referente')} />
+      </div>
+      <div className="field-inline">
+        <label>Observaciones generales</label>
+        <textarea value={draft.observaciones}
+          onChange={e => upd('observaciones', e.target.value)}
+          onBlur={() => commit('observaciones')} />
+      </div>
+    </div>
+  );
+}
+
+// ── REGISTRAR GESTIÓN (autofill fecha/hora, inputs flexibles) ──
+function RegistrarGestion({ onSubmit, settings }) {
+  const defaultDur = settings?.slotDurationMin || 60;
+  const [tipoSel, setTipoSel] = useState(null);
+  const [observacion, setObservacion] = useState('');
+  const [fechaIso, setFechaIso] = useState('');
+  const [hora, setHora] = useState('');
+  const [cantidad, setCantidad] = useState(1);
+  const [unidad, setUnidad] = useState('horas');
+  const [duracionMin, setDuracionMin] = useState(defaultDur);
+
+  const cfg = tipoSel ? tipoConfig(tipoSel) : null;
+
+  const reset = () => {
+    setTipoSel(null);
+    setObservacion('');
+    setFechaIso(''); setHora('');
+    setCantidad(1); setUnidad('horas');
+    setDuracionMin(defaultDur);
+  };
+
+  const onTipoClick = (id) => {
+    if (tipoSel === id) { reset(); return; }
+    setTipoSel(id);
+    setObservacion('');
+    const c = tipoConfig(id);
+    const today = new Date();
+    if (c.input === 'fecha' || c.input === 'fechahora') {
+      setFechaIso(dateToYMD(today));
+    } else {
+      setFechaIso('');
+    }
+    if (c.input === 'fechahora') {
+      setHora(`${pad2(today.getHours())}:${pad2(today.getMinutes())}`);
+      setDuracionMin(defaultDur);
+    } else {
+      setHora('');
+    }
+  };
+
+  const confirmar = () => {
+    let agendadoPara = null;
+    let extraDur = null;
+    if (cfg.input === 'plazo') {
+      const d = new Date();
+      const n = parseInt(cantidad, 10) || 0;
+      if (unidad === 'minutos') d.setMinutes(d.getMinutes() + n);
+      else if (unidad === 'horas') d.setHours(d.getHours() + n);
+      else if (unidad === 'dias') d.setDate(d.getDate() + n);
+      agendadoPara = d.toISOString();
+    } else if (cfg.input === 'fecha') {
+      if (!fechaIso) { alert('Falta la fecha'); return; }
+      agendadoPara = new Date(fechaIso + 'T10:00:00').toISOString();
+    } else if (cfg.input === 'fechahora') {
+      if (!fechaIso) { alert('Falta la fecha'); return; }
+      if (!hora) { alert('Falta la hora'); return; }
+      agendadoPara = new Date(fechaIso + 'T' + hora + ':00').toISOString();
+      extraDur = parseInt(duracionMin, 10) || defaultDur;
+    } else {
+      agendadoPara = calcAgendadoPara(tipoSel, null);
+    }
+    const payload = {
+      fecha: new Date().toISOString(),
+      tipo: tipoSel,
+      observacion: observacion.trim(),
+      agendadoPara
+    };
+    if (extraDur != null) payload.duracionMin = extraDur;
+    onSubmit(payload);
+    reset();
+  };
+
+  return (
+    <div>
+      <div className="tipos-grid">
+        {TIPOS_CONTACTO.map(t => {
+          const selected = tipoSel === t.id;
+          return (
+            <button
+              key={t.id}
+              className="tipo-button"
+              onClick={() => onTipoClick(t.id)}
+              style={{
+                borderColor: t.color,
+                color: t.color,
+                background: selected ? t.bg : 'white'
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {cfg && (
+        <div className="gestion-form">
+          <div className="gestion-form-title">
+            <span>Confirmar gestión:</span>
+            <span className="chip" style={{
+              color: cfg.color, background: cfg.bg,
+              padding:'3px 10px', borderRadius:10, fontSize:'0.7rem',
+              fontWeight:700, textTransform:'uppercase', letterSpacing:'0.3px'
+            }}>{cfg.label}</span>
+          </div>
+
+          {cfg.input === 'plazo' && (
+            <div className="field-inline-row">
+              <div className="field-inline">
+                <label>Cantidad</label>
+                <input type="number" min="1" value={cantidad}
+                  onChange={e => setCantidad(e.target.value)} />
+              </div>
+              <div className="field-inline">
+                <label>Unidad</label>
+                <select value={unidad} onChange={e => setUnidad(e.target.value)}>
+                  <option value="minutos">Minutos</option>
+                  <option value="horas">Horas</option>
+                  <option value="dias">Días</option>
+                </select>
+              </div>
+            </div>
+          )}
+
+          {cfg.input === 'fecha' && (
+            <div className="field-inline">
+              <label>Fecha exacta para llamar</label>
+              <FechaTexto valueIso={fechaIso} onChange={setFechaIso} />
+            </div>
+          )}
+
+          {cfg.input === 'fechahora' && (
+            <>
+              <div className="field-inline-row">
+                <div className="field-inline">
+                  <label>Fecha</label>
+                  <FechaTexto valueIso={fechaIso} onChange={setFechaIso} />
+                </div>
+                <div className="field-inline">
+                  <label>Hora (24h)</label>
+                  <HoraTexto value={hora} onChange={setHora} />
+                </div>
+              </div>
+              <div className="field-inline">
+                <label>Duración (minutos)</label>
+                <input type="number" min="15" step="15" value={duracionMin}
+                  onChange={e => setDuracionMin(e.target.value)} />
+              </div>
+            </>
+          )}
+
+          <div className="field-inline">
+            <label>Observación (opcional)</label>
+            <textarea value={observacion}
+              onChange={e => setObservacion(e.target.value)}
+              placeholder="Notas de esta llamada..." />
+          </div>
+
+          <div className="actions">
+            <button className="btn-mini" onClick={reset}>Cancelar</button>
+            <button className="btn-mini primary" onClick={confirmar}>Registrar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── HISTORIAL ──────────────────────────────────────────────────
+function HistorialList({ contactos, settings, onEdit, onDelete }) {
+  if (!contactos || contactos.length === 0) {
+    return <div className="historial-vacio">Sin gestiones registradas todavía.</div>;
+  }
+  const ordenados = [...contactos].reverse();
+  return (
+    <div className="historial-list">
+      {ordenados.map(c => (
+        <HistorialItem key={c.id} contacto={c} settings={settings}
+          onSave={(patch) => onEdit(c.id, patch)}
+          onDelete={() => onDelete(c.id)} />
+      ))}
+    </div>
+  );
+}
+
+function HistorialItem({ contacto, settings, onSave, onDelete }) {
+  const [editing, setEditing] = useState(false);
+  const cfg = tipoConfig(contacto.tipo);
+
+  if (editing) {
+    return (
+      <HistorialEditForm
+        contacto={contacto}
+        settings={settings}
+        onSave={(patch) => { onSave(patch); setEditing(false); }}
+        onCancel={() => setEditing(false)}
+      />
+    );
+  }
+
+  return (
+    <div className="historial-item">
+      <div className="top">
+        <span className="chip" style={{
+          color: cfg?.color, background: cfg?.bg,
+          padding: '3px 10px', borderRadius: 10, fontSize: '0.7rem',
+          fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px'
+        }}>
+          {cfg?.label || contacto.tipo}
+        </span>
+        <span style={{fontSize: '0.78rem', color: 'var(--texto-suave)'}}>
+          {formatFechaHora(contacto.fecha)}
+        </span>
+        <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
+        <button onClick={onDelete}
+          style={{
+            background: 'transparent', border: 'none',
+            color: 'var(--texto-suave)', cursor: 'pointer', fontSize: '0.95rem',
+            padding: '2px 6px', marginLeft: 4
+          }}
+          title="Eliminar este registro"
+        >×</button>
+      </div>
+      {contacto.agendadoPara && (
+        <div className="agendado-line">
+          {contacto.tipo === 'agendado' ? 'Cita: ' : 'Próximo: '}
+          {formatFechaHora(contacto.agendadoPara)}
+        </div>
+      )}
+      {contacto.observacion && <div className="obs">{contacto.observacion}</div>}
+    </div>
+  );
+}
+
+function HistorialEditForm({ contacto, settings, onSave, onCancel }) {
+  const cfg = tipoConfig(contacto.tipo);
+  const hasAgendado = !!contacto.agendadoPara;
+  const hasHora = cfg && cfg.input === 'fechahora';
+  const defaultDur = settings?.slotDurationMin || 60;
+
+  const [observacion, setObservacion] = useState(contacto.observacion || '');
+  const initialFecha = hasAgendado ? new Date(contacto.agendadoPara) : null;
+  const [fechaIso, setFechaIso] = useState(initialFecha ? dateToYMD(initialFecha) : '');
+  const [hora, setHora] = useState(initialFecha && hasHora
+    ? `${pad2(initialFecha.getHours())}:${pad2(initialFecha.getMinutes())}` : '');
+  const [duracionMin, setDuracionMin] = useState(contacto.duracionMin || defaultDur);
+
+  const save = () => {
+    const patch = { observacion: observacion.trim() };
+    if (hasAgendado) {
+      if (!fechaIso) { alert('Falta la fecha'); return; }
+      if (hasHora) {
+        if (!hora) { alert('Falta la hora'); return; }
+        patch.agendadoPara = new Date(fechaIso + 'T' + hora + ':00').toISOString();
+        patch.duracionMin = parseInt(duracionMin, 10) || defaultDur;
+      } else {
+        patch.agendadoPara = new Date(fechaIso + 'T10:00:00').toISOString();
+      }
+    }
+    onSave(patch);
+  };
+
+  return (
+    <div className="historial-edit-form">
+      <div className="historial-edit-tipo">
+        <span>Editando:</span>
+        <span className="chip" style={{
+          color: cfg?.color, background: cfg?.bg,
+          padding:'3px 10px', borderRadius:10, fontSize:'0.7rem',
+          fontWeight:700, textTransform:'uppercase', letterSpacing:'0.3px'
+        }}>{cfg?.label}</span>
+        <span style={{marginLeft:'auto', fontSize:'0.74rem', color:'var(--texto-suave)'}}>
+          registrada {formatFechaHora(contacto.fecha)}
+        </span>
+      </div>
+
+      {hasAgendado && (
+        hasHora ? (
+          <>
+            <div className="field-inline-row">
+              <div className="field-inline">
+                <label>Fecha del agendamiento</label>
+                <FechaTexto valueIso={fechaIso} onChange={setFechaIso} />
+              </div>
+              <div className="field-inline">
+                <label>Hora (24h)</label>
+                <HoraTexto value={hora} onChange={setHora} />
+              </div>
+            </div>
+            <div className="field-inline">
+              <label>Duración (minutos)</label>
+              <input type="number" min="15" step="15" value={duracionMin}
+                onChange={e => setDuracionMin(e.target.value)} />
+            </div>
+          </>
+        ) : (
+          <div className="field-inline">
+            <label>Fecha del próximo contacto</label>
+            <FechaTexto valueIso={fechaIso} onChange={setFechaIso} />
+          </div>
+        )
+      )}
+
+      <div className="field-inline">
+        <label>Observación</label>
+        <textarea value={observacion}
+          onChange={e => setObservacion(e.target.value)} />
+      </div>
+
+      <div className="actions">
+        <button className="btn-mini" onClick={onCancel}>Cancelar</button>
+        <button className="btn-mini primary" onClick={save}>Guardar</button>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL NUEVO PROSPECTO ──────────────────────────────────────
+function NuevoProspectoModal({ onCancel, onSave }) {
+  const [form, setForm] = useState({
+    nombre: '', telefono: '', preferenciaContacto: '',
+    detalle: '', referente: '', observaciones: ''
+  });
+  const [errors, setErrors] = useState({});
+
+  const upd = (k, v) => setForm(f => ({...f, [k]: v}));
+
+  const submit = () => {
+    const errs = {};
+    if (!form.nombre.trim()) errs.nombre = 'Ingresá un nombre';
+    if (Object.keys(errs).length > 0) { setErrors(errs); return; }
+    onSave({
+      nombre: form.nombre.trim(),
+      telefono: form.telefono.trim(),
+      preferenciaContacto: form.preferenciaContacto,
+      detalle: form.detalle.trim(),
+      referente: form.referente.trim(),
+      observaciones: form.observaciones.trim()
+    });
+  };
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true">
+        <div className="modal-header">
+          <h3>Nuevo prospecto</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <label>Nombre <span className="req">*</span></label>
+            <input type="text" value={form.nombre}
+              onChange={e => upd('nombre', e.target.value)}
+              placeholder="Ej: Juan Pérez" autoFocus />
+            {errors.nombre && <div className="field-error">{errors.nombre}</div>}
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label>Teléfono</label>
+              <input type="tel" value={form.telefono}
+                onChange={e => upd('telefono', e.target.value)}
+                placeholder="+54 11 ..." />
+            </div>
+            <div className="field">
+              <label>Preferencia de contacto</label>
+              <select value={form.preferenciaContacto}
+                onChange={e => upd('preferenciaContacto', e.target.value)}>
+                <option value="">— Seleccionar —</option>
+                {PREFS_CONTACTO.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="field">
+            <label>Detalle</label>
+            <input type="text" value={form.detalle}
+              onChange={e => upd('detalle', e.target.value)}
+              placeholder="Ej: Empresario, 45 años, casado" />
+          </div>
+          <div className="field">
+            <label>Referente</label>
+            <input type="text" value={form.referente}
+              onChange={e => upd('referente', e.target.value)}
+              placeholder="¿Quién lo refirió?" />
+          </div>
+          <div className="field">
+            <label>Observaciones</label>
+            <textarea value={form.observaciones}
+              onChange={e => upd('observaciones', e.target.value)}
+              placeholder="Notas iniciales que tengas del prospecto..." />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-primary" onClick={submit}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── VIEW TABS (Lista | Calendario) ────────────────────────────
+function ViewTabs({ view, setView }) {
+  return (
+    <div className="view-tabs">
+      <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
+        onClick={() => setView('lista')}>Lista</button>
+      <button className={`view-tab ${view === 'calendario' ? 'active' : ''}`}
+        onClick={() => setView('calendario')}>Calendario</button>
+    </div>
+  );
+}
+
+// ── CALENDARIO HELPERS ────────────────────────────────────────
+const NOMBRES_MES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DOW_CORTOS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear()
+      && a.getMonth() === b.getMonth()
+      && a.getDate() === b.getDate();
+}
+function isToday(d) { return isSameDay(d, new Date()); }
+
+// Devuelve la grilla del mes: array de 35-42 celdas con { date, outOfMonth }
+function buildMonthGrid(year, month) {
+  const first = new Date(year, month, 1);
+  // offset del lunes: 0=Lun, 1=Mar, ..., 6=Dom
+  const offset = (first.getDay() + 6) % 7;
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const cells = [];
+  for (let i = offset; i > 0; i--) {
+    cells.push({ date: new Date(year, month, 1 - i), outOfMonth: true });
+  }
+  for (let i = 1; i <= lastDay; i++) {
+    cells.push({ date: new Date(year, month, i), outOfMonth: false });
+  }
+  while (cells.length % 7 !== 0) {
+    const last = cells[cells.length - 1].date;
+    const d = new Date(last); d.setDate(d.getDate() + 1);
+    cells.push({ date: d, outOfMonth: true });
+  }
+  return cells;
+}
+
+// Extrae eventos de los prospectos (uno por prospecto si tiene proximoContacto y no está rechazado)
+function extractCalendarEvents(prospectos) {
+  const events = [];
+  for (const p of prospectos) {
+    if (!p.proximoContacto) continue;
+    if (deriveEstado(p) === 'rechazado') continue;
+    // Buscar el último contacto con agendadoPara para el tipo, observación y duración
+    const ultimoAgendado = [...(p.contactos || [])].reverse().find(c => c.agendadoPara);
+    events.push({
+      id: p.id + '_proximo',
+      prospectoId: p.id,
+      prospectoNombre: p.nombre || '(sin nombre)',
+      fecha: p.proximoContacto,
+      tipo: ultimoAgendado?.tipo || 'agendado',
+      observacion: ultimoAgendado?.observacion || '',
+      duracionMin: ultimoAgendado?.duracionMin || null
+    });
+  }
+  return events.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
+// Lunes como inicio de semana
+function startOfWeek(d) {
+  const x = new Date(d); x.setHours(0,0,0,0);
+  const dow = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - dow);
+  return x;
+}
+function addDays(d, n) {
+  const x = new Date(d); x.setDate(x.getDate() + n); return x;
+}
+
+function eventsByDayKey(events) {
+  const m = {};
+  for (const e of events) {
+    const d = new Date(e.fecha);
+    const key = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    if (!m[key]) m[key] = [];
+    m[key].push(e);
+  }
+  return m;
+}
+
+function dayKey(date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth()+1)}-${pad2(date.getDate())}`;
+}
+
+function formatHHMM(iso) {
+  const d = new Date(iso);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+function formatLargeDate(d) {
+  const dow = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][d.getDay()];
+  return `${dow} ${d.getDate()} de ${NOMBRES_MES[d.getMonth()]}`;
+}
+
+// ── CALENDARIO VIEW ───────────────────────────────────────────
+function CalendarioView({ prospectos, settings, onSelectProspecto }) {
+  const [mode, setMode] = useState('mes'); // 'mes' | 'semana' | 'hoy'
+  const [cursor, setCursor] = useState(() => {
+    const d = new Date(); d.setHours(0,0,0,0); return d;
+  });
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const events = useMemo(() => extractCalendarEvents(prospectos), [prospectos]);
+  const eventsByKey = useMemo(() => eventsByDayKey(events), [events]);
+
+  // Cuando cambia el mode, ajustar cursor a un anchor sensato
+  useEffect(() => {
+    if (mode === 'mes') {
+      const d = new Date(cursor); d.setDate(1); setCursor(d);
+    } else if (mode === 'semana') {
+      setCursor(startOfWeek(cursor));
+    } else if (mode === 'hoy') {
+      const d = new Date(); d.setHours(0,0,0,0); setCursor(d);
+    }
+    setSelectedDay(null);
+  }, [mode]);
+
+  const goPrev = () => {
+    const d = new Date(cursor);
+    if (mode === 'mes') d.setMonth(d.getMonth() - 1);
+    else if (mode === 'semana') d.setDate(d.getDate() - 7);
+    else if (mode === 'hoy') d.setDate(d.getDate() - 1);
+    setCursor(d); setSelectedDay(null);
+  };
+  const goNext = () => {
+    const d = new Date(cursor);
+    if (mode === 'mes') d.setMonth(d.getMonth() + 1);
+    else if (mode === 'semana') d.setDate(d.getDate() + 7);
+    else if (mode === 'hoy') d.setDate(d.getDate() + 1);
+    setCursor(d); setSelectedDay(null);
+  };
+  const goToday = () => {
+    if (mode === 'mes') {
+      const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); setCursor(d);
+      setSelectedDay(dayKey(new Date()));
+    } else if (mode === 'semana') {
+      setCursor(startOfWeek(new Date()));
+      setSelectedDay(null);
+    } else {
+      const d = new Date(); d.setHours(0,0,0,0); setCursor(d);
+      setSelectedDay(null);
+    }
+  };
+
+  // Saltar a un mes/año específico desde el picker del título
+  const jumpTo = (year, month) => {
+    const d = new Date(year, month, 1); d.setHours(0,0,0,0);
+    if (mode === 'mes') setCursor(d);
+    else if (mode === 'semana') setCursor(startOfWeek(d));
+    else { const t = new Date(year, month, 1); t.setHours(0,0,0,0); setCursor(t); }
+    setSelectedDay(null);
+  };
+
+  const subTabs = (
+    <div className="cal-sub-tabs">
+      <button className={`cal-sub-tab ${mode==='mes'?'active':''}`} onClick={() => setMode('mes')}>Mes</button>
+      <button className={`cal-sub-tab ${mode==='semana'?'active':''}`} onClick={() => setMode('semana')}>Semana</button>
+      <button className={`cal-sub-tab ${mode==='hoy'?'active':''}`} onClick={() => setMode('hoy')}>Hoy</button>
+    </div>
+  );
+
+  if (mode === 'mes') {
+    return <MonthCalendar
+      cursor={cursor}
+      events={events}
+      eventsByKey={eventsByKey}
+      selectedDay={selectedDay}
+      setSelectedDay={setSelectedDay}
+      onSelectProspecto={onSelectProspecto}
+      goPrev={goPrev} goNext={goNext} goToday={goToday}
+      onJumpTo={jumpTo}
+      subTabs={subTabs}
+    />;
+  }
+  if (mode === 'semana') {
+    return <WeekCalendar
+      anchorDate={cursor}
+      events={events}
+      settings={settings}
+      onSelectProspecto={onSelectProspecto}
+      goPrev={goPrev} goNext={goNext} goToday={goToday}
+      onJumpTo={jumpTo}
+      subTabs={subTabs}
+      ndays={settings.includeWeekends ? 7 : 5}
+    />;
+  }
+  // mode === 'hoy'
+  return <WeekCalendar
+    anchorDate={cursor}
+    events={events}
+    settings={settings}
+    onSelectProspecto={onSelectProspecto}
+    goPrev={goPrev} goNext={goNext} goToday={goToday}
+    onJumpTo={jumpTo}
+    subTabs={subTabs}
+    ndays={1}
+    singleDay={true}
+  />;
+}
+
+// ── MONTH/YEAR PICKER (popover en título del calendario) ─────
+function MonthYearPicker({ year, month, onPick, onClose }) {
+  const [picYear, setPicYear] = useState(year);
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!e.target.closest('.myp-pop, .cal-title.clickable')) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+  return (
+    <div className="myp-pop">
+      <div className="myp-year">
+        <button className="myp-year-btn" onClick={() => setPicYear(y => y - 1)}>‹</button>
+        <input type="number" value={picYear}
+          onChange={e => setPicYear(parseInt(e.target.value, 10) || picYear)} />
+        <button className="myp-year-btn" onClick={() => setPicYear(y => y + 1)}>›</button>
+      </div>
+      <div className="myp-months">
+        {NOMBRES_MES.map((m, idx) => (
+          <button key={idx}
+            className={`myp-month ${idx === month && picYear === year ? 'active' : ''}`}
+            onClick={() => { onPick(picYear, idx); onClose(); }}>
+            {m.slice(0,3)}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── VISTA MES ──────────────────────────────────────────────────
+function MonthCalendar({ cursor, events, eventsByKey, selectedDay, setSelectedDay, onSelectProspecto, goPrev, goNext, goToday, onJumpTo, subTabs }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const cells = useMemo(
+    () => buildMonthGrid(cursor.getFullYear(), cursor.getMonth()),
+    [cursor]
+  );
+  const monthEvents = events.filter(e => {
+    const d = new Date(e.fecha);
+    return d.getFullYear() === cursor.getFullYear() && d.getMonth() === cursor.getMonth();
+  });
+  const detailsEvents = selectedDay ? (eventsByKey[selectedDay] || []) : [];
+  const selectedDate = selectedDay ? new Date(selectedDay + 'T00:00:00') : null;
+
+  return (
+    <>
+      <div className="cal-wrap">
+        <div className="cal-header">
+          <div style={{display:'flex', alignItems:'center', gap:14}}>
+            <div className="cal-title clickable" onClick={() => setShowPicker(s => !s)}
+              title="Click para saltar a otro mes/año">
+              {NOMBRES_MES[cursor.getMonth()]} {cursor.getFullYear()}
+              <span className="cal-title-caret">▾</span>
+              {showPicker && (
+                <MonthYearPicker
+                  year={cursor.getFullYear()}
+                  month={cursor.getMonth()}
+                  onPick={onJumpTo}
+                  onClose={() => setShowPicker(false)}
+                />
+              )}
+            </div>
+            {subTabs}
+          </div>
+          <div className="cal-nav">
+            <button className="cal-nav-btn cal-nav-arrow" onClick={goPrev} title="Mes anterior">‹</button>
+            <button className="cal-nav-btn" onClick={goToday}>Hoy</button>
+            <button className="cal-nav-btn cal-nav-arrow" onClick={goNext} title="Mes siguiente">›</button>
+          </div>
+        </div>
+        <div className="cal-grid">
+          {DOW_CORTOS.map(d => <div key={d} className="cal-dow">{d}</div>)}
+          {cells.map((cell, idx) => (
+            <CalDayCell
+              key={idx}
+              date={cell.date}
+              outOfMonth={cell.outOfMonth}
+              events={eventsByKey[dayKey(cell.date)] || []}
+              isSelected={selectedDay === dayKey(cell.date)}
+              onClick={() => setSelectedDay(dayKey(cell.date))}
+              onSelectProspecto={onSelectProspecto}
+            />
+          ))}
+        </div>
+        {monthEvents.length === 0 && (
+          <div className="cal-empty-month">
+            No hay eventos agendados en {NOMBRES_MES[cursor.getMonth()]} {cursor.getFullYear()}.
+          </div>
+        )}
+      </div>
+
+      {selectedDate && (
+        <DayDetails
+          date={selectedDate}
+          events={detailsEvents}
+          onClose={() => setSelectedDay(null)}
+          onSelectProspecto={onSelectProspecto}
+        />
+      )}
+    </>
+  );
+}
+
+// ── VISTA SEMANA / HOY (grid de horas) ────────────────────────
+function WeekCalendar({ anchorDate, events, settings, onSelectProspecto, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
+  const [showPicker, setShowPicker] = useState(false);
+  const HOUR_HEIGHT = 56;
+  const startHour = Math.max(0, Math.min(23, settings.workStartHour ?? 9));
+  const startMinSetting = Math.max(0, Math.min(59, settings.workStartMin ?? 0));
+  const endHour = Math.max(startHour + 1, Math.min(24, settings.workEndHour ?? 19));
+  const endMinSetting = Math.max(0, Math.min(59, settings.workEndMin ?? 0));
+  // Grid de horas: redondea hacia abajo el inicio y hacia arriba el fin para mostrar siempre horas enteras
+  const gridStartHour = startHour;
+  const gridEndHour = endMinSetting > 0 ? endHour + 1 : endHour;
+  const hours = [];
+  for (let h = gridStartHour; h < gridEndHour; h++) hours.push(h);
+  const slotMin = settings.slotDurationMin || 60;
+  const startMinTotal = startHour * 60 + startMinSetting;
+  const endMinTotal = endHour * 60 + endMinSetting;
+
+  // Build days array
+  const start = singleDay ? new Date(anchorDate) : startOfWeek(anchorDate);
+  start.setHours(0,0,0,0);
+  const days = [];
+  for (let i = 0; i < ndays; i++) days.push(addDays(start, i));
+
+  const lastDay = days[days.length-1];
+  let title;
+  if (singleDay) {
+    title = formatLargeDate(start);
+  } else if (start.getMonth() === lastDay.getMonth()) {
+    title = `${start.getDate()} - ${lastDay.getDate()} ${NOMBRES_MES[start.getMonth()]} ${start.getFullYear()}`;
+  } else {
+    title = `${start.getDate()} ${NOMBRES_MES[start.getMonth()].slice(0,3)} - ${lastDay.getDate()} ${NOMBRES_MES[lastDay.getMonth()].slice(0,3)} ${lastDay.getFullYear()}`;
+  }
+
+  const totalHeight = HOUR_HEIGHT * hours.length;
+  const gridCols = `60px repeat(${ndays}, 1fr)`;
+
+  // Eventos por día (solo en rango de horas mostrado)
+  const eventsByDay = days.map(d =>
+    events.filter(e => isSameDay(new Date(e.fecha), d))
+  );
+
+  const now = new Date();
+
+  // Línea del "ahora" si hoy está visible y dentro del rango horario
+  const todayIdx = days.findIndex(d => isSameDay(d, now));
+  let nowLineTop = null;
+  if (todayIdx >= 0) {
+    const nowMin = (now.getHours() - gridStartHour) * 60 + now.getMinutes();
+    if (nowMin >= 0 && nowMin <= (gridEndHour - gridStartHour) * 60) {
+      nowLineTop = (nowMin / 60) * HOUR_HEIGHT;
+    }
+  }
+
+  return (
+    <div className="cal-wrap">
+      <div className="cal-header">
+        <div style={{display:'flex', alignItems:'center', gap:14}}>
+          <div className="cal-title clickable" onClick={() => setShowPicker(s => !s)}
+            title="Click para saltar a otro mes/año">
+            {title}
+            <span className="cal-title-caret">▾</span>
+            {showPicker && (
+              <MonthYearPicker
+                year={start.getFullYear()}
+                month={start.getMonth()}
+                onPick={onJumpTo}
+                onClose={() => setShowPicker(false)}
+              />
+            )}
+          </div>
+          {subTabs}
+        </div>
+        <div className="cal-nav">
+          <button className="cal-nav-btn cal-nav-arrow" onClick={goPrev}
+            title={singleDay ? 'Día anterior' : 'Semana anterior'}>‹</button>
+          <button className="cal-nav-btn" onClick={goToday}>Hoy</button>
+          <button className="cal-nav-btn cal-nav-arrow" onClick={goNext}
+            title={singleDay ? 'Día siguiente' : 'Semana siguiente'}>›</button>
+        </div>
+      </div>
+
+      <div className="cal-week-wrap">
+        <div className="cal-week-header" style={{gridTemplateColumns: gridCols}}>
+          <div className="cal-week-corner"></div>
+          {days.map(d => (
+            <div key={d.toISOString()} className={`cal-week-day-h ${isToday(d) ? 'today' : ''}`}>
+              <span className="dow">{DOW_CORTOS[(d.getDay()+6)%7]}</span>
+              <span className="num">{d.getDate()}</span>
+            </div>
+          ))}
+        </div>
+        <div className="cal-week-body" style={{gridTemplateColumns: gridCols}}>
+          <div className="cal-hours-col">
+            {hours.map(h => (
+              <div key={h} className="cal-hour-label" style={{height: HOUR_HEIGHT}}>
+                {pad2(h)}:00
+              </div>
+            ))}
+          </div>
+          {days.map((d, dIdx) => (
+            <div key={d.toISOString()} className="cal-day-col" style={{height: totalHeight}}>
+              {hours.map(h => (
+                <div key={h} className="cal-hour-cell" style={{height: HOUR_HEIGHT}}></div>
+              ))}
+              {dIdx === todayIdx && nowLineTop != null && (
+                <div className="cal-now-line" style={{top: nowLineTop}}></div>
+              )}
+              {eventsByDay[dIdx].map(e => {
+                const ev = new Date(e.fecha);
+                const evMin = ev.getHours() * 60 + ev.getMinutes();
+                const offsetMin = evMin - gridStartHour * 60;
+                if (offsetMin < 0 || offsetMin >= (gridEndHour - gridStartHour) * 60) {
+                  return null;
+                }
+                const dur = e.duracionMin || slotMin;
+                const top = (offsetMin / 60) * HOUR_HEIGHT;
+                const height = Math.max(28, (dur / 60) * HOUR_HEIGHT - 2);
+                const cfg = tipoConfig(e.tipo);
+                const vencido = ev < now && !isToday(ev);
+                return (
+                  <div key={e.id}
+                    className={`cal-week-event ${vencido ? 'vencido' : ''}`}
+                    style={{
+                      top: top, height,
+                      background: cfg?.bg || '#f3f4f6',
+                      borderLeftColor: cfg?.color || '#6b7280',
+                      color: cfg?.color || 'var(--texto)'
+                    }}
+                    title={`${formatHHMM(e.fecha)} · ${e.prospectoNombre}${e.observacion ? ' — ' + e.observacion : ''}`}
+                    onClick={() => onSelectProspecto(e.prospectoId)}
+                  >
+                    <div className="event-time">{formatHHMM(e.fecha)} · {dur}min</div>
+                    <div className="event-name">{e.prospectoNombre}</div>
+                    {height > 50 && e.observacion && (
+                      <div className="event-obs">{e.observacion}</div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectProspecto }) {
+  const today = isToday(date);
+  const cls = [
+    'cal-day',
+    outOfMonth ? 'out' : '',
+    today ? 'today' : '',
+    isSelected ? 'selected' : ''
+  ].filter(Boolean).join(' ');
+
+  const visibles = events.slice(0, 3);
+  const restantes = events.length - visibles.length;
+  const now = new Date();
+
+  return (
+    <div className={cls} onClick={onClick}>
+      <span className="cal-day-num">{date.getDate()}</span>
+      {visibles.map(e => {
+        const cfg = tipoConfig(e.tipo);
+        const fechaEv = new Date(e.fecha);
+        const vencido = fechaEv < now && !isToday(fechaEv);
+        return (
+          <div
+            key={e.id}
+            className={`cal-event ${vencido ? 'vencido' : ''}`}
+            style={{
+              background: cfg?.bg || '#f3f4f6',
+              borderLeftColor: cfg?.color || '#6b7280',
+              color: cfg?.color || 'var(--texto)'
+            }}
+            title={`${e.prospectoNombre}${e.observacion ? ' — ' + e.observacion : ''}`}
+            onClick={(ev) => { ev.stopPropagation(); onSelectProspecto(e.prospectoId); }}
+          >
+            <span className="cal-event-time">{formatHHMM(e.fecha)}</span>
+            {e.prospectoNombre}
+          </div>
+        );
+      })}
+      {restantes > 0 && (
+        <div className="cal-more">+{restantes} más</div>
+      )}
+    </div>
+  );
+}
+
+function DayDetails({ date, events, onClose, onSelectProspecto }) {
+  return (
+    <div className="day-details">
+      <div className="day-details-header">
+        <h3>{formatLargeDate(date)}</h3>
+        <button className="modal-close" style={{
+          background:'#f3f4f6', color:'var(--texto-suave)'
+        }} onClick={onClose}>×</button>
+      </div>
+      {events.length === 0 ? (
+        <div style={{color:'var(--texto-suave)', fontStyle:'italic', fontSize:'0.9rem'}}>
+          Sin eventos agendados para este día.
+        </div>
+      ) : (
+        <div className="day-details-list">
+          {events.map(e => {
+            const cfg = tipoConfig(e.tipo);
+            return (
+              <div
+                key={e.id}
+                className="day-event"
+                style={{ borderLeftColor: cfg?.color || '#6b7280' }}
+                onClick={() => onSelectProspecto(e.prospectoId)}
+              >
+                <span className="day-event-time">{formatHHMM(e.fecha)}</span>
+                <span className="chip" style={{color: cfg?.color, background: cfg?.bg}}>
+                  {cfg?.label || e.tipo}
+                </span>
+                <span className="day-event-name">{e.prospectoNombre}</span>
+                {e.observacion && <span className="day-event-obs">{e.observacion}</span>}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── SETTINGS MODAL ─────────────────────────────────────────────
+function SettingsModal({ settings, onCancel, onSave }) {
+  const [form, setForm] = useState({
+    workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
+    workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
+    slotDurationMin: settings.slotDurationMin,
+    includeWeekends: !!settings.includeWeekends
+  });
+
+  const upd = (k, v) => setForm(f => ({...f, [k]: v}));
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const guardar = () => {
+    const ts = parseHoraFlex(form.workStart);
+    const te = parseHoraFlex(form.workEnd);
+    if (!ts) { alert('Hora de inicio inválida'); return; }
+    if (!te) { alert('Hora de fin inválida'); return; }
+    const startMin = ts.h * 60 + ts.m;
+    const endMin = te.h * 60 + te.m;
+    if (endMin <= startMin) { alert('La hora de fin debe ser mayor que la de inicio'); return; }
+    const dur = parseInt(form.slotDurationMin, 10);
+    if (isNaN(dur) || dur < 15 || dur > 240) { alert('Duración entre 15 y 240 min'); return; }
+    onSave({
+      workStartHour: ts.h,
+      workStartMin: ts.m,
+      workEndHour: te.h,
+      workEndMin: te.m,
+      slotDurationMin: dur,
+      includeWeekends: !!form.includeWeekends
+    });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true">
+        <div className="modal-header">
+          <h3>Ajustes</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div className="settings-section">
+            <h4>Horario laboral</h4>
+            <div className="field-row">
+              <div className="field">
+                <label>Hora de inicio (24h)</label>
+                <HoraTexto value={form.workStart} onChange={(v) => upd('workStart', v)} />
+              </div>
+              <div className="field">
+                <label>Hora de fin (24h)</label>
+                <HoraTexto value={form.workEnd} onChange={(v) => upd('workEnd', v)} />
+              </div>
+            </div>
+            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
+              Acepta formato HH:MM (ej: 09:30, 18:30). También se puede tipear sin separador (930 = 09:30).
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h4>Duración por defecto de reuniones</h4>
+            <div className="field">
+              <label>Minutos</label>
+              <select value={form.slotDurationMin}
+                onChange={e => upd('slotDurationMin', e.target.value)}>
+                <option value="15">15 min</option>
+                <option value="30">30 min</option>
+                <option value="45">45 min</option>
+                <option value="60">60 min</option>
+                <option value="90">90 min</option>
+                <option value="120">120 min</option>
+              </select>
+            </div>
+            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
+              Es el bloque de tiempo que se reserva al elegir AGENDADO. Editable por reunión.
+            </div>
+          </div>
+
+          <div className="settings-section">
+            <h4>Vista del calendario</h4>
+            <div className="toggle-row">
+              <label htmlFor="cb-finde">Incluir fin de semana en vista Semana</label>
+              <div
+                id="cb-finde"
+                className={`toggle-switch ${form.includeWeekends ? 'on' : ''}`}
+                onClick={() => upd('includeWeekends', !form.includeWeekends)}
+                role="switch"
+                aria-checked={form.includeWeekends}
+              />
+            </div>
+            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
+              Si está activado: vista Semana muestra 7 días (Lun-Dom). Si no: solo días hábiles (Lun-Vie).
+            </div>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-primary" onClick={guardar}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+window.__abordajeMount = function() {
+  const root = ReactDOM.createRoot(document.getElementById('reactRoot'));
+  root.render(<App />);
+};
+
+window.__abordajeMount();
+</script>
+
+</body>
+</html>

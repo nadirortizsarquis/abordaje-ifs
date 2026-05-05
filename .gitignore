@@ -1,0 +1,7 @@
+# macOS
+.DS_Store
+
+# Build / dependencias
+node_modules/
+public/
+.env
