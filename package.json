@@ -1,14 +1,13 @@
 {
   "name": "planificador-abordaje-ifs",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
-  "description": "Planificador de Abordaje IFS — Gestión de prospectos y agenda comercial",
+  "description": "Planificador de Abordaje IFS — Gestión de prospectos y agenda comercial (Supabase)",
   "scripts": {
-    "build": "staticrypt index.html -p \"$STATICRYPT_PASSWORD\" --short --template ifs_template.html -d public",
+    "build": "mkdir -p public && cp index.html public/index.html",
     "start": "serve public -l ${PORT:-3000} --no-clipboard"
   },
   "dependencies": {
-    "staticrypt": "^3.5.4",
     "serve": "^14.2.0"
   },
   "engines": {
