@@ -284,38 +284,7 @@
     display: flex; justify-content: flex-end; gap: 10px;
   }
 
-  /* ── INSTRUCCIONES MODAL ── */
-  .help-modal { max-width: 720px; max-height: 86vh; }
-  .help-modal .modal-body {
-    overflow-y: auto;
-    max-height: calc(86vh - 64px - 70px);
-  }
-  .help-section { margin-bottom: 22px; }
-  .help-section:last-child { margin-bottom: 0; }
-  .help-section h4 {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: var(--azul-oscuro);
-    margin-bottom: 10px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid var(--azul);
-    display: inline-block;
-  }
-  .help-section p {
-    font-size: 0.92rem;
-    color: var(--texto);
-    line-height: 1.6;
-    margin-bottom: 8px;
-  }
-  .help-section ul, .help-section ol {
-    font-size: 0.92rem;
-    color: var(--texto);
-    line-height: 1.65;
-    padding-left: 22px;
-    margin: 6px 0 4px;
-  }
-  .help-section ul li, .help-section ol li { margin-bottom: 4px; }
-  .help-section strong { color: var(--azul-oscuro); }
+  /* ── CALLOUT (info contextual en modales) ── */
   .help-callout {
     background: rgba(0,152,218,0.07);
     border-left: 3px solid var(--azul);
@@ -335,25 +304,6 @@
     border-left-color: #dc2626;
   }
   .help-callout strong { display: block; margin-bottom: 4px; color: inherit; }
-  .help-status-row {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 8px 14px;
-    align-items: center;
-    margin: 10px 0;
-    font-size: 0.87rem;
-  }
-  .help-status-pill {
-    padding: 4px 11px;
-    border-radius: 8px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    text-align: center;
-    white-space: nowrap;
-  }
-  .help-status-pill.ok     { background: rgba(16, 185, 129, 0.18); color: #047857; }
-  .help-status-pill.warn   { background: rgba(251, 146, 60, 0.20); color: #c2410c; }
-  .help-status-pill.danger { background: rgba(220, 38, 38, 0.18); color: #b91c1c; }
 
   /* ── KANBAN TAREAS ─ violeta #7c3aed para distinguir de estados de prospecto ── */
   .kanban-wrap {
@@ -938,46 +888,6 @@
     background: var(--azul-oscuro); color: white; border-color: var(--azul-oscuro);
   }
   .btn-mini.primary:hover { background: var(--azul); border-color: var(--azul); }
-
-  /* ── BACKUP INDICATOR ── */
-  .backup-info {
-    font-size: 0.75rem;
-    color: var(--texto-suave);
-    margin-top: 4px;
-  }
-  .backup-info.ok     { color: #047857; font-weight: 500; }
-  .backup-info.warn   { color: #c2410c; font-weight: 500; }
-  .backup-info.danger { color: #b91c1c; font-weight: 600; }
-
-  /* ── BACKUP INFO en header ── */
-  .header-backup {
-    font-size: 0.72rem;
-    color: rgba(255,255,255,0.65);
-    letter-spacing: 0.3px;
-    padding: 6px 12px;
-    border-radius: 8px;
-    background: rgba(255,255,255,0.06);
-    border: 1px solid rgba(255,255,255,0.14);
-    white-space: nowrap;
-    user-select: none;
-    transition: color 0.2s ease, background 0.2s ease, border-color 0.2s ease;
-  }
-  .header-backup.ok {
-    color: #6ee7b7;
-    background: rgba(16, 185, 129, 0.14);
-    border-color: rgba(16, 185, 129, 0.42);
-  }
-  .header-backup.warn {
-    color: #fdba74;
-    background: rgba(251, 146, 60, 0.14);
-    border-color: rgba(251, 146, 60, 0.42);
-  }
-  .header-backup.danger {
-    color: #fca5a5;
-    background: rgba(220, 38, 38, 0.16);
-    border-color: rgba(220, 38, 38, 0.50);
-    font-weight: 600;
-  }
 
   /* ── FILTER BAR ── */
   .filter-bar {
@@ -1656,7 +1566,6 @@
   /* ── RESPONSIVE ── */
   @media (max-width: 900px) {
     .col-referente, .col-pref { display: none; }
-    .header-backup { display: none; }
   }
   @media (max-width: 720px) {
     .main { padding: 20px 16px; }
@@ -2022,18 +1931,6 @@ const storage = {
   async deleteAgendado(id) {
     const { error } = await sb.from('abordaje_agendados').delete().eq('id', id);
     if (error) throw error;
-  },
-
-  // ── Backup local del state actual (no consulta DB, usa lo ya cargado) ──
-  exportJSON(state) {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const ts = new Date().toISOString().slice(0,10);
-    a.href = url;
-    a.download = `abordaje_backup_${ts}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   }
 };
 
@@ -2239,32 +2136,6 @@ function calcAgendadoPara(tipo, custom) {
   }
 }
 
-// ── BACKUP HELPERS ─────────────────────────────────────────────
-const LAST_BACKUP_KEY = 'abordaje_last_backup';
-function getLastBackup() {
-  const v = localStorage.getItem(LAST_BACKUP_KEY);
-  return v ? new Date(v) : null;
-}
-function markBackup() {
-  localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
-}
-function backupAge() {
-  const last = getLastBackup();
-  if (!last) return { texto: 'Sin backup', status: 'danger' };
-  const ahora = new Date();
-  const dias = diasEntre(ahora, last);
-  const horas = (ahora - last) / 3600000;
-  const hh = pad2(last.getHours());
-  const mm = pad2(last.getMinutes());
-  const fecha = `${pad2(last.getDate())}/${pad2(last.getMonth() + 1)}`;
-
-  if (horas < 1)   return { texto: `Backup ${fecha} ${hh}:${mm}`,                status: 'ok' };
-  if (dias === 0)  return { texto: `Backup hoy ${hh}:${mm} (${fecha})`,         status: 'ok' };
-  if (dias === 1)  return { texto: `Backup ayer ${hh}:${mm} (${fecha})`,        status: 'warn' };
-  if (dias <= 5)   return { texto: `Backup hace ${dias}d (${fecha} ${hh}:${mm})`, status: 'warn' };
-  return { texto: `Backup hace ${dias}d (${fecha})`, status: 'danger' };
-}
-
 function showToast(msg, opts = {}) {
   const { actionLabel, action, duration = 2400, dismissible = false } = opts;
   const existing = document.querySelector('.toast');
@@ -2414,14 +2285,12 @@ function App({ user, onLogout }) {
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showInstrucciones, setShowInstrucciones] = useState(false);
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [view, setView] = useState('lista');
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
-  const [, forceUpdate] = useState(0);
 
   // Carga inicial desde Supabase
   useEffect(() => {
@@ -2582,74 +2451,6 @@ function App({ user, onLogout }) {
     } catch (e) { handleErr(e, 'deleteContacto'); }
   };
 
-  const handleExport = () => {
-    storage.exportJSON(state);
-    markBackup();
-    forceUpdate(x => x + 1);
-    showToast('Backup descargado');
-  };
-
-  const handleEmailBackup = () => {
-    const count = (state.prospectos || []).length;
-    const ts = new Date().toISOString().slice(0,10);
-    storage.exportJSON(state);
-    markBackup();
-    forceUpdate(x => x + 1);
-    setTimeout(() => {
-      const subject = `Backup Planificador de Abordaje - ${ts}`;
-      const body = `Backup del Planificador de Abordaje al ${ts}.\n\nProspectos: ${count}\n\nAdjuntá el archivo "abordaje_backup_${ts}.json" (descargado a tu carpeta de Descargas) y enviá este mail a tu cuenta de email.`;
-      window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    }, 250);
-    showToast('Backup descargado, abriendo mail');
-  };
-
-  // Importación deshabilitada en v2 — ahora la fuente de verdad es Supabase.
-  // Si querés re-importar un backup viejo, hablamos: hay que escribirlo a la DB.
-  const handleImportClick = () => {
-    alert('Importación desde JSON está deshabilitada — los datos viven en Supabase. Si necesitás restaurar un backup viejo, decime.');
-  };
-  const handleImportFile = (e) => { e.target.value = ''; };
-
-  // ── BACKUP REMINDERS ──
-  // handleExport vive en una ref para que los timers no se rearmen en cada render.
-  const handleExportRef = useRef(handleExport);
-  handleExportRef.current = handleExport;
-
-  useEffect(() => {
-    const checkBackup = () => {
-      const last = getLastBackup();
-      const horas = last ? (Date.now() - last.getTime()) / 3600000 : Infinity;
-      if (horas >= 1) {
-        showToast(
-          last ? 'Hace tiempo que no hacés backup' : 'Todavía no hiciste tu primer backup',
-          {
-            actionLabel: 'Descargar',
-            action: () => handleExportRef.current(),
-            duration: 9000,
-            dismissible: true,
-          }
-        );
-      }
-    };
-    // primer chequeo a los 5 min de carga (no apenas abre la app)
-    const initialTimer = setTimeout(checkBackup, 5 * 60 * 1000);
-    // luego cada hora
-    const interval = setInterval(checkBackup, 60 * 60 * 1000);
-    return () => { clearTimeout(initialTimer); clearInterval(interval); };
-  }, []);
-
-  useEffect(() => {
-    const onBefore = (e) => {
-      const last = getLastBackup();
-      const horas = last ? (Date.now() - last.getTime()) / 3600000 : Infinity;
-      if (horas >= 1) {
-        e.preventDefault();
-        e.returnValue = '';
-      }
-    };
-    window.addEventListener('beforeunload', onBefore);
-    return () => window.removeEventListener('beforeunload', onBefore);
-  }, []);
 
   // ── TAREAS HANDLERS ──
   const handleAddTarea = async (columnaId, titulo = '') => {
@@ -2814,7 +2615,6 @@ function App({ user, onLogout }) {
   };
 
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
-  const backupStatus = backupAge();
 
   const filtrados = useMemo(
     () => aplicarFiltros(state.prospectos, filterEstado, filterFecha),
@@ -2836,20 +2636,7 @@ function App({ user, onLogout }) {
       <HeaderActions
         user={user}
         onLogout={onLogout}
-        onExport={handleExport}
-        onImport={handleImportClick}
-        onMail={handleEmailBackup}
         onOpenSettings={() => setShowSettings(true)}
-        onOpenInstrucciones={() => setShowInstrucciones(true)}
-        backupTexto={backupStatus.texto}
-        backupStatus={backupStatus.status}
-      />
-      <input
-        id="importInput"
-        type="file"
-        accept=".json,application/json"
-        style={{display:'none'}}
-        onChange={handleImportFile}
       />
 
       <div className="main-head">
@@ -2945,10 +2732,6 @@ function App({ user, onLogout }) {
         />
       )}
 
-      {showInstrucciones && (
-        <InstruccionesModal onClose={() => setShowInstrucciones(false)} />
-      )}
-
       {tareaEditando && (
         <TareaModal
           tarea={tareaEditando}
@@ -2989,18 +2772,11 @@ function App({ user, onLogout }) {
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, onLogout, onExport, onImport, onMail, onOpenSettings, onOpenInstrucciones, backupTexto, backupStatus }) {
+function HeaderActions({ user, onLogout, onOpenSettings }) {
   useEffect(() => {
     const target = document.getElementById('headerActions');
     if (!target) return;
     target.innerHTML = '';
-    // Backup indicator (a la izquierda de los botones)
-    const bk = document.createElement('div');
-    bk.className = 'header-backup ' + (backupStatus || 'ok');
-    bk.textContent = backupTexto;
-    bk.title = 'Estado del último backup local';
-    target.appendChild(bk);
-    // Botones
     const mk = (txt, title, fn) => {
       const b = document.createElement('button');
       b.className = 'header-btn';
@@ -3009,11 +2785,7 @@ function HeaderActions({ user, onLogout, onExport, onImport, onMail, onOpenSetti
       b.onclick = fn;
       return b;
     };
-    target.appendChild(mk('Instrucciones', 'Cómo usar Abordaje', onOpenInstrucciones));
     target.appendChild(mk('Ajustes', 'Configurar rango horario, duración y vista', onOpenSettings));
-    target.appendChild(mk('Enviar por mail', 'Descargar backup y abrir cliente de mail', onMail));
-    target.appendChild(mk('Exportar', 'Descargar backup JSON', onExport));
-    // Email del user logueado + botón salir
     if (user) {
       const sep = document.createElement('div');
       sep.style.cssText = 'width:1px;height:22px;background:rgba(255,255,255,0.18);margin:0 4px;';
@@ -3025,7 +2797,7 @@ function HeaderActions({ user, onLogout, onExport, onImport, onMail, onOpenSetti
       target.appendChild(u);
       target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
     }
-  }, [user, onLogout, onExport, onImport, onMail, onOpenSettings, onOpenInstrucciones, backupTexto, backupStatus]);
+  }, [user, onLogout, onOpenSettings]);
   return null;
 }
 
@@ -4391,113 +4163,6 @@ function SettingsModal({ settings, onCancel, onSave }) {
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={guardar}>Guardar</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── INSTRUCCIONES MODAL ───────────────────────────────────────
-function InstruccionesModal({ onClose }) {
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  return (
-    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal help-modal" role="dialog" aria-modal="true">
-        <div className="modal-header">
-          <h3>Instrucciones de uso</h3>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
-        </div>
-        <div className="modal-body">
-
-          <div className="help-section">
-            <h4>Cómo funciona Abordaje</h4>
-            <p>
-              Esta aplicación guarda toda tu información (prospectos, gestiones, agenda)
-              <strong> en este mismo browser</strong>, en tu computadora.
-              <strong> No está en internet ni en un servidor.</strong>
-            </p>
-            <div className="help-callout danger">
-              <strong>Esto significa que:</strong>
-              Si limpiás los datos del browser, formateás la computadora, o la perdés sin haber hecho un backup, se pierden todos tus prospectos. Por eso es muy importante hacer backup seguido.
-            </div>
-          </div>
-
-          <div className="help-section">
-            <h4>Backup: tu única red de seguridad</h4>
-            <p>
-              El "backup" es un archivo JSON con todos tus datos. Lo descargás a tu carpeta de Descargas y lo guardás en un lugar seguro (Google Drive, Dropbox, mail a vos mismo, pendrive, etc).
-            </p>
-            <ul>
-              <li><strong>Botón Exportar</strong>: descarga el archivo a Descargas. Hacelo cada vez que termines de trabajar.</li>
-              <li><strong>Botón Enviar por mail</strong>: descarga el archivo y abre tu cliente de mail listo para enviar (recomendado para tener una copia diaria sin olvidarte).</li>
-              <li><strong>Botón Importar</strong>: si perdiste todo, seleccionás el archivo JSON y se restaura la información.</li>
-            </ul>
-          </div>
-
-          <div className="help-section">
-            <h4>Cómo te avisa la app</h4>
-            <p>
-              Arriba a la derecha del header tenés un cartel con el estado del último backup. El color te indica si estás al día o no:
-            </p>
-            <div className="help-status-row">
-              <span className="help-status-pill ok">Verde</span>
-              <span>Hiciste backup en las últimas 24 horas. Tranquilo.</span>
-              <span className="help-status-pill warn">Naranja</span>
-              <span>Pasó más de un día sin backup. Conviene hacer ya.</span>
-              <span className="help-status-pill danger">Rojo</span>
-              <span>Nunca hiciste backup, o pasaron más de 5 días. Urgente.</span>
-            </div>
-            <p>Además:</p>
-            <ul>
-              <li>Cada hora sin backup, aparece un mensaje abajo de la pantalla con un botón "Descargar" para hacerlo en un click.</li>
-              <li>Si intentás cerrar la pestaña sin haber hecho backup en más de 1 hora, el browser te pregunta si estás seguro.</li>
-            </ul>
-          </div>
-
-          <div className="help-section">
-            <h4>Si perdés todo</h4>
-            <p>Mientras tengas el archivo JSON guardado, podés recuperar todo:</p>
-            <ol>
-              <li>Abrí Abordaje en tu browser.</li>
-              <li>Click en <strong>Importar</strong> (botón del header).</li>
-              <li>Seleccioná el archivo JSON que tenías guardado.</li>
-              <li>Listo: todos tus prospectos y gestiones vuelven como estaban.</li>
-            </ol>
-          </div>
-
-          <div className="help-section">
-            <h4>Qué evitar</h4>
-            <ul>
-              <li><strong>No uses modo incógnito.</strong> En modo incógnito todo se borra al cerrar la pestaña, sin avisarte.</li>
-              <li><strong>No "limpies datos del sitio"</strong> ni "borres caché completo" del browser sin haber hecho backup antes — perdés todo.</li>
-              <li><strong>No asumas que la data está sincronizada en la nube.</strong> Vive solo en este browser. Si abrís Abordaje en otra computadora o en el celular, vas a ver una lista vacía (a menos que importes el backup).</li>
-            </ul>
-          </div>
-
-          <div className="help-section">
-            <h4>Trabajar desde varios dispositivos</h4>
-            <p>
-              Cada browser tiene su propia copia. No hay sincronización automática. Si querés trabajar desde la PC y el celular:
-            </p>
-            <ol>
-              <li>En la PC: click en <strong>Enviar por mail</strong> o <strong>Exportar</strong>.</li>
-              <li>Abrí el archivo JSON en el otro dispositivo (desde el mail o Drive).</li>
-              <li>En el otro dispositivo: abrí Abordaje y hacé <strong>Importar</strong>.</li>
-            </ol>
-            <div className="help-callout warn">
-              <strong>Cuidado:</strong>
-              Importar reemplaza TODO lo que tengas en el browser actual con el contenido del archivo. Si trabajaste en ambos dispositivos sin sincronizar, vas a perder lo más reciente del que importás encima.
-            </div>
-          </div>
-
-        </div>
-        <div className="modal-footer">
-          <button className="btn-primary" onClick={onClose}>Entendido</button>
         </div>
       </div>
     </div>
