@@ -829,29 +829,63 @@
 
   /* ── HISTORIAL ── */
   .historial-list {
-    display: flex; flex-direction: column; gap: 10px;
+    display: flex; flex-direction: column; gap: 6px;
   }
   .historial-item {
     background: white;
     border: 1px solid var(--borde);
-    border-radius: 10px;
-    padding: 11px 14px;
-    display: flex; flex-direction: column; gap: 4px;
+    border-radius: 8px;
+    padding: 8px 12px;
   }
-  .historial-item .top {
-    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  .historial-row {
+    display: flex; align-items: center; gap: 10px;
+    min-width: 0;
   }
-  .historial-item .obs {
-    font-size: 0.85rem;
-    color: var(--texto);
-    line-height: 1.4;
+  .hist-fecha-reg {
+    font-size: 0.74rem;
+    color: var(--texto-suave);
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 78px;
   }
-  .historial-item .obs:empty { display: none; }
-  .historial-item .agendado-line {
+  .historial-row .chip {
+    flex-shrink: 0;
+  }
+  .hist-fecha-obj {
     font-size: 0.78rem;
     color: var(--azul-oscuro);
     font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
   }
+  .hist-fecha-obj::before {
+    content: '→';
+    margin-right: 4px;
+    color: var(--texto-suave);
+    font-weight: 400;
+  }
+  .hist-obs {
+    font-size: 0.82rem;
+    color: var(--texto);
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .historial-row .btn-edit-mini,
+  .historial-row .btn-hist-del {
+    flex-shrink: 0;
+  }
+  .btn-hist-del {
+    background: transparent; border: none;
+    color: var(--texto-suave); cursor: pointer;
+    font-size: 0.95rem; padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+  }
+  .btn-hist-del:hover { background: rgba(220,38,38,0.1); color: var(--estado-rechazado); }
   .historial-vacio {
     color: var(--texto-suave);
     font-size: 0.85rem;
@@ -1654,7 +1688,8 @@ function mapContactoFromDB(c) {
     fecha: c.fecha,
     hora: c.hora,
     observacion: c.observacion || '',
-    agendadoPara
+    agendadoPara,
+    createdAt: c.created_at
   };
 }
 
@@ -3278,9 +3313,13 @@ function HistorialItem({ contacto, settings, onSave, onDelete }) {
     );
   }
 
+  const fechaRegistro = contacto.createdAt || contacto.fecha;
+  const tooltipObj = contacto.tipo === 'agendado' ? 'Cita' : 'Próximo contacto';
+
   return (
     <div className="historial-item">
-      <div className="top">
+      <div className="historial-row">
+        <span className="hist-fecha-reg" title="Registrado el">{formatFechaCorta(fechaRegistro)}</span>
         <span className="chip" style={{
           color: cfg?.color, background: cfg?.bg,
           padding: '3px 10px', borderRadius: 10, fontSize: '0.7rem',
@@ -3288,26 +3327,17 @@ function HistorialItem({ contacto, settings, onSave, onDelete }) {
         }}>
           {cfg?.label || contacto.tipo}
         </span>
-        <span style={{fontSize: '0.78rem', color: 'var(--texto-suave)'}}>
-          {formatFechaHora(contacto.fecha)}
-        </span>
+        {contacto.agendadoPara && (
+          <span className="hist-fecha-obj" title={tooltipObj}>
+            {formatFechaHora(contacto.agendadoPara)}
+          </span>
+        )}
+        {contacto.observacion && (
+          <span className="hist-obs" title={contacto.observacion}>{contacto.observacion}</span>
+        )}
         <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
-        <button onClick={onDelete}
-          style={{
-            background: 'transparent', border: 'none',
-            color: 'var(--texto-suave)', cursor: 'pointer', fontSize: '0.95rem',
-            padding: '2px 6px', marginLeft: 4
-          }}
-          title="Eliminar este registro"
-        >×</button>
+        <button className="btn-hist-del" onClick={onDelete} title="Eliminar este registro">×</button>
       </div>
-      {contacto.agendadoPara && (
-        <div className="agendado-line">
-          {contacto.tipo === 'agendado' ? 'Cita: ' : 'Próximo: '}
-          {formatFechaHora(contacto.agendadoPara)}
-        </div>
-      )}
-      {contacto.observacion && <div className="obs">{contacto.observacion}</div>}
     </div>
   );
 }
