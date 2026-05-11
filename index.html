@@ -2880,29 +2880,34 @@ function App({ user, onLogout }) {
   const handleDeleteContacto = async (prospectoId, contactoId) => {
     if (!confirm('¿Eliminar este registro de gestión?')) return;
     try {
+      const prevState = state;
+      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
+      if (!prospectAnterior) return;
+
+      // Determinar si el contacto borrado era el último (define el seguimiento vigente)
+      const contactosPrev = prospectAnterior.contactos || [];
+      const eraUltimo = contactosPrev[contactosPrev.length - 1]?.id === contactoId;
+
       await storage.deleteContacto(contactoId);
+
+      // Lista nueva de contactos + último nuevo
+      const contactosNuevos = contactosPrev.filter(c => c.id !== contactoId);
+      const nuevoUltimo = contactosNuevos[contactosNuevos.length - 1] || null;
+      const proxNuevo = nuevoUltimo?.agendadoPara || null;
+      const estadoNuevo = nuevoUltimo ? (tipoConfig(nuevoUltimo.tipo)?.estado || 'nuevo') : 'nuevo';
+
       setState(s => ({
         ...s,
-        prospectos: s.prospectos.map(p => {
-          if (p.id !== prospectoId) return p;
-          const contactos = (p.contactos || []).filter(c => c.id !== contactoId);
-          const ultimo = contactos[contactos.length - 1];
-          return {
-            ...p,
-            contactos,
-            proximoContacto: ultimo?.agendadoPara || null,
-            estado: ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo',
-            updatedAt: new Date().toISOString()
-          };
-        })
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: contactosNuevos, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
       }));
-      const p = state.prospectos.find(x => x.id === prospectoId);
-      if (p) {
-        const contactos = (p.contactos || []).filter(c => c.id !== contactoId);
-        const ultimo = contactos[contactos.length - 1];
-        const proxNuevo = ultimo?.agendadoPara || null;
-        const estadoNuevo = ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo';
-        await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+
+      // Si el contacto borrado era el último, resincronizamos tarea/agenda.
+      // sincronizarSeguimiento con nuevoUltimo (puede ser null → solo limpia).
+      if (eraUltimo) {
+        await sincronizarSeguimiento(prospectoId, nuevoUltimo, prevState);
       }
     } catch (e) { handleErr(e, 'deleteContacto'); }
   };
