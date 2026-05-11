@@ -1546,51 +1546,6 @@
     margin-bottom: 10px;
     display: flex; align-items: center; gap: 8px;
   }
-  .settings-tag {
-    background: #e0e7ff;
-    color: var(--azul-oscuro);
-    padding: 2px 7px;
-    border-radius: 8px;
-    font-size: 0.66rem;
-    font-weight: 700;
-    text-transform: none;
-    letter-spacing: 0;
-  }
-
-  /* Tabla de usuarios dentro del settings modal */
-  .usuarios-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.82rem;
-    margin-bottom: 6px;
-  }
-  .usuarios-table thead tr { border-bottom: 1.5px solid var(--borde); }
-  .usuarios-table th {
-    text-align: left;
-    padding: 8px 6px;
-    font-weight: 600;
-    color: var(--texto-suave);
-    font-size: 0.7rem;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-  .usuarios-table tbody tr { border-top: 1px solid var(--borde); }
-  .usuarios-table td { padding: 8px 6px; vertical-align: middle; }
-  .usuarios-table td input[type="text"] {
-    width: 100%; padding: 4px 8px;
-    border: 1px solid var(--borde); border-radius: 5px;
-    font-size: 0.8rem; font-family: inherit;
-  }
-  .usuarios-table td select {
-    padding: 5px 8px; border: 1px solid var(--borde); border-radius: 5px;
-    font-size: 0.8rem; font-weight: 600; font-family: inherit;
-    background: white;
-  }
-  .usuarios-table td select.role-admin { color: var(--azul-oscuro); }
-  .usuarios-yo {
-    color: var(--texto-suave); font-weight: 400; font-size: 0.74rem;
-    margin-left: 4px;
-  }
   .toggle-row {
     display: flex; align-items: center; justify-content: space-between;
     padding: 6px 0;
@@ -3311,7 +3266,7 @@ function App({ user, agente, onLogout }) {
           agente={agente}
           currentUser={user}
           onCancel={() => setShowSettings(false)}
-          onSave={(s) => { setSettings(s); persistSettings(s); setShowSettings(false); showToast('Ajustes guardados'); }}
+          onSave={(s) => { setSettings(s); persistSettings(s); showToast('Ajustes guardados'); }}
         />
       )}
 
@@ -4659,9 +4614,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 }
 
 // ── SETTINGS MODAL ─────────────────────────────────────────────
-// ── USUARIOS (sección embebida en SettingsModal, solo visible para admins) ─
-// Usa la tabla compartida public.profiles y la Edge Function 'create-user'.
-
+// ── PROFILES API (compartido entre apps IFS) ──────────────────
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
     .select('id, email, display_name, role, advisor_name_ole, created_at')
@@ -4676,10 +4629,8 @@ async function updateProfile(id, patch) {
   if (error) throw error;
 }
 
-async function callCreateUserEdgeFn({ email, password, display_name, role }) {
-  const { data, error } = await sb.functions.invoke('create-user', {
-    body: { email, password, display_name, role }
-  });
+async function createUser(payload) {
+  const { data, error } = await sb.functions.invoke('create-user', { body: payload });
   if (error) {
     const detail = data?.error || error.message;
     throw new Error(detail);
@@ -4687,107 +4638,289 @@ async function callCreateUserEdgeFn({ email, password, display_name, role }) {
   return data;
 }
 
+// ── UI primitivas y estilos (copia literal del patrón Comisiones) ─
+const adminOverlayStyle = {
+  position: 'fixed', inset: 0, zIndex: 1000,
+  background: 'rgba(15, 17, 41, 0.65)',
+  display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+  padding: '40px 24px',
+  backdropFilter: 'blur(4px)',
+};
+const adminModalStyle = {
+  width: '100%', maxWidth: 1000,
+  background: '#fff', borderRadius: 16,
+  boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
+  overflow: 'hidden',
+  display: 'flex', flexDirection: 'column',
+  maxHeight: 'calc(100vh - 80px)',
+};
+const adminHeaderStyle = {
+  padding: '18px 24px', borderBottom: '1px solid #e5e7eb',
+  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+  background: 'linear-gradient(135deg, #1e1b4b, #1e3a5f)',
+  color: '#fff', flexShrink: 0,
+};
+const adminCloseBtn = {
+  background: 'rgba(255,255,255,0.12)', color: '#fff',
+  border: '1px solid rgba(255,255,255,0.2)', borderRadius: 8,
+  padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+};
+const adminSectionStyle = {
+  padding: '22px 24px',
+  borderBottom: '1px solid #f3f4f6',
+};
+const adminSectionTitleStyle = {
+  margin: 0, fontSize: 14, fontWeight: 800, color: '#1e1b4b',
+  letterSpacing: '0.02em',
+};
+const adminSectionDescStyle = {
+  fontSize: 12, color: '#6b7280',
+  marginTop: 4, marginBottom: 0, lineHeight: 1.5,
+};
+const adminTdStyle = { padding: '10px 16px', verticalAlign: 'middle' };
+const adminInpStyle = {
+  border: '1px solid #d1d5db', borderRadius: 6,
+  padding: '6px 10px', fontSize: 13, outline: 'none',
+  background: '#fff', width: '100%', boxSizing: 'border-box',
+  fontFamily: 'inherit',
+};
+const adminBtnPrimary = {
+  background: '#1e3a5f', color: '#fff', border: 'none',
+  borderRadius: 6, padding: '6px 14px', fontSize: 12, fontWeight: 600,
+  cursor: 'pointer', marginLeft: 4,
+};
+const adminBtnGhost = {
+  background: 'transparent', color: '#4338ca',
+  border: '1px solid #c7d2fe', borderRadius: 6,
+  padding: '5px 12px', fontSize: 11, fontWeight: 600,
+  cursor: 'pointer', marginLeft: 4,
+};
+
+function AdminField({ label, hint, children }) {
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 5, flex: '0 1 auto' }}>
+      <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}
+      </span>
+      {children}
+      {hint && <span style={{ fontSize: 10, color: '#9ca3af' }}>{hint}</span>}
+    </label>
+  );
+}
+
+function AdminTh({ children, right }) {
+  return (
+    <th style={{
+      padding: '10px 16px', textAlign: right ? 'right' : 'left',
+      fontSize: 11, fontWeight: 700, color: '#6b7280',
+      textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap',
+    }}>
+      {children}
+    </th>
+  );
+}
+
+// ── SECCIÓN USUARIOS — copia literal del patrón Comisiones ─────
 function UsuariosSection({ currentUser }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [creating, setCreating] = useState(false);
+  const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent' });
+  const [createBusy, setCreateBusy] = useState(false);
 
-  const [creando, setCreando] = useState(false);
-  const [form, setForm] = useState({ email: '', password: '', display_name: '', role: 'asesor' });
-  const [createMsg, setCreateMsg] = useState('');
-
-  const cargar = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await loadAllProfiles();
-      setProfiles(data);
-      setError('');
-    } catch (e) { setError(e.message || String(e)); }
-    setLoading(false);
+  useEffect(() => {
+    let mounted = true;
+    loadAllProfiles().then(data => { if (mounted) { setProfiles(data); setLoading(false); } });
+    return () => { mounted = false; };
   }, []);
 
-  useEffect(() => { cargar(); }, [cargar]);
-
-  const cambiarRol = async (id, nuevoRole) => {
-    if (id === currentUser.id) { alert('No podés cambiar tu propio rol.'); return; }
-    if (!confirm(`¿Cambiar rol a "${nuevoRole}"?`)) return;
-    try {
-      await updateProfile(id, { role: nuevoRole });
-      setProfiles(prev => prev.map(p => p.id === id ? { ...p, role: nuevoRole } : p));
-      showToast('Rol actualizado');
-    } catch (e) { alert('Error: ' + e.message); }
+  const startEdit = p => {
+    setEditingId(p.id);
+    setDraft({
+      display_name: p.display_name || '',
+      advisor_name_ole: p.advisor_name_ole || '',
+      role: p.role || 'agent',
+    });
+    setError(null);
   };
+  const cancelEdit = () => { setEditingId(null); setError(null); };
 
-  const guardarDisplayName = async (id, display_name) => {
+  const save = async id => {
+    setSaving(true); setError(null);
     try {
-      await updateProfile(id, { display_name });
-      setProfiles(prev => prev.map(p => p.id === id ? { ...p, display_name } : p));
-    } catch (e) { alert('Error: ' + e.message); }
-  };
-
-  const crearUsuario = async () => {
-    setCreateMsg('');
-    const email = form.email.trim().toLowerCase();
-    if (!email || !form.password) { setCreateMsg('Email y contraseña son obligatorios.'); return; }
-    if (form.password.length < 6) { setCreateMsg('La contraseña debe tener al menos 6 caracteres.'); return; }
-    setCreando(true);
-    try {
-      await callCreateUserEdgeFn({
-        email,
-        password: form.password,
-        display_name: form.display_name.trim() || null,
-        role: form.role
+      await updateProfile(id, {
+        display_name: draft.display_name || null,
+        advisor_name_ole: draft.advisor_name_ole || null,
+        role: draft.role,
       });
-      setCreateMsg(`✓ Usuario ${email} creado.`);
-      setForm({ email: '', password: '', display_name: '', role: 'asesor' });
-      await cargar();
-    } catch (e) {
-      setCreateMsg('Error: ' + e.message);
-    } finally { setCreando(false); }
+      setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft } : p));
+      setEditingId(null);
+    } catch (err) { setError(err.message); }
+    setSaving(false);
+  };
+
+  const submitNewUser = async e => {
+    e.preventDefault();
+    setError(null); setCreateBusy(true);
+    try {
+      const created = await createUser(newUser);
+      setProfiles(ps => [created, ...ps]);
+      setNewUser({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent' });
+      setCreating(false);
+    } catch (err) { setError(err.message); }
+    setCreateBusy(false);
   };
 
   return (
-    <>
-      <div className="settings-section">
-        <h4>Usuarios <span className="settings-tag">{profiles.length}</span></h4>
-        {loading && <div style={{ color: 'var(--texto-suave)', fontSize: '0.85rem' }}>Cargando…</div>}
-        {error && <div style={{ color: 'var(--estado-rechazado)', fontSize: '0.85rem' }}>{error}</div>}
-        {!loading && profiles.length > 0 && (
-          <table className="usuarios-table">
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Nombre</th>
-                <th>Rol</th>
+    <section style={adminSectionStyle}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <h3 style={adminSectionTitleStyle}>👥 Usuarios</h3>
+        {!creating && (
+          <button onClick={() => { setCreating(true); setError(null); }} style={adminBtnPrimary}>
+            + Crear usuario
+          </button>
+        )}
+      </div>
+      <p style={adminSectionDescStyle}>
+        Compartidos entre todas las apps IFS (Tablero, Abordaje, BTP, etc.) — un
+        mismo email/contraseña entra en todas las herramientas bajo este Supabase.
+      </p>
+
+      {creating && (
+        <form onSubmit={submitNewUser} style={{
+          marginTop: 14, padding: 16,
+          background: '#eef2ff', border: '1px solid #c7d2fe',
+          borderRadius: 10,
+        }}>
+          <div style={{
+            fontSize: 12, fontWeight: 700, color: '#4338ca', marginBottom: 12,
+            textTransform: 'uppercase', letterSpacing: '0.05em',
+          }}>
+            Nuevo usuario
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+            <AdminField label="Email *">
+              <input type="email" required value={newUser.email}
+                onChange={e => setNewUser(u => ({ ...u, email: e.target.value }))}
+                placeholder="agente@ifs-broker.com" style={adminInpStyle} />
+            </AdminField>
+            <AdminField label="Contraseña * (mín 8)">
+              <input type="text" required minLength={8} value={newUser.password}
+                onChange={e => setNewUser(u => ({ ...u, password: e.target.value }))}
+                placeholder="Una contraseña fuerte" style={adminInpStyle} />
+            </AdminField>
+            <AdminField label="Nombre y apellido">
+              <input value={newUser.display_name}
+                onChange={e => setNewUser(u => ({ ...u, display_name: e.target.value }))}
+                placeholder="Hernán Cardona" style={adminInpStyle} />
+            </AdminField>
+            <AdminField label="Asesor OLE (exacto)">
+              <input value={newUser.advisor_name_ole}
+                onChange={e => setNewUser(u => ({ ...u, advisor_name_ole: e.target.value }))}
+                placeholder="HERNAN  CARDONA VALDES" style={adminInpStyle} />
+            </AdminField>
+            <AdminField label="Rol">
+              <select value={newUser.role}
+                onChange={e => setNewUser(u => ({ ...u, role: e.target.value }))}
+                style={{ ...adminInpStyle, cursor: 'pointer' }}>
+                <option value="agent">agent</option>
+                <option value="admin">admin</option>
+              </select>
+            </AdminField>
+          </div>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
+            <button type="button" onClick={() => { setCreating(false); setError(null); }} style={adminBtnGhost}>
+              Cancelar
+            </button>
+            <button type="submit" disabled={createBusy} style={adminBtnPrimary}>
+              {createBusy ? 'Creando…' : 'Crear usuario'}
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div style={{ marginTop: 14, overflowX: 'auto', borderRadius: 10, border: '1px solid #e5e7eb' }}>
+        {loading ? (
+          <div style={{ padding: 32, textAlign: 'center', color: '#9ca3af' }}>Cargando…</div>
+        ) : profiles.length === 0 ? (
+          <div style={{ padding: 32, textAlign: 'center', color: '#9ca3af' }}>Sin usuarios</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead style={{ background: '#f9fafb' }}>
+              <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                <AdminTh>Nombre</AdminTh>
+                <AdminTh>Email</AdminTh>
+                <AdminTh>Asesor OLE</AdminTh>
+                <AdminTh>Rol</AdminTh>
+                <AdminTh right>Acciones</AdminTh>
               </tr>
             </thead>
             <tbody>
               {profiles.map(p => {
-                const esYo = p.id === currentUser.id;
+                const isEditing = editingId === p.id;
                 return (
-                  <tr key={p.id}>
-                    <td style={{ fontWeight: 600 }}>
-                      {p.email} {esYo && <span className="usuarios-yo">(vos)</span>}
+                  <tr key={p.id} style={{
+                    borderBottom: '1px solid #f3f4f6',
+                    background: isEditing ? '#eef2ff' : 'transparent',
+                  }}>
+                    <td style={adminTdStyle}>
+                      {isEditing ? (
+                        <input value={draft.display_name}
+                          onChange={e => setDraft(d => ({ ...d, display_name: e.target.value }))}
+                          placeholder="Nombre y apellido" style={adminInpStyle} />
+                      ) : (
+                        <div style={{ fontWeight: 600, color: '#1e1b4b' }}>
+                          {p.display_name || <em style={{ color: '#9ca3af', fontWeight: 400 }}>sin nombre</em>}
+                        </div>
+                      )}
                     </td>
-                    <td>
-                      <input
-                        type="text"
-                        defaultValue={p.display_name || ''}
-                        placeholder="(sin nombre)"
-                        onBlur={(e) => { if (e.target.value !== (p.display_name || '')) guardarDisplayName(p.id, e.target.value); }}
-                      />
+                    <td style={{ ...adminTdStyle, color: '#6b7280', fontSize: 12 }}>{p.email}</td>
+                    <td style={adminTdStyle}>
+                      {isEditing ? (
+                        <input value={draft.advisor_name_ole}
+                          onChange={e => setDraft(d => ({ ...d, advisor_name_ole: e.target.value }))}
+                          placeholder="HERNAN  CARDONA VALDES" style={adminInpStyle} />
+                      ) : (
+                        <span style={{ fontSize: 11, color: '#6b7280', fontFamily: 'ui-monospace, monospace' }}>
+                          {p.advisor_name_ole || '—'}
+                        </span>
+                      )}
                     </td>
-                    <td>
-                      <select
-                        value={p.role}
-                        disabled={esYo}
-                        title={esYo ? 'No podés cambiar tu propio rol' : 'Cambiar rol'}
-                        onChange={(e) => cambiarRol(p.id, e.target.value)}
-                        className={p.role === 'admin' ? 'role-admin' : ''}
-                      >
-                        <option value="asesor">asesor</option>
-                        <option value="admin">admin</option>
-                      </select>
+                    <td style={adminTdStyle}>
+                      {isEditing ? (
+                        <select value={draft.role}
+                          onChange={e => setDraft(d => ({ ...d, role: e.target.value }))}
+                          style={{ ...adminInpStyle, cursor: 'pointer' }}>
+                          <option value="agent">agent</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      ) : (
+                        <span style={{
+                          display: 'inline-block', fontSize: 10, fontWeight: 800,
+                          textTransform: 'uppercase', letterSpacing: '0.06em',
+                          padding: '2px 8px', borderRadius: 4,
+                          background: p.role === 'admin' ? '#7dd3fc' : '#e5e7eb',
+                          color: p.role === 'admin' ? '#0c4a6e' : '#374151',
+                        }}>
+                          {p.role}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ ...adminTdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {isEditing ? (
+                        <>
+                          <button onClick={() => save(p.id)} disabled={saving} style={adminBtnPrimary}>
+                            {saving ? 'Guardando…' : 'Guardar'}
+                          </button>
+                          <button onClick={cancelEdit} style={adminBtnGhost}>Cancelar</button>
+                        </>
+                      ) : (
+                        <button onClick={() => startEdit(p)} style={adminBtnGhost}>Editar</button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -4797,47 +4930,16 @@ function UsuariosSection({ currentUser }) {
         )}
       </div>
 
-      <div className="settings-section">
-        <h4>+ Crear usuario</h4>
-        <div className="field-row">
-          <div className="field">
-            <label>Email</label>
-            <input type="email" value={form.email} onChange={(e) => setForm(f => ({...f, email: e.target.value}))} placeholder="asesor@ifs-broker.com" />
-          </div>
-          <div className="field">
-            <label>Contraseña inicial</label>
-            <input type="text" value={form.password} onChange={(e) => setForm(f => ({...f, password: e.target.value}))} placeholder="mínimo 6 caracteres" />
-          </div>
+      {error && (
+        <div style={{
+          marginTop: 12, padding: '10px 14px',
+          background: '#fef2f2', border: '1px solid #fecaca',
+          borderRadius: 8, fontSize: 12, color: '#dc2626',
+        }}>
+          {error}
         </div>
-        <div className="field-row">
-          <div className="field">
-            <label>Nombre (opcional)</label>
-            <input type="text" value={form.display_name} onChange={(e) => setForm(f => ({...f, display_name: e.target.value}))} placeholder="Federico Del Boca" />
-          </div>
-          <div className="field">
-            <label>Rol</label>
-            <select value={form.role} onChange={(e) => setForm(f => ({...f, role: e.target.value}))}>
-              <option value="asesor">asesor</option>
-              <option value="admin">admin</option>
-            </select>
-          </div>
-        </div>
-        {createMsg && (
-          <div className={`help-callout ${createMsg.startsWith('Error') ? 'danger' : ''}`} style={{ marginTop: 8 }}>
-            {createMsg}
-          </div>
-        )}
-        <div style={{ marginTop: 10 }}>
-          <button className="btn-primary" disabled={creando} onClick={crearUsuario}>
-            {creando ? 'Creando…' : '+ Crear usuario'}
-          </button>
-        </div>
-        <p style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 10, lineHeight: 1.5 }}>
-          El usuario queda con email confirmado y puede loguear inmediatamente.
-          El mismo email/contraseña sirve para todas las apps IFS (Comisiones, Abordaje, etc.).
-        </p>
-      </div>
-    </>
+      )}
+    </section>
   );
 }
 
@@ -4879,36 +4981,48 @@ function SettingsModal({ settings, agente, currentUser, onCancel, onSave }) {
 
   const esAdmin = agente?.role === 'admin';
   return (
-    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true" style={esAdmin ? { maxWidth: 720, maxHeight: '88vh' } : undefined}>
-        <div className="modal-header">
-          <h3>Ajustes {esAdmin && <span style={{fontSize:'0.62rem', fontWeight:600, background:'#7dd3fc', color:'#0c4a6e', padding:'2px 8px', borderRadius:6, marginLeft:10, letterSpacing:0.6, textTransform:'uppercase'}}>Admin</span>}</h3>
-          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
-        </div>
-        <div className="modal-body" style={esAdmin ? { overflowY: 'auto', maxHeight: 'calc(88vh - 130px)' } : undefined}>
-          <div className="settings-section">
-            <h4>Horario laboral</h4>
-            <div className="field-row">
-              <div className="field">
-                <label>Hora de inicio (24h)</label>
-                <HoraTexto value={form.workStart} onChange={(v) => upd('workStart', v)} />
-              </div>
-              <div className="field">
-                <label>Hora de fin (24h)</label>
-                <HoraTexto value={form.workEnd} onChange={(v) => upd('workEnd', v)} />
-              </div>
+    <div style={adminOverlayStyle} onClick={onCancel}>
+      <div style={adminModalStyle} onClick={e => e.stopPropagation()}>
+        <header style={adminHeaderStyle}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
+              Ajustes
             </div>
-            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
-              Acepta formato HH:MM (ej: 09:30, 18:30). También se puede tipear sin separador (930 = 09:30).
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>
+              {esAdmin ? 'Configuración personal + administración' : 'Configuración personal'}
             </div>
           </div>
+          <button onClick={onCancel} style={adminCloseBtn}>Cerrar</button>
+        </header>
 
-          <div className="settings-section">
-            <h4>Duración por defecto de reuniones</h4>
-            <div className="field">
-              <label>Minutos</label>
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          <section style={adminSectionStyle}>
+            <h3 style={adminSectionTitleStyle}>⚙ Configuración de Abordaje</h3>
+            <p style={adminSectionDescStyle}>
+              Aplica solo a tu vista. Horario laboral, duración default de citas y opciones del calendario.
+            </p>
+
+            <div style={{ marginTop: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Horario laboral
+              </div>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                <AdminField label="Hora inicio (24h)">
+                  <HoraTexto value={form.workStart} onChange={(v) => upd('workStart', v)} />
+                </AdminField>
+                <AdminField label="Hora fin (24h)">
+                  <HoraTexto value={form.workEnd} onChange={(v) => upd('workEnd', v)} />
+                </AdminField>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 18 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>
+                Duración default de reunión
+              </div>
               <select value={form.slotDurationMin}
-                onChange={e => upd('slotDurationMin', e.target.value)}>
+                onChange={e => upd('slotDurationMin', e.target.value)}
+                style={{ ...adminInpStyle, width: 'auto', cursor: 'pointer' }}>
                 <option value="15">15 min</option>
                 <option value="30">30 min</option>
                 <option value="45">45 min</option>
@@ -4917,35 +5031,28 @@ function SettingsModal({ settings, agente, currentUser, onCancel, onSave }) {
                 <option value="120">120 min</option>
               </select>
             </div>
-            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
-              Es el bloque de tiempo que se reserva al elegir AGENDADO. Editable por reunión.
-            </div>
-          </div>
 
-          <div className="settings-section">
-            <h4>Vista del calendario</h4>
-            <div className="toggle-row">
-              <label htmlFor="cb-finde">Incluir fin de semana en vista Semana</label>
+            <div style={{ marginTop: 18, display: 'flex', alignItems: 'center', gap: 12 }}>
               <div
-                id="cb-finde"
                 className={`toggle-switch ${form.includeWeekends ? 'on' : ''}`}
                 onClick={() => upd('includeWeekends', !form.includeWeekends)}
                 role="switch"
                 aria-checked={form.includeWeekends}
               />
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>Incluir fin de semana</div>
+                <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                  Vista Semana: ON = 7 días · OFF = solo Lun–Vie.
+                </div>
+              </div>
             </div>
-            <div style={{fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:6}}>
-              Si está activado: vista Semana muestra 7 días (Lun-Dom). Si no: solo días hábiles (Lun-Vie).
-            </div>
-          </div>
 
-          {agente?.role === 'admin' && (
-            <UsuariosSection currentUser={currentUser} />
-          )}
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button className="btn-primary" onClick={guardar}>Guardar</button>
+            <div style={{ marginTop: 18, display: 'flex', justifyContent: 'flex-end' }}>
+              <button onClick={guardar} style={adminBtnPrimary}>Guardar configuración</button>
+            </div>
+          </section>
+
+          {esAdmin && <UsuariosSection currentUser={currentUser} />}
         </div>
       </div>
     </div>
