@@ -356,13 +356,21 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
   }
+  .kanban-col-head:active { cursor: grabbing; }
+  .kanban-col.col-dragging { opacity: 0.5; }
+  .kanban-col.col-drop-before { box-shadow: -3px 0 0 0 var(--azul); }
+  .kanban-col.col-drop-after  { box-shadow:  3px 0 0 0 var(--azul); }
   .kanban-col-titulo {
     flex: 1;
     font-size: 0.84rem;
     font-weight: 700;
     color: var(--azul-oscuro);
     cursor: text;
+    user-select: text;
     padding: 3px 5px;
     border-radius: 5px;
     border: 1.5px solid transparent;
@@ -2224,6 +2232,24 @@ function calcAgendadoPara(tipo, custom) {
       d.setMinutes(d.getMinutes() + 15);
       return dateToLocalIso(d);
     }
+    case 'contestador': {
+      // Cuando deja contestador, lo re-agendamos solo para el próximo lunes 9am.
+      // Si HOY es lunes antes de las 9, se programa para hoy. Si es lunes a/después
+      // de las 9, salta al lunes siguiente.
+      const d = new Date();
+      const day = d.getDay(); // 0=Dom, 1=Lun, ..., 6=Sáb
+      let diasHastaLunes;
+      if (day === 1 && d.getHours() < 9) {
+        diasHastaLunes = 0;
+      } else if (day === 0) {
+        diasHastaLunes = 1;
+      } else {
+        diasHastaLunes = 8 - day; // 1..7
+      }
+      d.setDate(d.getDate() + diasHastaLunes);
+      d.setHours(9, 0, 0, 0);
+      return dateToLocalIso(d);
+    }
     case 'llamar_tarde': {
       const d = new Date();
       if (d.getHours() < 16) { d.setHours(17, 0, 0, 0); }
@@ -3001,6 +3027,32 @@ function App({ user, onLogout }) {
     } catch (e) { handleErr(e, 'createColumna'); }
   };
 
+  const handleMoveColumna = async (columnaId, targetColumnaId, position) => {
+    if (columnaId === targetColumnaId) return;
+    const prev = state.tareas.columnas;
+    const ordenadas = [...prev].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
+    const moving = ordenadas.find(c => c.id === columnaId);
+    if (!moving) return;
+    const sinMover = ordenadas.filter(c => c.id !== columnaId);
+    const targetIdx = sinMover.findIndex(c => c.id === targetColumnaId);
+    if (targetIdx === -1) return;
+    const insertIdx = position === 'after' ? targetIdx + 1 : targetIdx;
+    sinMover.splice(insertIdx, 0, moving);
+    const nuevas = sinMover.map((c, i) => ({ ...c, orden: i }));
+    setState(s => ({ ...s, tareas: { ...s.tareas, columnas: nuevas } }));
+    try {
+      for (const c of nuevas) {
+        const previo = prev.find(p => p.id === c.id);
+        if (previo && previo.orden !== c.orden) {
+          await storage.updateColumna(c.id, { orden: c.orden });
+        }
+      }
+    } catch (e) {
+      handleErr(e, 'moveColumna');
+      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: prev } }));
+    }
+  };
+
   const handleRenameColumna = async (columnaId, nuevoTitulo) => {
     if (!nuevoTitulo || !nuevoTitulo.trim()) return;
     const col = state.tareas.columnas.find(c => c.id === columnaId);
@@ -3165,6 +3217,7 @@ function App({ user, onLogout }) {
           onAddColumna={handleAddColumna}
           onRenameColumna={handleRenameColumna}
           onDeleteColumna={handleDeleteColumna}
+          onMoveColumna={handleMoveColumna}
         />
       )}
 
@@ -4646,7 +4699,7 @@ function SettingsModal({ settings, onCancel, onSave }) {
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna }) {
+function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna }) {
   const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   return (
     <div className="kanban-wrap">
@@ -4661,6 +4714,7 @@ function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAdd
             onDelete={() => onDeleteColumna(col.id)}
             onAddTarea={(titulo) => onAddTarea(col.id, titulo)}
             onMoveTarea={onMoveTarea}
+            onMoveColumna={onMoveColumna}
             onEditarTarea={onEditarTarea}
           />
         );
@@ -4670,11 +4724,14 @@ function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAdd
   );
 }
 
-function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveTarea, onEditarTarea }) {
+function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
   const cancelRef = useRef(false);
+  const colRef = useRef(null);
+  const headRef = useRef(null);
+  const colDragRef = useRef({ active: false, captured: false, startX: 0, pointerId: null });
   useEffect(() => { setTituloEdit(columna.titulo); }, [columna.titulo]);
 
   const commitTitulo = () => {
@@ -4702,9 +4759,78 @@ function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveT
     setAgregando(false);
   };
 
+  // ── Drag de columna (pointer events sobre el header, excepto inputs/buttons) ──
+  const clearColDropMarkers = () => {
+    document.querySelectorAll('.kanban-col.col-drop-before, .kanban-col.col-drop-after')
+      .forEach(n => n.classList.remove('col-drop-before', 'col-drop-after'));
+  };
+
+  const onHeadPointerDown = (e) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    // No iniciar drag si el click va sobre un input o botón del header
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA') return;
+    colDragRef.current = { active: true, captured: false, startX: e.clientX, pointerId: e.pointerId };
+  };
+
+  const onHeadPointerMove = (e) => {
+    const ds = colDragRef.current;
+    if (!ds.active) return;
+    const dx = e.clientX - ds.startX;
+    if (!ds.captured && Math.abs(dx) > 6) {
+      ds.captured = true;
+      try { headRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      colRef.current?.classList.add('col-dragging');
+    }
+    if (ds.captured) {
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const overCol = el && el.closest ? el.closest('.kanban-col') : null;
+      clearColDropMarkers();
+      if (overCol && overCol !== colRef.current) {
+        const rect = overCol.getBoundingClientRect();
+        const isLeftHalf = e.clientX < rect.left + rect.width / 2;
+        overCol.classList.add(isLeftHalf ? 'col-drop-before' : 'col-drop-after');
+      }
+    }
+  };
+
+  const finishHeadDrag = (e, commit) => {
+    const ds = colDragRef.current;
+    if (!ds.active) return;
+    if (ds.captured) {
+      try { headRef.current.releasePointerCapture(ds.pointerId); } catch (_) {}
+      colRef.current?.classList.remove('col-dragging');
+      if (commit) {
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const overCol = el && el.closest ? el.closest('.kanban-col') : null;
+        if (overCol && overCol !== colRef.current) {
+          const rect = overCol.getBoundingClientRect();
+          const isLeftHalf = e.clientX < rect.left + rect.width / 2;
+          const targetId = overCol.dataset.colId;
+          if (targetId && targetId !== columna.id && typeof onMoveColumna === 'function') {
+            onMoveColumna(columna.id, targetId, isLeftHalf ? 'before' : 'after');
+          }
+        }
+      }
+      clearColDropMarkers();
+    }
+    colDragRef.current = { active: false, captured: false, startX: 0, pointerId: null };
+  };
+
   return (
-    <div className={`kanban-col ${columna.protegida ? 'kanban-col-protegida' : ''}`}>
-      <div className="kanban-col-head">
+    <div
+      ref={colRef}
+      className={`kanban-col ${columna.protegida ? 'kanban-col-protegida' : ''}`}
+      data-col-id={columna.id}
+    >
+      <div
+        ref={headRef}
+        className="kanban-col-head"
+        onPointerDown={onHeadPointerDown}
+        onPointerMove={onHeadPointerMove}
+        onPointerUp={(e) => finishHeadDrag(e, true)}
+        onPointerCancel={(e) => finishHeadDrag(e, false)}
+      >
         <input
           className="kanban-col-titulo"
           value={tituloEdit}
