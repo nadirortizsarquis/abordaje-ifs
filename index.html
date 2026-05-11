@@ -2701,12 +2701,13 @@ async function exportarProspectosPDF(prospectos, user) {
 }
 
 // ── APP ────────────────────────────────────────────────────────
-function App({ user, onLogout }) {
+function App({ user, agente, onLogout }) {
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showAdmin, setShowAdmin] = useState(false);
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -3158,8 +3159,10 @@ function App({ user, onLogout }) {
     <>
       <HeaderActions
         user={user}
+        agente={agente}
         onLogout={onLogout}
         onOpenSettings={() => setShowSettings(true)}
+        onOpenAdmin={() => setShowAdmin(true)}
       />
 
       <div className="main-head">
@@ -3256,6 +3259,13 @@ function App({ user, onLogout }) {
         />
       )}
 
+      {showAdmin && (
+        <AdminPanel
+          currentUser={user}
+          onClose={() => setShowAdmin(false)}
+        />
+      )}
+
       {tareaEditando && (
         <TareaModal
           tarea={tareaEditando}
@@ -3296,7 +3306,8 @@ function App({ user, onLogout }) {
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, onLogout, onOpenSettings }) {
+function HeaderActions({ user, agente, onLogout, onOpenSettings, onOpenAdmin }) {
+  const esAdmin = agente?.rol === 'admin';
   useEffect(() => {
     const target = document.getElementById('headerActions');
     if (!target) return;
@@ -3309,6 +3320,9 @@ function HeaderActions({ user, onLogout, onOpenSettings }) {
       b.onclick = fn;
       return b;
     };
+    if (esAdmin) {
+      target.appendChild(mk('Administración', 'Gestionar asesores y permisos', onOpenAdmin));
+    }
     target.appendChild(mk('Ajustes', 'Configurar rango horario, duración y vista', onOpenSettings));
     if (user) {
       const sep = document.createElement('div');
@@ -3316,12 +3330,12 @@ function HeaderActions({ user, onLogout, onOpenSettings }) {
       target.appendChild(sep);
       const u = document.createElement('div');
       u.className = 'header-user';
-      u.textContent = user.email;
+      u.textContent = user.email + (esAdmin ? ' · admin' : '');
       u.title = 'Sesión iniciada como ' + user.email;
       target.appendChild(u);
       target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
     }
-  }, [user, onLogout, onOpenSettings]);
+  }, [user, esAdmin, onLogout, onOpenSettings, onOpenAdmin]);
   return null;
 }
 
@@ -4592,6 +4606,193 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 }
 
 // ── SETTINGS MODAL ─────────────────────────────────────────────
+// ── ADMIN PANEL ─────────────────────────────────────────────────
+// Cliente Supabase secundario para signUp sin afectar la sesión del admin actual.
+const sbExtra = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false }
+});
+
+function AdminPanel({ currentUser, onClose }) {
+  const [agentes, setAgentes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  // Form invitar
+  const [invEmail, setInvEmail] = useState('');
+  const [invPassword, setInvPassword] = useState('');
+  const [invNombre, setInvNombre] = useState('');
+  const [invitando, setInvitando] = useState(false);
+  const [invMsg, setInvMsg] = useState('');
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    const { data, error: err } = await sb.from('abordaje_agentes')
+      .select('id,email,nombre,rol,created_at').order('created_at');
+    if (err) setError(err.message);
+    else setAgentes(data || []);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    cargar();
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [cargar, onClose]);
+
+  const cambiarRol = async (id, nuevoRol) => {
+    if (id === currentUser.id) {
+      alert('No podés cambiar tu propio rol. Pedíselo a otro admin.');
+      return;
+    }
+    if (!confirm(`¿Cambiar rol a "${nuevoRol}"?`)) return;
+    const { error: err } = await sb.from('abordaje_agentes').update({ rol: nuevoRol }).eq('id', id);
+    if (err) { alert('Error: ' + err.message); return; }
+    setAgentes(prev => prev.map(a => a.id === id ? { ...a, rol: nuevoRol } : a));
+    showToast('Rol actualizado');
+  };
+
+  const guardarNombre = async (id, nombre) => {
+    const { error: err } = await sb.from('abordaje_agentes').update({ nombre }).eq('id', id);
+    if (err) { alert('Error: ' + err.message); return; }
+    setAgentes(prev => prev.map(a => a.id === id ? { ...a, nombre } : a));
+  };
+
+  const invitar = async () => {
+    setInvMsg('');
+    const email = invEmail.trim().toLowerCase();
+    const pwd = invPassword;
+    const nombre = invNombre.trim();
+    if (!email || !pwd) { setInvMsg('Email y password son obligatorios.'); return; }
+    if (pwd.length < 6) { setInvMsg('La contraseña debe tener al menos 6 caracteres.'); return; }
+    setInvitando(true);
+    try {
+      // Cliente secundario con persistSession:false → no afecta tu sesión actual.
+      const { data, error: err } = await sbExtra.auth.signUp({
+        email, password: pwd,
+        options: nombre ? { data: { nombre } } : undefined
+      });
+      if (err) throw err;
+      const newId = data?.user?.id;
+      // Si tenemos nombre y el trigger creó el agente, actualizo el nombre
+      if (newId && nombre) {
+        // Esperar un instante para que el trigger inserte
+        await new Promise(r => setTimeout(r, 600));
+        await sb.from('abordaje_agentes').update({ nombre }).eq('id', newId);
+      }
+      setInvMsg(`✓ Asesor ${email} creado correctamente.`);
+      setInvEmail(''); setInvPassword(''); setInvNombre('');
+      await cargar();
+    } catch (e) {
+      setInvMsg('Error: ' + (e.message || e));
+    } finally {
+      setInvitando(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 720, maxHeight: '86vh' }}>
+        <div className="modal-header">
+          <h3>Administración de asesores</h3>
+          <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body" style={{ overflowY: 'auto', maxHeight: 'calc(86vh - 140px)' }}>
+
+          <div className="help-callout" style={{ marginTop: 0 }}>
+            <strong>Permisos</strong>
+            Los <strong>asesores</strong> sólo ven sus propios prospectos, tareas y agendas.
+            Los <strong>admins</strong> ven todo, pueden cambiar roles de otros y crear nuevos asesores.
+          </div>
+
+          <h4 style={{ marginTop: 18, marginBottom: 10, color: 'var(--azul-oscuro)', fontSize: '0.92rem' }}>
+            Asesores registrados ({agentes.length})
+          </h4>
+          {loading && <div style={{ color: 'var(--texto-suave)', fontSize: '0.85rem' }}>Cargando…</div>}
+          {error && <div style={{ color: 'var(--estado-rechazado)', fontSize: '0.85rem' }}>{error}</div>}
+          {!loading && agentes.length > 0 && (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', marginBottom: 24 }}>
+              <thead>
+                <tr style={{ borderBottom: '1.5px solid var(--borde)' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600, color: 'var(--texto-suave)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Email</th>
+                  <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600, color: 'var(--texto-suave)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Nombre</th>
+                  <th style={{ textAlign: 'left', padding: '8px 6px', fontWeight: 600, color: 'var(--texto-suave)', fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>Rol</th>
+                </tr>
+              </thead>
+              <tbody>
+                {agentes.map(a => {
+                  const esYo = a.id === currentUser.id;
+                  return (
+                    <tr key={a.id} style={{ borderTop: '1px solid var(--borde)' }}>
+                      <td style={{ padding: '10px 6px', fontWeight: 600 }}>
+                        {a.email} {esYo && <span style={{color: 'var(--texto-suave)', fontWeight: 400, fontSize:'0.74rem'}}>(vos)</span>}
+                      </td>
+                      <td style={{ padding: '10px 6px' }}>
+                        <input
+                          type="text"
+                          defaultValue={a.nombre || ''}
+                          placeholder="(sin nombre)"
+                          onBlur={(e) => { if (e.target.value !== (a.nombre || '')) guardarNombre(a.id, e.target.value); }}
+                          style={{ width: '100%', padding: '4px 8px', border: '1px solid var(--borde)', borderRadius: 5, fontSize: '0.8rem' }}
+                        />
+                      </td>
+                      <td style={{ padding: '10px 6px' }}>
+                        <select
+                          value={a.rol}
+                          disabled={esYo}
+                          title={esYo ? 'No podés cambiar tu propio rol' : 'Cambiar rol'}
+                          onChange={(e) => cambiarRol(a.id, e.target.value)}
+                          style={{ padding: '5px 8px', border: '1px solid var(--borde)', borderRadius: 5, fontSize: '0.8rem', fontWeight: 600, color: a.rol === 'admin' ? 'var(--azul-oscuro)' : 'var(--texto)' }}
+                        >
+                          <option value="asesor">asesor</option>
+                          <option value="admin">admin</option>
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+
+          <h4 style={{ marginTop: 6, marginBottom: 10, color: 'var(--azul-oscuro)', fontSize: '0.92rem' }}>
+            Invitar asesor nuevo
+          </h4>
+          <div className="field">
+            <label>Email</label>
+            <input type="email" value={invEmail} onChange={(e) => setInvEmail(e.target.value)} placeholder="asesor@ifs-broker.com" />
+          </div>
+          <div className="field">
+            <label>Contraseña inicial</label>
+            <input type="text" value={invPassword} onChange={(e) => setInvPassword(e.target.value)} placeholder="mínimo 6 caracteres" />
+          </div>
+          <div className="field">
+            <label>Nombre (opcional)</label>
+            <input type="text" value={invNombre} onChange={(e) => setInvNombre(e.target.value)} placeholder="Federico" />
+          </div>
+          {invMsg && (
+            <div className={`help-callout ${invMsg.startsWith('Error') ? 'danger' : ''}`} style={{ marginTop: 8 }}>
+              {invMsg}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10, marginTop: 10 }}>
+            <button className="btn-primary" disabled={invitando} onClick={invitar}>
+              {invitando ? 'Creando…' : 'Crear asesor'}
+            </button>
+          </div>
+          <p style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 12, lineHeight: 1.5 }}>
+            El asesor entra con email/contraseña y arranca con rol <code>asesor</code>. Si querés
+            que también gestione asesores, cambiá su rol arriba.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SettingsModal({ settings, onCancel, onSave }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
@@ -5265,25 +5466,37 @@ function Root() {
 // que el header IFS solo se renderice cuando hay sesión.
 function AppShell() {
   const [user, setUser] = useState(null);
+  const [agente, setAgente] = useState(null);  // perfil con rol/nombre
 
   useEffect(() => {
     let mounted = true;
     auth.getUser().then(u => { if (mounted) setUser(u); });
     const { data } = auth.onChange((event, session) => {
       if (!mounted) return;
-      if (event === 'SIGNED_OUT') setUser(null);
+      if (event === 'SIGNED_OUT') { setUser(null); setAgente(null); }
       else if (session?.user) setUser(session.user);
     });
     return () => { mounted = false; data?.subscription?.unsubscribe?.(); };
   }, []);
 
+  // Cargar perfil del agente (rol, nombre) cuando hay user
+  useEffect(() => {
+    if (!user) { setAgente(null); return; }
+    let cancel = false;
+    sb.from('abordaje_agentes').select('id,email,nombre,rol').eq('id', user.id).single()
+      .then(({ data }) => { if (!cancel && data) setAgente(data); })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, [user?.id]);
+
   const handleLogout = async () => {
     await auth.signOut();
     setUser(null);
+    setAgente(null);
   };
 
   if (!user) return null;
-  return <App key={user.id} user={user} onLogout={handleLogout} />;
+  return <App key={user.id} user={user} agente={agente} onLogout={handleLogout} />;
 }
 
 window.__abordajeMount = function() {
