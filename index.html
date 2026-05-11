@@ -3360,6 +3360,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         <TareaModal
           tarea={tareaEditando}
           columnas={state.tareas.columnas}
+          readOnly={readOnly}
           onClose={() => setTareaEditando(null)}
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
           onDelete={() => handleDeleteTarea(tareaEditando.id)}
@@ -5524,7 +5525,7 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, onClose, onSave, onDelete, onConvertir }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onConvertir }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -5556,40 +5557,41 @@ function TareaModal({ tarea, columnas, onClose, onSave, onDelete, onConvertir })
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true">
         <div className="modal-header">
-          <h3>Editar tarea</h3>
+          <h3>{readOnly ? 'Detalle de tarea' : 'Editar tarea'}</h3>
           <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
           <div className="field">
             <label>Título</label>
-            <input type="text" value={form.titulo} autoFocus
+            <input type="text" value={form.titulo} autoFocus={!readOnly} readOnly={readOnly}
               onChange={e => upd('titulo', e.target.value)}
               placeholder="Ej: Cotización Pérez, Llamar a Juan" />
           </div>
           <div className="field-row">
             <div className="field">
               <label>Columna</label>
-              <select value={form.columnaId} onChange={e => upd('columnaId', e.target.value)}>
+              <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
                 {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
               </select>
             </div>
             <div className="field">
               <label>Fecha recordatorio</label>
-              <input type="date" value={form.fechaRecordatorio || ''}
+              <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
                 onChange={e => upd('fechaRecordatorio', e.target.value)} />
             </div>
           </div>
           <div className="field">
             <label>Hora (opcional, si tiene fecha)</label>
-            <input type="time" value={form.horaRecordatorio || ''}
+            <input type="time" value={form.horaRecordatorio || ''} readOnly={readOnly}
               onChange={e => upd('horaRecordatorio', e.target.value)}
-              disabled={!form.fechaRecordatorio} />
+              disabled={!form.fechaRecordatorio || readOnly} />
           </div>
           <div className="field">
-            <label>Observación / detalle <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(Enter guarda · Shift+Enter nueva línea)</span></label>
-            <textarea value={form.observacion}
+            <label>Observación / detalle {!readOnly && <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(Enter guarda · Shift+Enter nueva línea)</span>}</label>
+            <textarea value={form.observacion} readOnly={readOnly}
               onChange={e => upd('observacion', e.target.value)}
               onKeyDown={e => {
+                if (readOnly) return;
                 if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
                   e.preventDefault();
                   guardar();
@@ -5598,12 +5600,12 @@ function TareaModal({ tarea, columnas, onClose, onSave, onDelete, onConvertir })
               placeholder="Descripción libre de la tarea, pasos, contexto..." />
           </div>
         </div>
-        <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
-          <button className="btn-danger" onClick={onDelete}>Eliminar</button>
+        <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
+          {!readOnly && <button className="btn-danger" onClick={onDelete}>Eliminar</button>}
           <div style={{ display: 'flex', gap: 10 }}>
-            <button className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>
-            <button className="btn-secondary" onClick={onClose}>Cancelar</button>
-            <button className="btn-primary" onClick={guardar}>Guardar</button>
+            {!readOnly && <button className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>}
+            <button className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+            {!readOnly && <button className="btn-primary" onClick={guardar}>Guardar</button>}
           </div>
         </div>
       </div>
