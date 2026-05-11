@@ -2140,6 +2140,9 @@ const { useState, useEffect, useCallback, useMemo, useRef } = React;
 const PREFS_CONTACTO = ['Llamada', 'WhatsApp', 'Email', 'Presencial', 'Otro'];
 
 // ── SETTINGS (rango horario laboral, duración default, finde en calendario) ─
+// Persistencia: profiles.abordaje_settings (jsonb). Sigue al user entre dispositivos.
+// localStorage queda como cache local para que el primer render sea instantáneo
+// antes de que llegue la respuesta de Supabase.
 const SETTINGS_KEY = 'abordaje_settings';
 const DEFAULT_SETTINGS = {
   workStartHour: 9,
@@ -2156,8 +2159,15 @@ function loadSettings() {
     return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
   } catch { return { ...DEFAULT_SETTINGS }; }
 }
-function persistSettings(s) {
+// Persiste en localStorage (cache local) y push a Supabase si hay user.
+async function persistSettings(s, userId) {
   try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch {}
+  if (userId) {
+    try {
+      const { error } = await sb.from('profiles').update({ abordaje_settings: s }).eq('id', userId);
+      if (error) console.error('persistSettings DB:', error.message);
+    } catch (e) { console.error('persistSettings DB:', e); }
+  }
 }
 
 // ── TIPOS DE GESTIÓN (orden de grid: agendado primero, rechazado al final) ─
@@ -2770,6 +2780,17 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
     }
     return false;
   };
+
+  // Cuando el agente llega con abordaje_settings (puede tardar un instante por la
+  // consulta a profiles), sincronizamos el state con eso. Si es null usamos el
+  // cache local (que ya se cargó en useState inicial).
+  useEffect(() => {
+    if (agente?.abordaje_settings) {
+      const merged = { ...DEFAULT_SETTINGS, ...agente.abordaje_settings };
+      setSettings(merged);
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged)); } catch {}
+    }
+  }, [agente?.id]);
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -3352,7 +3373,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
           currentUser={user}
           onViewAs={(p) => { onViewAs(p); setShowSettings(false); }}
           onCancel={() => setShowSettings(false)}
-          onSave={(s) => { setSettings(s); persistSettings(s); showToast('Ajustes guardados'); }}
+          onSave={(s) => { setSettings(s); persistSettings(s, user.id); showToast('Ajustes guardados'); }}
         />
       )}
 
@@ -4839,8 +4860,12 @@ function AdminTh({ children, right }) {
 }
 
 // ── SECCIÓN USUARIOS — copia literal del patrón Comisiones ─────
+// Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
+const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
+
 function UsuariosSection({ currentUser, onViewAs }) {
   const currentUserId = currentUser?.id;
+  const esMegaAdmin = (currentUser?.email || '').toLowerCase() === MEGAADMIN_EMAIL;
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
@@ -5097,7 +5122,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
                               Ver como
                             </button>
                           )}
-                          {p.id !== currentUserId && (
+                          {esMegaAdmin && p.id !== currentUserId && (
                             <button
                               onClick={() => handleDelete(p)}
                               disabled={deletingId === p.id}
@@ -5837,7 +5862,7 @@ function AppShell() {
   useEffect(() => {
     if (!user) { setAgente(null); return; }
     let cancel = false;
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole').eq('id', user.id).single()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings').eq('id', user.id).single()
       .then(({ data }) => { if (!cancel && data) setAgente(data); })
       .catch(() => {});
     return () => { cancel = true; };
