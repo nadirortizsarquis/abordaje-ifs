@@ -59,7 +59,8 @@
     letter-spacing: 0.3px;
   }
   .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
-  .header-actions { margin-left: auto; display: flex; gap: 10px; align-items: center; }
+  .header-actions { display: flex; gap: 10px; align-items: center; }
+  .header-search-slot { margin-left: auto; display: flex; align-items: center; }
   .header-btn {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -1667,6 +1668,85 @@
     margin-right: 2px;
   }
 
+  /* ── Buscador global ── */
+  .buscador-wrap {
+    position: relative;
+    margin-right: 4px;
+  }
+  .buscador-input {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: white;
+    padding: 7px 12px;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    width: 240px;
+    outline: none;
+    font-family: inherit;
+    transition: background 0.15s, border-color 0.15s, width 0.2s;
+  }
+  .buscador-input::placeholder { color: rgba(255,255,255,0.5); }
+  .buscador-input:focus {
+    background: rgba(255,255,255,0.14);
+    border-color: rgba(255,255,255,0.4);
+    width: 280px;
+  }
+  .buscador-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 340px;
+    max-width: calc(100vw - 44px);
+    max-height: 60vh;
+    overflow-y: auto;
+    background: white;
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(15,17,41,0.3);
+    z-index: 9999;
+  }
+  .buscador-empty {
+    padding: 20px 14px;
+    text-align: center;
+    color: var(--texto-suave);
+    font-size: 0.82rem;
+  }
+  .buscador-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    border-bottom: 1px solid #f3f4f6;
+    transition: background 0.1s;
+  }
+  .buscador-item:last-child { border-bottom: none; }
+  .buscador-item:hover { background: #f9fafb; }
+  .buscador-item-titulo {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--texto);
+    line-height: 1.3;
+  }
+  .buscador-item-cat {
+    color: #9ca3af;
+    font-weight: 400;
+    font-size: 0.76rem;
+  }
+  .buscador-item-sub {
+    font-size: 0.74rem;
+    color: var(--texto-suave);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* ── Etiqueta categoría dentro de notifs (reemplazo del emoji) ── */
+  .bell-item-cat {
+    color: #9ca3af;
+    font-weight: 400;
+    font-size: 0.76rem;
+    margin-right: 2px;
+  }
+
   /* ── Campanita de notificaciones ── */
   .bell-btn {
     position: relative;
@@ -1866,6 +1946,7 @@
       Planificador de Abordaje
       <span class="header-subtitle">Gestión de prospectos · IFS</span>
     </div>
+    <div id="headerSearch" class="header-search-slot"></div>
     <div class="header-actions" id="headerActions"></div>
   </header>
 
@@ -2885,6 +2966,133 @@ async function exportarProspectosPDF(prospectos, user) {
   doc.save(`IFS_Abordaje_${ts}.pdf`);
 }
 
+// Helper para montar children en un elemento del DOM ya existente (slot
+// fuera del árbol React). Se usa para inyectar el buscador en el header HTML.
+function MountInSlot({ slotId, children }) {
+  const [target, setTarget] = useState(null);
+  useEffect(() => { setTarget(document.getElementById(slotId)); }, [slotId]);
+  if (!target) return null;
+  return ReactDOM.createPortal(children, target);
+}
+
+// ── BUSCADOR GLOBAL ────────────────────────────────────────────
+// Busca en prospectos, tareas y agendados. Resultados unificados con categoría
+// y handlers de click que llevan al lugar de acción correspondiente.
+const CATEGORIA_LABEL = { lista: 'Lista', tarea: 'Tarea', calendario: 'Calendario' };
+
+function buscarGlobal(state, query, max = 12) {
+  const q = query.trim().toLowerCase();
+  if (q.length < 2) return [];
+  const resultados = [];
+
+  // Prospectos (lista de abordaje)
+  for (const p of state.prospectos || []) {
+    const haystack = [p.nombre, p.telefono, p.detalle, p.observaciones, p.referente, p.preferenciaContacto]
+      .filter(Boolean).join(' ').toLowerCase();
+    if (haystack.includes(q)) {
+      resultados.push({
+        key: 'p_' + p.id,
+        categoria: 'lista',
+        titulo: p.nombre || '(sin nombre)',
+        sub: p.telefono || '',
+        prospectoId: p.id,
+        sortScore: (p.nombre || '').toLowerCase().startsWith(q) ? 0 : 1,
+      });
+    }
+  }
+  // Tareas (Kanban)
+  for (const t of state.tareas?.items || []) {
+    const haystack = [t.titulo, t.observacion].filter(Boolean).join(' ').toLowerCase();
+    if (haystack.includes(q)) {
+      resultados.push({
+        key: 't_' + t.id,
+        categoria: 'tarea',
+        titulo: t.titulo || '(sin título)',
+        sub: t.observacion || '',
+        tareaId: t.id,
+        prospectoId: t.prospectoId || null,
+        sortScore: (t.titulo || '').toLowerCase().startsWith(q) ? 0 : 1,
+      });
+    }
+  }
+  // Agendados (calendario)
+  for (const a of state.agendados || []) {
+    const prospect = (state.prospectos || []).find(p => p.id === a.prospectoId);
+    const haystack = [a.nota, prospect?.nombre].filter(Boolean).join(' ').toLowerCase();
+    if (haystack.includes(q)) {
+      const fecha = new Date(a.fecha);
+      const fechaTxt = `${String(fecha.getDate()).padStart(2,'0')}/${String(fecha.getMonth()+1).padStart(2,'0')} ${String(fecha.getHours()).padStart(2,'0')}:${String(fecha.getMinutes()).padStart(2,'0')}`;
+      resultados.push({
+        key: 'a_' + a.id,
+        categoria: 'calendario',
+        titulo: prospect?.nombre || a.nota || 'Cita',
+        sub: fechaTxt,
+        prospectoId: a.prospectoId,
+        sortScore: (prospect?.nombre || '').toLowerCase().startsWith(q) ? 0 : 1,
+      });
+    }
+  }
+
+  resultados.sort((x, y) => x.sortScore - y.sortScore || x.titulo.localeCompare(y.titulo));
+  return resultados.slice(0, max);
+}
+
+function BuscadorGlobal({ state, onClickItem }) {
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  const items = useMemo(() => buscarGlobal(state, query), [state, query]);
+
+  useEffect(() => {
+    const onClick = (e) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+
+  const seleccionar = (it) => {
+    onClickItem(it);
+    setQuery('');
+    setOpen(false);
+  };
+
+  return (
+    <div className="buscador-wrap" ref={wrapRef}>
+      <input
+        className="buscador-input"
+        type="search"
+        placeholder="Buscar prospecto, tarea, cita…"
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={e => {
+          if (e.key === 'Escape') { setQuery(''); setOpen(false); e.target.blur(); }
+          if (e.key === 'Enter' && items[0]) seleccionar(items[0]);
+        }}
+      />
+      {open && query.trim().length >= 2 && (
+        <div className="buscador-dropdown">
+          {items.length === 0 ? (
+            <div className="buscador-empty">Sin resultados para "{query}"</div>
+          ) : items.map(it => (
+            <div key={it.key} className="buscador-item" onClick={() => seleccionar(it)}>
+              <div className="buscador-item-body">
+                <div className="buscador-item-titulo">
+                  {it.titulo}
+                  <span className="buscador-item-cat"> — {CATEGORIA_LABEL[it.categoria]}</span>
+                </div>
+                {it.sub && <div className="buscador-item-sub">{it.sub}</div>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── NOTIFICACIONES (campanita) ─────────────────────────────────
 // Calcula la lista de eventos pendientes (vencidos + hoy + próximos 24h + semana)
 // a partir del state actual. No consulta DB — todo viene de prospectos, tareas
@@ -2994,11 +3202,13 @@ function NotificacionesDropdown({ items, onClose, onClickItem }) {
               const fechaStr = hoy
                 ? `${hh}:${mm}`
                 : `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')} ${hh}:${mm}`;
+              const catLabel = it.tipo === 'agendado' ? 'Calendario' : 'Tarea';
               return (
                 <div key={it.key} className="bell-item" onClick={() => onClickItem(it)}>
-                  <div className="bell-item-icon">{it.tipo === 'agendado' ? '📅' : '📌'}</div>
                   <div className="bell-item-body">
-                    <div className="bell-item-titulo">{it.titulo}</div>
+                    <div className="bell-item-titulo">
+                      <span className="bell-item-cat">{catLabel} —</span> {it.titulo}
+                    </div>
                     {it.detalle && <div className="bell-item-detalle">{it.detalle}</div>}
                   </div>
                   <div className="bell-item-fecha">{fechaStr}</div>
@@ -3507,6 +3717,21 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   );
   const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos';
 
+  // Handler común para click en notifs y en buscador.
+  // IMPORTANTE: declarado ANTES del early return de loading para no violar
+  // Rules of Hooks (un useCallback debe llamarse siempre en el mismo orden).
+  const handleNavToItem = useCallback((it) => {
+    if (it.categoria === 'tarea' || it.tipo === 'tarea') {
+      const t = state.tareas.items.find(x => x.id === it.tareaId);
+      if (t) setTareaEditando(t);
+    } else if (it.categoria === 'calendario' || it.tipo === 'agendado') {
+      if (it.prospectoId) setSelectedId(it.prospectoId);
+      else setView('calendario');
+    } else if (it.categoria === 'lista' && it.prospectoId) {
+      setSelectedId(it.prospectoId);
+    }
+  }, [state.tareas, state.prospectos]);
+
   if (loading) {
     return (
       <div style={{display:'flex',alignItems:'center',justifyContent:'center',padding:'80px 20px',color:'var(--texto-suave)'}}>
@@ -3528,20 +3753,14 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         notifCount={notifUrgentes}
         onToggleBell={() => setBellOpen(o => !o)}
       />
+      <MountInSlot slotId="headerSearch">
+        <BuscadorGlobal state={state} onClickItem={handleNavToItem} />
+      </MountInSlot>
       {bellOpen && (
         <NotificacionesDropdown
           items={notificaciones}
           onClose={() => setBellOpen(false)}
-          onClickItem={(it) => {
-            setBellOpen(false);
-            if (it.tipo === 'tarea') {
-              const t = state.tareas.items.find(x => x.id === it.tareaId);
-              if (t) setTareaEditando(t);
-            } else if (it.tipo === 'agendado') {
-              if (it.prospectoId) setSelectedId(it.prospectoId);
-              else setView('calendario');
-            }
-          }}
+          onClickItem={(it) => { setBellOpen(false); handleNavToItem(it); }}
         />
       )}
       {viewAs && (
