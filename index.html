@@ -76,7 +76,7 @@
   /* ── MAIN ── */
   .main {
     margin-top: var(--header-h);
-    padding: 18px 22px;
+    padding: 10px 22px 0;
     max-width: 1520px;
     margin-left: auto;
     margin-right: auto;
@@ -84,29 +84,27 @@
 
   .main-head {
     display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 24px;
+    margin-bottom: 12px;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: 12px;
   }
   .main-head h1 {
-    font-size: 1.5rem;
+    font-size: 1.25rem;
     color: var(--azul-oscuro);
     font-weight: 700;
     letter-spacing: 0.2px;
   }
-  .main-head .subhead {
-    font-size: 0.85rem;
-    color: var(--texto-suave);
-    margin-top: 4px;
+  .main-head-actions {
+    display: flex; gap: 8px; align-items: center;
   }
 
   .btn-primary {
     background: linear-gradient(135deg, var(--azul) 0%, var(--azul-oscuro) 100%);
     color: white;
     border: none;
-    padding: 11px 20px;
-    border-radius: 10px;
-    font-size: 0.88rem;
+    padding: 9px 16px;
+    border-radius: 9px;
+    font-size: 0.82rem;
     font-weight: 600;
     cursor: pointer;
     letter-spacing: 0.3px;
@@ -115,6 +113,21 @@
   }
   .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(0,152,218,0.35); }
   .btn-primary:active { transform: translateY(0); }
+  .btn-export {
+    background: white;
+    color: var(--azul-oscuro);
+    border: 1.5px solid var(--borde);
+    padding: 8px 14px;
+    border-radius: 9px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    letter-spacing: 0.2px;
+    transition: all 0.12s;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .btn-export:hover { border-color: var(--azul); color: var(--azul); }
+  .btn-export[disabled] { opacity: 0.55; cursor: wait; }
 
   .btn-secondary {
     background: white;
@@ -169,17 +182,17 @@
   table.prospectos {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.88rem;
+    font-size: 0.8rem;
   }
   table.prospectos thead {
     background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
     color: white;
   }
   table.prospectos thead th {
-    padding: 13px 16px;
+    padding: 8px 12px;
     text-align: left;
     font-weight: 600;
-    font-size: 0.78rem;
+    font-size: 0.7rem;
     letter-spacing: 0.6px;
     text-transform: uppercase;
   }
@@ -189,7 +202,7 @@
   }
   table.prospectos tbody tr:hover { background: #f7f9fd; }
   table.prospectos td {
-    padding: 14px 16px;
+    padding: 8px 12px;
     vertical-align: middle;
   }
   table.prospectos td.col-nombre {
@@ -198,14 +211,23 @@
   }
   table.prospectos td.col-telefono {
     font-family: 'SF Mono', Menlo, Consolas, monospace;
-    font-size: 0.82rem;
+    font-size: 0.76rem;
     color: var(--texto-suave);
+  }
+  table.prospectos td.col-referente,
+  table.prospectos td.col-pref,
+  table.prospectos thead th.col-referente,
+  table.prospectos thead th.col-pref {
+    font-size: 0.72rem;
+    color: var(--texto-suave);
+    text-align: right;
+    padding-right: 14px;
   }
   .badge-estado {
     display: inline-block;
-    padding: 3px 10px;
-    border-radius: 12px;
-    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.66rem;
     font-weight: 700;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -214,9 +236,9 @@
   }
   .badge-pref {
     display: inline-block;
-    padding: 2px 9px;
+    padding: 2px 8px;
     border-radius: 10px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     background: #eef4fb;
     color: var(--azul-oscuro);
     font-weight: 600;
@@ -310,33 +332,38 @@
     display: flex;
     gap: 14px;
     overflow-x: auto;
-    padding: 4px 4px 16px;
-    margin-top: 14px;
+    overflow-y: hidden;
+    padding: 4px 4px 12px;
+    margin-top: 10px;
+    /* flex-start: cada columna toma su propia altura natural (estilo Trello) */
     align-items: flex-start;
+    /* Altura fija para que la barra de scroll horizontal quede pegada al bottom del viewport */
+    height: calc(100vh - var(--header-h) - 110px);
   }
   .kanban-col {
-    flex: 0 0 280px;
+    flex: 0 0 240px;
     background: var(--bg-card);
-    border-radius: 12px;
+    border-radius: 10px;
     border: 1px solid var(--borde);
     display: flex;
     flex-direction: column;
-    max-height: calc(100vh - 280px);
+    /* La columna crece con el contenido pero nunca supera la altura del wrap */
+    max-height: 100%;
   }
   .kanban-col-head {
-    padding: 12px 14px;
+    padding: 8px 10px;
     border-bottom: 1px solid var(--borde);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .kanban-col-titulo {
     flex: 1;
-    font-size: 0.92rem;
+    font-size: 0.84rem;
     font-weight: 700;
     color: var(--azul-oscuro);
     cursor: text;
-    padding: 4px 6px;
+    padding: 3px 5px;
     border-radius: 5px;
     border: 1.5px solid transparent;
     background: transparent;
@@ -374,7 +401,9 @@
   .kanban-col-body {
     padding: 10px 10px 6px;
     overflow-y: auto;
-    flex: 1;
+    /* flex-shrink:1 permite que el body se reduzca cuando la columna llega al max-height */
+    flex: 0 1 auto;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -417,23 +446,33 @@
     background: white;
     border: 1px solid var(--borde);
     border-left: 3px solid #7c3aed;
-    border-radius: 8px;
-    padding: 10px 12px;
+    border-radius: 7px;
+    padding: 7px 9px;
     cursor: pointer;
     transition: box-shadow 0.15s, transform 0.1s;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
+  }
+  /* Tareas auto-generadas desde una gestión (tienen prospectoId): tono lila más claro */
+  .tarea-card.tarea-auto {
+    background: #faf5ff;
+    border-color: #e9d5ff;
+    border-left-color: #a78bfa;
+  }
+  .tarea-card.tarea-auto .tarea-card-fecha {
+    background: rgba(167, 139, 250, 0.14);
+    color: #7c3aed;
   }
   .tarea-card:hover {
     box-shadow: 0 3px 10px rgba(0,0,0,0.07);
   }
   .tarea-card.activated:active { transform: translateY(1px); }
   .tarea-card-titulo {
-    font-size: 0.88rem;
+    font-size: 0.8rem;
     font-weight: 600;
     color: var(--texto);
-    line-height: 1.35;
+    line-height: 1.3;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -442,10 +481,10 @@
   }
   .tarea-card-titulo.empty { color: var(--texto-suave); font-style: italic; font-weight: 500; }
   .tarea-card-fecha {
-    font-size: 0.74rem;
+    font-size: 0.68rem;
     color: #6d28d9;
     background: rgba(124, 58, 237, 0.10);
-    padding: 2px 8px;
+    padding: 1px 7px;
     border-radius: 5px;
     align-self: flex-start;
     font-weight: 600;
@@ -455,9 +494,9 @@
     background: rgba(220, 38, 38, 0.10);
   }
   .tarea-card-obs {
-    font-size: 0.78rem;
+    font-size: 0.72rem;
     color: var(--texto-suave);
-    line-height: 1.4;
+    line-height: 1.35;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
@@ -516,6 +555,17 @@
   .cal-event.cal-event-tarea:hover,
   .cal-week-event.cal-event-tarea:hover {
     background: rgba(124, 58, 237, 0.22) !important;
+  }
+  /* Tareas auto-generadas desde una gestión: tono lila más bajo */
+  .cal-event.cal-event-tarea-auto,
+  .cal-week-event.cal-event-tarea-auto {
+    background: rgba(167, 139, 250, 0.12) !important;
+    color: #7c3aed !important;
+    border-left-color: #a78bfa !important;
+  }
+  .cal-event.cal-event-tarea-auto:hover,
+  .cal-week-event.cal-event-tarea-auto:hover {
+    background: rgba(167, 139, 250, 0.20) !important;
   }
 
   /* ── FORM ── */
@@ -622,64 +672,65 @@
   /* ── TIMELINE CELL (col Último contacto / Observación) ── */
   .timeline-cell {
     display: flex; flex-direction: column; gap: 0;
-    min-width: 220px;
+    min-width: 260px;
   }
   .timeline-row {
-    display: flex; align-items: flex-start; gap: 9px;
-    font-size: 0.78rem;
-    line-height: 1.4;
-    padding: 8px 0;
-  }
-  .timeline-row + .timeline-row {
-    border-top: 1px dashed rgba(60, 60, 90, 0.28);
+    display: flex; align-items: center; gap: 7px;
+    font-size: 0.74rem;
+    line-height: 1.35;
+    padding: 3px 0;
+    min-width: 0;
   }
   .timeline-row .chip {
     display: inline-block;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: 0.66rem;
+    padding: 1px 7px;
+    border-radius: 9px;
+    font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: 0.3px;
     text-transform: uppercase;
     flex-shrink: 0;
     line-height: 1.4;
-    margin-top: 1px;
-    align-self: flex-start;
   }
-  .timeline-row .body {
-    display: flex; flex-direction: row; flex-wrap: wrap;
-    align-items: baseline;
-    column-gap: 8px; row-gap: 2px;
-    min-width: 0; flex: 1;
-  }
-  .timeline-row .fecha {
-    font-size: 0.72rem;
+  .timeline-fecha-reg {
+    font-size: 0.68rem;
     color: var(--texto-suave);
     font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    min-width: 50px;
+  }
+  .timeline-fecha-obj {
+    font-size: 0.7rem;
+    color: var(--azul-oscuro);
+    font-weight: 600;
+    white-space: nowrap;
     flex-shrink: 0;
   }
-  .timeline-row .obs {
+  .timeline-fecha-obj::before {
+    content: '→';
+    margin-right: 3px;
+    color: var(--texto-suave);
+    font-weight: 400;
+  }
+  .timeline-obs {
     color: var(--texto);
     font-style: italic;
     overflow: hidden;
     text-overflow: ellipsis;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    word-break: break-word;
-    flex: 1 1 100px;
+    white-space: nowrap;
+    flex: 1 1 auto;
     min-width: 0;
   }
-  .timeline-row .obs:empty { display: none; }
   .timeline-mas {
-    font-size: 0.7rem;
+    font-size: 0.66rem;
     color: var(--texto-suave);
     font-style: italic;
-    padding-left: 4px;
+    padding: 3px 0 0;
   }
   .timeline-vacio {
     color: var(--texto-suave);
-    font-size: 0.82rem;
+    font-size: 0.76rem;
     font-style: italic;
   }
 
@@ -964,10 +1015,10 @@
   }
 
   /* ── COLUMN WIDTHS ── */
-  table.prospectos col.col-w-tel       { width: 130px; }
-  table.prospectos col.col-w-estado    { width: 160px; }
-  table.prospectos col.col-w-referente { width: 120px; }
-  table.prospectos col.col-w-pref      { width: 90px; }
+  table.prospectos col.col-w-tel       { width: 110px; }
+  table.prospectos col.col-w-estado    { width: 130px; }
+  table.prospectos col.col-w-referente { width: 90px; }
+  table.prospectos col.col-w-pref      { width: 70px; }
 
   /* ── EDIT BUTTON en historial ── */
   .btn-edit-mini {
@@ -1647,11 +1698,14 @@
 
 </div>
 
-<!-- ─────────────────── React + Babel + Supabase ─────────────────── -->
+<!-- ─────────────────── React + Babel + Supabase + Export libs ─────────────────── -->
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
 <!-- ─────────────────── CAPA DE DATOS (Supabase) ─────────────────── -->
 <script>
@@ -1662,10 +1716,10 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, 
 });
 
 const TAREAS_COLUMNAS_DEFAULT = [
-  { titulo: 'Administrativo',    orden: 0 },
-  { titulo: 'Ventas pendientes', orden: 1 },
-  { titulo: 'Abordar',           orden: 2 },
-  { titulo: 'Personal',          orden: 3 },
+  { titulo: 'Administrativo',    orden: 0, slug: null },
+  { titulo: 'Ventas pendientes', orden: 1, slug: null },
+  { titulo: 'Abordar',           orden: 2, slug: 'abordar' },
+  { titulo: 'Personal',          orden: 3, slug: null },
 ];
 
 function emptyState() {
@@ -1679,14 +1733,15 @@ function emptyState() {
 
 // ── Mappers DB ↔ frontend ──────────────────────────────────────
 function mapContactoFromDB(c) {
+  const horaCorta = c.hora ? c.hora.slice(0, 5) : null;
   const agendadoPara = c.fecha
-    ? (c.hora ? `${c.fecha}T${c.hora.slice(0,5)}` : c.fecha)
+    ? (horaCorta ? `${c.fecha}T${horaCorta}` : c.fecha)
     : null;
   return {
     id: c.id,
     tipo: c.tipo || '',
     fecha: c.fecha,
-    hora: c.hora,
+    hora: horaCorta,
     observacion: c.observacion || '',
     agendadoPara,
     createdAt: c.created_at
@@ -1714,16 +1769,23 @@ function mapProspectoFromDB(p, contactosTodos) {
 }
 
 function mapColumnaFromDB(c) {
-  return { id: c.id, titulo: c.titulo, orden: c.orden };
+  return {
+    id: c.id,
+    titulo: c.titulo,
+    orden: c.orden,
+    slug: c.slug || null,
+    protegida: !!c.slug   // si tiene slug, es columna especial protegida
+  };
 }
 
 function mapTareaFromDB(t) {
   return {
     id: t.id,
     columnaId: t.columna_id,
+    prospectoId: t.prospecto_id || null,
     titulo: t.titulo || '',
     fechaRecordatorio: t.fecha_recordatorio,
-    horaRecordatorio: t.hora_recordatorio,
+    horaRecordatorio: t.hora_recordatorio ? t.hora_recordatorio.slice(0, 5) : null,
     observacion: t.observacion || '',
     createdAt: t.created_at,
     updatedAt: t.updated_at
@@ -1794,12 +1856,19 @@ const storage = {
     // Sembrar columnas default si el asesor entra por primera vez
     if (columnas.length === 0) {
       const inserts = TAREAS_COLUMNAS_DEFAULT.map(c => ({
-        agente_id: user.id, titulo: c.titulo, orden: c.orden
+        agente_id: user.id, titulo: c.titulo, orden: c.orden, slug: c.slug
       }));
       const { data, error } = await sb.from('abordaje_tareas_columnas')
         .insert(inserts).select().order('orden');
       if (!error && data) columnas = data.map(mapColumnaFromDB);
       else if (error) console.error('seed columnas:', error.message);
+    } else if (!columnas.some(c => c.slug === 'abordar')) {
+      // Asesor existente sin columna Abordar — la creamos para que las tareas auto-generadas tengan adónde ir
+      const { data, error } = await sb.from('abordaje_tareas_columnas')
+        .insert({ agente_id: user.id, titulo: 'Abordar', orden: columnas.length, slug: 'abordar' })
+        .select().single();
+      if (!error && data) columnas = [...columnas, mapColumnaFromDB(data)];
+      else if (error) console.error('seed Abordar:', error.message);
     }
 
     return {
@@ -1919,11 +1988,12 @@ const storage = {
   },
 
   // ── Tareas Kanban ──
-  async createTarea({ columnaId, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
+  async createTarea({ columnaId, prospectoId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
     const user = await auth.getUser();
     const { data, error } = await sb.from('abordaje_tareas').insert({
       columna_id: columnaId,
       agente_id: user.id,
+      prospecto_id: prospectoId,
       titulo,
       observacion,
       fecha_recordatorio: fechaRecordatorio,
@@ -2140,27 +2210,35 @@ function deriveEstado(prospecto) {
   return cfg ? cfg.estado : 'nuevo';
 }
 
+// Devuelve "YYYY-MM-DDTHH:MM" en hora LOCAL (sin Z, sin UTC).
+// Importante: toISOString() convierte a UTC, lo cual genera bugs de timezone
+// cuando la app divide la fecha y hora para guardarlos en columnas separadas (date/time).
+function dateToLocalIso(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
 function calcAgendadoPara(tipo, custom) {
-  const now = new Date();
   switch (tipo) {
-    case 'llamar_15min':
-      now.setMinutes(now.getMinutes() + 15);
-      return now.toISOString();
+    case 'llamar_15min': {
+      const d = new Date();
+      d.setMinutes(d.getMinutes() + 15);
+      return dateToLocalIso(d);
+    }
     case 'llamar_tarde': {
       const d = new Date();
       if (d.getHours() < 16) { d.setHours(17, 0, 0, 0); }
       else { d.setDate(d.getDate() + 1); d.setHours(17, 0, 0, 0); }
-      return d.toISOString();
+      return dateToLocalIso(d);
     }
     case 'llamar_manana': {
       const d = new Date();
-      d.setDate(d.getDate() + 1); d.setHours(10, 0, 0, 0);
-      return d.toISOString();
+      d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0);
+      return dateToLocalIso(d);
     }
     case 'llamar_semana': {
       const d = new Date();
-      d.setDate(d.getDate() + 7); d.setHours(10, 0, 0, 0);
-      return d.toISOString();
+      d.setDate(d.getDate() + 7); d.setHours(9, 0, 0, 0);
+      return dateToLocalIso(d);
     }
     case 'llamar_dentro_de':
     case 'fecha_exacta':
@@ -2313,6 +2391,289 @@ function reordenarColumnas(columnas) {
     .map((c, i) => ({ ...c, orden: i }));
 }
 
+// ── EXPORT EXCEL / PDF ─────────────────────────────────────────
+// Logo IFS inline (mismo que login/header) — usado para renderizar en PDF
+const IFS_LOGO_SVG = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="7000 2400 9600 4800">
+<defs><style>.il0{fill:#5CC6D0}.il1{fill:#91D8F7}.il2{fill:#0098DA}.il3{fill:#3E4095}.il4{fill:#91D8F7;fill-rule:nonzero}</style></defs>
+<polygon class="il0" points="8962.78,6101.93 9303.8,7059.75 9311.18,5912.33 9167.31,5916.02 9076.17,5808.32"/>
+<polygon class="il1" points="9303.8,7059.75 8962.78,6101.93 8793.75,6616.09"/>
+<polygon class="il2" points="8793.75,6616.09 9076.17,5808.32 8992.99,5736.16 8996.68,5627.32 8919.18,5520.33 8908.11,5654.99 8624.05,6103.26"/>
+<polygon class="il1" points="8908.11,5654.99 8919.18,5520.33 8803,5226.1 8810.37,5534.16 8659.11,5871.75 8700.97,5981.89"/>
+<polygon class="il2" points="9167.31,5916.02 9097.27,5833.26 9156.24,5784.12 9305.68,5785.04 9308.94,5912.39"/>
+<polygon class="il3" points="9173.3,5637.47 9284.92,5745.38 9332.88,5745.38 9448.16,5633.78 9448.16,5555.38 9174.24,5556.3"/>
+<polygon class="il0" points="9111.97,5407.8 9156.24,5089.58 9309.37,5143.08 9312.58,5555.84 9175.63,5556.3 9174.69,5637.47 9286.32,5745.38 9307.97,5745.38 9305.68,5785.04 9156.24,5784.12 9097.27,5833.26 9076.17,5808.32 8992.99,5736.16 8996.68,5627.32"/>
+<polygon class="il2" points="8903.09,4959.07 9045.13,5026.4 8999.92,5130.62 9111.97,5407.8 8996.68,5627.32 8919.18,5520.33 8803.24,5236.72 8757.34,5136.16 8791.46,5036.54 8776.73,4991.35"/>
+<polygon class="il1" points="9111.97,5407.8 9156.24,5089.58 9106.94,4840.07 8999.92,5130.62"/>
+<polygon class="il1" points="8776.73,4991.35 8903.09,4959.07 8867.11,4799.95 8753.66,4639.46 8654.99,4573.05 8389.34,4499.26 8260.22,4407.02 8317.38,4704.95 8507.39,4941.07"/>
+<polygon class="il2" points="8389.34,4499.26 8260.22,4407.02 8553.05,4744.15 8703.39,4828.08 8776.73,4991.35 8903.09,4959.07 8863.53,4794.86 8753.66,4639.46 8654.99,4573.05"/>
+<polygon class="il2" points="9106.94,4840.07 9156.24,5089.58 9309.37,5143.08 9308.47,4413.94 9098.18,4469.28"/>
+<polygon class="il0" points="9020,4435.84 9098.18,4469.28 9106.94,4840.07 9039.33,5023.65 8903.09,4959.07 8863.53,4794.86 8772.52,4666.12 8770.04,4576.04"/>
+<polygon class="il3" points="8887.41,5127.86 8830.21,5067.9 8835.76,5041.16 8915.06,5032.85 8984.25,5097.42 8974.09,5123.24"/>
+<polygon class="il2" points="8456.45,4128.29 8661.91,4367.54 8370.35,4250.71 8151.89,3928.4 8161.99,3482.27 8253.63,3903.66"/>
+<polygon class="il1" points="8261.12,4089.56 8370.35,4250.71 7958.8,4098.38 7825.76,3953.79"/>
+<polygon class="il2" points="7958.8,4098.38 8370.35,4250.71 7687.8,4206.47 7552.1,4047.26"/>
+<polygon class="il1" points="7552.1,4047.26 7687.8,4206.47 7578.91,4185.76 7320.8,3938.23 7190.45,3642.11 7376.34,3896.9"/>
+<polygon class="il2" points="8120.38,4045.67 7837.45,3966.52 7663.02,3720.33 7581.33,3683.6 7280.15,3390.38 7673.06,3606.51 7700.94,3650.93 7785.23,3676.25 7947.99,3935.75"/>
+<polygon class="il1" points="7673.06,3606.51 7558.69,3543.59 7525.02,3134.16 7693.78,3564.21 7785.23,3676.25 7700.94,3650.93"/>
+<polygon class="il1" points="7525.02,3134.16 7558.69,3543.59 7389.47,3066.08 7504.63,2475.85 7505.34,3084.61"/>
+<polygon class="il1" points="7280.15,3390.38 7581.33,3683.6 7171.28,3450.53 7047.37,3003.74 7258.25,3378.86"/>
+<polygon class="il1" points="8238.63,4056.38 8253.63,3903.66 8161.71,3494.88 8151.89,3928.4"/>
+<polygon class="il1" points="8917.12,4357.98 8882.5,4528.16 8971.42,4498.25"/>
+<polygon class="il2" points="8882.5,4528.16 8917.12,4357.98 8770.51,4136.82 8834.2,4397.34 8814.18,4551.28"/>
+<polygon class="il2" points="8673.44,4140.73 8721.24,3978.9 8770.51,4136.82 8834.2,4397.34"/>
+<polygon class="il1" points="8721.24,3978.9 8673.44,4140.73 8654.77,3962.15 8807.52,3784.7"/>
+<polygon class="il1" points="8654.77,3962.15 8807.52,3784.7 8784.14,3684.47 8765.42,3783.45"/>
+<polygon class="il1" points="8834.2,4397.34 8814.18,4551.28 8570.93,4267.92 8564.31,4128.48 8772.94,4299.57"/>
+<polygon class="il2" points="8564.31,4128.48 8570.93,4267.92 8431.73,4109.12 8482.91,3968.31"/>
+<polygon class="il1" points="8482.91,3968.31 8431.73,4109.12 8421.63,3939.15 8520.65,3797.97"/>
+<polygon class="il1" points="8421.63,3939.15 8520.65,3797.97 8502.96,3726.15 8491.92,3797.45"/>
+<path class="il4" d="M9679.26 7014.76l301.76 0 0 -2575.98 -301.76 0 0 2575.98zm632.97 0l301.75 0 0 -1258.55 397.43 0 0 -66.24 -397.43 0 0 -1140.79 552 0 0 -110.4 -853.75 0 0 1251.19 -110.41 0 0 66.24 110.41 0 0 1258.55z"/>
+<path class="il4" d="M11603.85 6933.8c-110.39,3.68 -264.96,-95.68 -268.64,-217.12l-103.04 0c18.41,147.2 165.61,283.36 375.36,298.08 404.8,29.44 618.24,-246.56 581.43,-724.95 -33.11,-415.84 -614.54,-850.08 -662.38,-1269.59 -18.41,-165.6 7.35,-482.08 264.95,-500.48 110.39,-7.36 279.67,92 287.04,213.44l103.04 0c-25.76,-147.2 -184.01,-298.08 -390.08,-298.08l-7.36 0c-471.04,0 -588.79,371.68 -559.35,728.64 40.47,474.71 673.42,842.71 658.71,1413.1 -3.68,172.96 -47.84,386.4 -279.68,356.96z"/>
+<path class="il4" d="M12599.6 5330.95l0 -424.76 53.3 0 0 424.76 -53.3 0zm173.21 0l0 -326.8 26.64 0 207.68 229.62 0 -229.62 50.15 0 0 326.8 -26.64 0 -207.68 -228.84 0 228.84 -50.15 0zm368.33 -41.54l25.07 -43.1c21.96,14.89 47.02,26.65 73.68,35.27 26.65,8.62 51.71,12.54 76.01,12.54 29,0 52.52,-6.27 70.54,-18.03 18.02,-11.75 26.64,-26.64 26.64,-45.45 0,-18.81 -7.83,-32.14 -24.29,-41.54 -16.46,-8.62 -42.32,-14.11 -77.59,-14.89 -59.56,-0.78 -100.31,-7.84 -122.26,-20.37 -22.73,-13.32 -33.69,-35.27 -33.69,-65.05 0,-28.21 12.54,-50.94 36.83,-67.4 24.29,-17.24 57.2,-25.86 97.97,-25.86 28.2,0 55.64,3.92 82.28,11.76 25.85,7.84 51.72,19.59 76.02,35.27l-25.86 42.31c-20.38,-14.1 -42.33,-24.29 -65.83,-32.13 -23.51,-7.06 -45.46,-10.97 -67.4,-10.97 -24.3,0 -44.67,3.91 -59.57,12.54 -14.88,9.4 -22.71,20.38 -22.71,34.48 0,14.11 7.83,24.3 22.71,30.56 14.9,6.28 41.54,9.41 79.17,9.41 51.71,0 90.9,8.62 117.54,26.64 26.64,17.25 39.97,43.1 39.97,78.37 0,30.57 -13.33,56.43 -39.97,76.81 -27.42,20.37 -61.91,30.56 -105.01,30.56 -31.34,0 -62.7,-4.71 -94.04,-13.32 -31.36,-9.41 -60.35,-21.94 -86.21,-38.41zm416.92 -284.48l50.94 0 0 209.25c0,31.35 7.85,52.51 21.95,63.48 14.9,10.97 44.67,16.46 88.56,16.46 43.88,0 73.66,-5.49 88.56,-16.46 14.88,-10.97 21.93,-32.13 21.93,-63.48l0 -209.25 50.95 0 0 222.58c0,39.96 -12.55,68.96 -37.61,86.99 -25.87,18.02 -67.41,26.64 -124.61,26.64 -57.21,0 -97.97,-8.62 -123.04,-26.64 -25.08,-17.25 -37.63,-46.24 -37.63,-86.99l0 -222.58zm486.68 135.59l173.99 0c17.24,0 30.56,-3.92 39.97,-11.76 9.39,-7.83 14.1,-18.81 14.1,-32.92 0,-14.1 -4.71,-25.07 -14.1,-32.91 -9.41,-7.06 -22.73,-10.97 -39.97,-10.97l-173.99 0 0 88.56zm0 47.8l0 142.63 -50.94 0 0 -326.02 224.93 0c32.9,0 59.56,7.84 78.35,24.3 18.82,15.67 28.23,38.4 28.23,66.61 0,23.51 -7.05,43.11 -22.73,60.35 -14.9,17.24 -33.7,27.43 -58,31.35l90.91 143.41 -55.64 0 -92.48 -142.63 -142.63 0z"/>
+<path class="il4" d="M14459.84 5204.78l127.75 0 -63.47 -125.39 -64.28 125.39zm-118.33 126.17l166.14 -326.8 32.14 0 167.71 326.8 -54.86 0 -42.32 -83.07 -172.41 0 -42.32 83.07 -54.08 0zm415.35 0l0 -326.8 26.65 0 207.68 229.62 0 -229.62 50.16 0 0 326.8 -26.65 0 -207.68 -228.84 0 228.84 -50.16 0zm742.16 -79.93c-18.02,28.99 -43.11,51.72 -72.89,66.61 -30.56,15.68 -65.03,23.51 -103.45,23.51 -57.19,0 -104.22,-16.46 -141.84,-48.59 -36.83,-32.91 -55.64,-73.66 -55.64,-123.82 0,-50.16 18.81,-91.7 55.64,-123.83 37.62,-32.91 84.65,-49.37 141.84,-49.37 36.06,0 68.2,6.27 97.19,20.38 28.99,13.32 52.5,32.13 70.54,56.42l-40.77 28.21c-13.32,-18.8 -31.34,-32.91 -53.29,-43.1 -21.94,-10.18 -46.24,-14.88 -73.67,-14.88 -41.52,0 -76.01,11.75 -103.43,36.04 -27.44,23.51 -41.55,53.29 -41.55,89.35 0,36.05 14.11,65.82 41.55,89.33 27.42,24.3 61.91,36.05 103.43,36.05 29.01,0 54.87,-5.48 76.81,-17.24 22.72,-11.75 42.31,-28.99 58.78,-53.28l40.75 28.21zm86.21 79.93l0 -327.58 306.43 0 0 47.81 -255.5 0 0 81.5 167.72 0 0 47.02 -167.72 0 0 103.45 269.61 0 0 47.02 -320.54 0z"/>
+<path class="il4" d="M12877.82 6069.98l-130.1 -152.82c-34.47,14.89 -61.12,32.13 -78.37,52.51 -17.24,19.59 -25.86,42.32 -25.86,67.4 0,26.64 9.41,48.59 28.22,65.04 18.02,16.46 43.1,25.08 72.88,25.08 22.72,0 45.45,-4.7 67.4,-14.1 22.73,-10.19 44.67,-24.3 65.83,-43.11zm112.07 -41.54c-5.49,7.84 -12.54,16.47 -18.81,23.51 -7.05,7.84 -14.9,14.9 -22.73,22.73l75.24 86.99 -67.41 0 -47.02 -53.28c-28.2,23.51 -55.64,40.75 -81.5,51.72 -25.85,10.97 -53.29,16.45 -82.29,16.45 -47.81,0 -85.41,-12.53 -114.41,-37.62 -29,-25.07 -43.11,-57.98 -43.11,-99.52 0,-33.7 10.19,-62.7 31.34,-88.56 20.38,-25.86 52.52,-50.15 95.62,-71.32l-115.99 -137.14 277.43 0 28.99 46.23 -198.26 0 206.89 243.73c10.97,-10.96 19.59,-19.59 25.87,-26.64 5.47,-7.05 11.74,-13.32 16.44,-20.38l33.71 43.1zm354.22 136.37l0 -422.41 332.3 0 0 48.59 -279.79 0 0 123.82 169.28 0 0 48.59 -169.28 0 0 201.41 -52.51 0z"/>
+<path class="il4" d="M13668.19 6164.81l0 -327.58 51.71 0 0 327.58 -51.71 0zm165.35 0l0 -326.8 26.65 0 207.68 229.62 0 -229.62 50.15 0 0 326.8 -26.64 0 -207.68 -228.84 0 228.84 -50.16 0zm452.2 -126.17l127.74 0 -63.48 -125.4 -64.26 125.4zm-118.34 126.17l166.13 -326.8 32.14 0 167.71 326.8 -54.86 0 -42.31 -83.07 -172.42 0 -42.32 83.07 -54.07 0zm415.35 0l0 -326.8 26.65 0 207.68 229.62 0 -229.62 50.15 0 0 326.8 -26.65 0 -207.68 -228.84 0 228.84 -50.15 0zm742.16 -79.93c-18.04,28.99 -43.1,51.72 -72.89,66.61 -30.55,15.67 -65.05,23.51 -103.45,23.51 -57.2,0 -104.22,-16.46 -141.85,-48.59 -36.83,-32.92 -55.63,-73.67 -55.63,-123.82 0,-50.16 18.8,-91.7 55.63,-123.83 37.63,-32.91 84.65,-49.37 141.85,-49.37 36.05,0 68.19,6.27 97.19,20.38 28.99,13.32 52.5,32.13 70.52,56.42l-40.75 28.21c-13.32,-18.8 -31.35,-32.91 -53.28,-43.1 -21.96,-10.19 -46.24,-14.89 -73.68,-14.89 -41.52,0 -76.02,11.76 -103.44,36.05 -27.43,23.51 -41.54,53.29 -41.54,89.34 0,36.05 14.11,65.83 41.54,89.34 27.42,24.29 61.92,36.05 103.44,36.05 29,0 54.86,-5.48 76.81,-17.24 22.73,-11.76 42.32,-28.99 58.78,-53.29l40.75 28.22zm86.98 79.93l0 -327.58 51.72 0 0 327.58 -51.72 0zm220.22 -126.17l127.75 0 -63.47 -125.4 -64.28 125.4zm-118.34 126.17l166.15 -326.8 32.13 0 167.71 326.8 -54.85 0 -42.32 -83.07 -172.41 0 -42.32 83.07 -54.09 0zm414.58 0l0 -326.8 50.93 0 0 279.78 242.95 0 0 47.02 -293.88 0z"/>
+<path class="il4" d="M12558.86 6935.19l30.56 -45.46c29.77,22.73 61.13,40.76 93.25,53.3 32.14,11.75 64.27,18.02 95.63,18.02 39.17,0 70.53,-8.62 94.81,-25.08 25.09,-16.46 36.83,-37.62 36.83,-63.48 0,-21.15 -8.61,-37.62 -25.84,-50.94 -18.04,-13.32 -42.33,-21.15 -72.89,-24.29 -7.06,-0.78 -18.03,-1.57 -32.13,-2.36 -69.75,-4.7 -116.78,-12.53 -141.85,-24.29 -19.59,-9.4 -34.49,-21.94 -44.68,-36.83 -10.19,-14.89 -15.66,-31.35 -15.66,-50.16 0,-33.7 14.88,-61.91 45.44,-83.85 30.57,-21.95 69.75,-32.92 118.34,-32.92 35.27,0 69.75,5.49 104.24,17.25 34.47,11.75 67.39,28.99 97.96,51.72l-30.57 43.88c-25.87,-21.15 -53.29,-36.83 -82.29,-47.8 -28.2,-10.19 -57.99,-15.67 -88.56,-15.67 -31.34,0 -57.98,6.26 -78.36,18.81 -21.17,12.53 -31.35,27.43 -31.35,46.23 0,7.84 1.57,14.11 4.71,20.37 3.92,6.28 8.61,11.76 15.66,17.25 17.24,13.32 54.87,21.16 112.85,25.07 25.87,1.58 47.03,3.14 61.13,4.71 43.11,4.7 76.8,18.81 101.89,41.53 25.08,22.73 37.61,50.16 37.61,83.86 0,39.18 -17.24,72.1 -51.72,97.18 -33.7,25.86 -79.15,38.4 -134.79,38.4 -42.32,0 -81.52,-6.27 -117.56,-18.03 -36.05,-12.54 -70.53,-31.35 -102.66,-56.42zm671.63 25.86c43.87,0 79.15,-11.76 106.57,-35.27 28.22,-23.51 41.54,-54.07 41.54,-90.12 0,-36.05 -14.11,-65.83 -41.54,-90.12 -27.42,-23.51 -63.47,-35.27 -106.57,-35.27 -43.11,0 -78.37,11.76 -105.8,35.27 -27.44,23.51 -41.54,53.28 -41.54,90.12 0,36.05 14.1,66.61 41.54,90.12 27.43,23.51 62.69,35.27 105.8,35.27zm0 47.81c-58.01,0 -105.8,-16.47 -143.43,-49.38 -37.61,-32.91 -56.42,-74.45 -56.42,-123.82 0,-50.16 18.81,-90.91 56.42,-123.83 36.84,-32.13 85.42,-48.58 143.43,-48.58 58.77,0 107.35,16.45 144.98,48.58 36.83,32.13 55.64,73.67 55.64,123.83 0,50.15 -18.81,90.91 -56.44,123.82 -37.61,32.91 -85.41,49.38 -144.18,49.38zm283.69 -10.19l0 -326.8 50.94 0 0 279.77 242.95 0 0 47.03 -293.89 0zm352.66 -326.02l50.93 0 0 209.24c0,31.35 7.84,52.52 21.96,63.48 14.88,10.98 44.66,16.47 88.55,16.47 43.89,0 73.67,-5.49 88.55,-16.47 14.89,-10.96 21.94,-32.13 21.94,-63.48l0 -209.24 50.94 0 0 222.57c0,39.97 -12.53,68.96 -37.61,86.99 -25.87,18.02 -67.39,26.65 -124.61,26.65 -57.21,0 -97.95,-8.63 -123.04,-26.65 -25.06,-17.25 -37.61,-46.24 -37.61,-86.99l0 -222.57zm512.53 326.02l0 -281.35 -137.93 0 0 -45.45 326.8 0 0 45.45 -137.92 0 0 281.35 -50.95 0zm240.59 0l0 -327.58 51.74 0 0 327.58 -51.74 0zm336.21 -37.62c43.89,0 79.16,-11.76 106.58,-35.27 28.22,-23.51 41.54,-54.07 41.54,-90.12 0,-36.05 -14.1,-65.83 -41.54,-90.12 -27.42,-23.51 -63.47,-35.27 -106.58,-35.27 -43.1,0 -78.37,11.76 -105.8,35.27 -27.42,23.51 -41.54,53.28 -41.54,90.12 0,36.05 14.12,66.61 41.54,90.12 27.43,23.51 62.7,35.27 105.8,35.27zm0 47.81c-57.99,0 -105.8,-16.47 -143.41,-49.38 -37.62,-32.91 -56.43,-74.45 -56.43,-123.82 0,-50.16 18.81,-90.91 56.43,-123.83 36.84,-32.13 85.42,-48.58 143.41,-48.58 58.79,0 107.37,16.45 144.99,48.58 36.83,32.13 55.65,73.67 55.65,123.83 0,50.15 -18.82,90.91 -56.43,123.82 -37.63,32.91 -85.42,49.38 -144.21,49.38zm284.48 -10.19l0 -326.8 26.65 0 207.68 229.62 0 -229.62 50.17 0 0 326.8 -26.65 0 -207.68 -228.84 0 228.84 -50.17 0zm368.34 -41.54l25.08 -43.11c21.94,14.9 47.02,26.65 73.66,35.27 26.65,8.63 51.73,12.55 76.02,12.55 29.01,0 52.51,-6.28 70.53,-18.03 18.04,-11.76 26.66,-26.65 26.66,-45.46 0,-18.8 -7.85,-32.13 -24.3,-41.53 -16.46,-8.62 -42.32,-14.11 -77.58,-14.89 -59.56,-0.79 -100.32,-7.84 -122.26,-20.38 -22.73,-13.32 -33.7,-35.26 -33.7,-65.05 0,-28.21 12.54,-50.94 36.84,-67.39 24.29,-17.24 57.2,-25.86 97.95,-25.86 28.22,0 55.64,3.92 82.29,11.75 25.87,7.84 51.73,19.6 76.02,35.27l-25.87 42.31c-20.37,-14.1 -42.3,-24.29 -65.82,-32.13 -23.51,-7.05 -45.45,-10.97 -67.4,-10.97 -24.29,0 -44.68,3.92 -59.56,12.55 -14.89,9.4 -22.73,20.37 -22.73,34.47 0,14.11 7.84,24.3 22.73,30.57 14.88,6.27 41.54,9.41 79.15,9.41 51.73,0 90.92,8.62 117.56,26.64 26.65,17.24 39.97,43.1 39.97,78.37 0,30.56 -13.32,56.43 -39.97,76.8 -27.43,20.38 -61.91,30.57 -105.01,30.57 -31.36,0 -62.7,-4.71 -94.05,-13.33 -31.34,-9.4 -60.34,-21.94 -86.21,-38.4z"/>
+</svg>`;
+
+let _ifsLogoCache = null;
+async function loadIFSLogoPNG(targetWidth = 1200) {
+  if (_ifsLogoCache && _ifsLogoCache.width === targetWidth) return _ifsLogoCache;
+  return new Promise((resolve, reject) => {
+    const blob = new Blob([IFS_LOGO_SVG], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const aspect = img.naturalWidth / img.naturalHeight || 2;
+      const w = targetWidth, h = Math.round(targetWidth / aspect);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      _ifsLogoCache = { dataURL: canvas.toDataURL('image/png'), width: w, height: h };
+      resolve(_ifsLogoCache);
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+
+function _filaProspectoParaExport(p) {
+  const ult = (p.contactos || []).slice(-1)[0];
+  const cfgUlt = ult ? tipoConfig(ult.tipo) : null;
+  const proxIso = p.proximoContacto;
+  return {
+    Nombre:        p.nombre || '',
+    Telefono:      p.telefono || '',
+    Estado:        ESTADO_META[deriveEstado(p)]?.label || '',
+    UltimaGestion: cfgUlt?.label || '',
+    UltimaFecha:   ult?.createdAt ? new Date(ult.createdAt).toLocaleDateString('es-AR') : '',
+    Proximo:       proxIso ? new Date(proxIso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '',
+    Observacion:   ult?.observacion || '',
+    Referente:     p.referente || '',
+    Preferencia:   p.preferenciaContacto || '',
+  };
+}
+
+function exportarProspectosExcel(prospectos) {
+  if (!window.XLSX) { alert('XLSX library no cargada'); return; }
+  const filas = prospectos.map(_filaProspectoParaExport);
+  const ws = XLSX.utils.json_to_sheet(filas);
+  ws['!cols'] = [
+    { wch: 24 }, { wch: 14 }, { wch: 12 }, { wch: 16 },
+    { wch: 12 }, { wch: 16 }, { wch: 40 }, { wch: 16 }, { wch: 12 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Prospectos');
+  const ts = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `IFS_Abordaje_${ts}.xlsx`);
+}
+
+function _hex2rgb(hex) {
+  if (!hex) return [80, 80, 100];
+  const m = hex.replace('#', '').match(/^([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (!m) return [80, 80, 100];
+  return [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)];
+}
+
+// Devuelve los últimos N contactos del prospecto en el orden que los queremos pintar
+// (más reciente primero — el más nuevo arriba sin sangría).
+function _ultimasGestiones(p, max = 3) {
+  return [...(p.contactos || [])].reverse().slice(0, max);
+}
+
+async function exportarProspectosPDF(prospectos, user) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert('jsPDF library no cargada'); return; }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+
+  // Cargar el logo IFS (SVG → PNG)
+  let logo = null;
+  try { logo = await loadIFSLogoPNG(1200); }
+  catch (e) { console.error('no se pudo cargar logo IFS:', e); }
+
+  // Header con logo IFS real
+  const drawHeader = () => {
+    // Banda navy superior
+    doc.setFillColor(30, 27, 75);
+    doc.rect(0, 0, pageW, 16, 'F');
+
+    if (logo) {
+      // Logo IFS — alto fijo 10mm, ancho calculado por aspect ratio
+      const aspect = logo.width / logo.height;
+      const logoH = 10, logoW = logoH * aspect;
+      doc.addImage(logo.dataURL, 'PNG', 10, 3, logoW, logoH);
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(145, 216, 247);
+      doc.text('IFS', 12, 10);
+    }
+
+    // Título derecha
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text('Lista de Abordaje', pageW - 12, 10, { align: 'right' });
+
+    // Sub-banda info
+    doc.setFontSize(8);
+    doc.setTextColor(80, 80, 100);
+    doc.setFont('helvetica', 'normal');
+    const fecha = new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+    doc.text(`Asesor: ${user?.email || 'IFS'}`, 12, 22);
+    doc.text(`Generado: ${fecha}`, pageW - 12, 22, { align: 'right' });
+  };
+
+  const drawFooter = (pageNum, pageCount) => {
+    doc.setFontSize(7.5);
+    doc.setTextColor(120, 120, 140);
+    doc.setFont('helvetica', 'normal');
+    doc.text('www.broker-ifs.com — Confidencial', 12, pageH - 6);
+    doc.text(`Página ${pageNum} de ${pageCount}`, pageW - 12, pageH - 6, { align: 'right' });
+  };
+
+  // Datos de la tabla. La columna 4 (Últimas gestiones) la dibujamos a mano en didDrawCell.
+  const head = [['#', 'Nombre', 'Teléfono', 'Estado', 'Últimas gestiones', 'Ref.', 'Pref.']];
+  const body = prospectos.map((p, i) => {
+    return [
+      i + 1,
+      p.nombre || '',
+      p.telefono || '',
+      ESTADO_META[deriveEstado(p)]?.label || '',
+      '', // se dibuja en didDrawCell
+      p.referente || '',
+      p.preferenciaContacto || '',
+    ];
+  });
+
+  // Constantes del rendering manual de la celda 4
+  const ROW_H_GESTION = 4.6;     // alto por gestión (mm)
+  const SANGRIA_PX = 5;          // sangría progresiva (mm) por nivel
+
+  doc.autoTable({
+    head, body,
+    startY: 28,
+    margin: { left: 10, right: 10, top: 28, bottom: 12 },
+    styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 2.5, overflow: 'linebreak', valign: 'middle' },
+    headStyles: { fillColor: [62, 64, 149], textColor: 255, fontSize: 7.5, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: [245, 247, 252] },
+    columnStyles: {
+      0: { cellWidth: 8,  halign: 'right' },
+      1: { cellWidth: 42, fontStyle: 'bold' },
+      2: { cellWidth: 24 },
+      3: { cellWidth: 22 },
+      4: { cellWidth: 'auto', minCellHeight: 18, valign: 'top' },
+      5: { cellWidth: 18, overflow: 'ellipsize' },
+      6: { cellWidth: 22, overflow: 'ellipsize' },
+    },
+    didDrawPage: () => { drawHeader(); },
+    didDrawCell: (data) => {
+      // Render manual de la columna 4 (Últimas gestiones)
+      if (data.column.index !== 4 || data.section !== 'body') return;
+      const p = prospectos[data.row.index];
+      if (!p) return;
+      const ultimos = _ultimasGestiones(p, 3);
+      if (ultimos.length === 0) {
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 165);
+        doc.text('Sin gestiones', data.cell.x + 2, data.cell.y + 5);
+        return;
+      }
+      const baseX = data.cell.x + 2;
+      const startY = data.cell.y + 4;
+      ultimos.forEach((c, i) => {
+        const cfg = tipoConfig(c.tipo);
+        const x = baseX + i * SANGRIA_PX;
+        const y = startY + i * ROW_H_GESTION;
+
+        // 1) Fecha del registro
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.5);
+        doc.setTextColor(110, 110, 130);
+        const fechaReg = c.createdAt
+          ? new Date(c.createdAt).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit' })
+          : '';
+        doc.text(fechaReg, x, y);
+        let cursor = x + (fechaReg ? doc.getTextWidth(fechaReg) + 2 : 0);
+
+        // 2) Chip etiqueta con color
+        const label = (cfg?.label || c.tipo || '').toUpperCase();
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(5.8);
+        const labelW = doc.getTextWidth(label) + 2.5;
+        const bg = _hex2rgb(cfg?.bg || '#eef4fb');
+        const fg = _hex2rgb(cfg?.color || '#3E4095');
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.roundedRect(cursor, y - 2.7, labelW, 3.4, 0.8, 0.8, 'F');
+        doc.setTextColor(fg[0], fg[1], fg[2]);
+        doc.text(label, cursor + 1.25, y);
+        cursor += labelW + 1.5;
+
+        // 3) Fecha objetivo (si tiene). Uso >> en vez de → porque jsPDF default no tiene la flecha unicode.
+        if (c.agendadoPara) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6.5);
+          doc.setTextColor(62, 64, 149);
+          const d = new Date(c.agendadoPara);
+          const fechaObj = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          const objTxt = '>> ' + fechaObj;
+          doc.text(objTxt, cursor, y);
+          cursor += doc.getTextWidth(objTxt) + 1.5;
+        }
+
+        // 4) Observación (truncada al ancho disponible)
+        if (c.observacion) {
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(6.5);
+          doc.setTextColor(70, 70, 90);
+          const maxW = (data.cell.x + data.cell.width) - cursor - 2;
+          if (maxW > 5) {
+            const linea = doc.splitTextToSize(c.observacion, maxW)[0] || '';
+            doc.text(linea, cursor, y);
+          }
+        }
+      });
+    },
+  });
+
+  // Footer en cada página (con paginación final)
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    drawFooter(i, pageCount);
+  }
+
+  const ts = new Date().toISOString().slice(0,10);
+  doc.save(`IFS_Abordaje_${ts}.pdf`);
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, onLogout }) {
   const [state, setState] = useState(() => emptyState());
@@ -2389,26 +2750,86 @@ function App({ user, onLogout }) {
     }
   };
 
+  // Sincroniza la tarea (Abordar) y/o el agendado del prospect según el contacto activo.
+  // contactoActivo: el contacto que define el seguimiento vigente. Si null/sin agendadoPara,
+  // sólo limpia (no crea nada).
+  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
+    // 1. Limpiar tareas auto-generadas del prospect
+    const tareasAuto = (prevState.tareas?.items || []).filter(t => t.prospectoId === prospectoId);
+    for (const t of tareasAuto) {
+      try { await storage.deleteTarea(t.id); }
+      catch (e) { console.error('limpieza tarea auto:', e); }
+    }
+    // 2. Limpiar agendados anteriores del prospect que NO estén vencidos
+    const ahora = new Date();
+    const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
+      if (a.prospectoId !== prospectoId) return false;
+      return new Date(a.fecha) >= ahora;
+    });
+    for (const a of agendadosNoVencidos) {
+      try { await storage.deleteAgendado(a.id); }
+      catch (e) { console.error('limpieza agendado:', e); }
+    }
+    const idsTareasBorradas = new Set(tareasAuto.map(t => t.id));
+    const idsAgendadosBorrados = new Set(agendadosNoVencidos.map(a => a.id));
+    setState(s => ({
+      ...s,
+      tareas: { ...s.tareas, items: s.tareas.items.filter(t => !idsTareasBorradas.has(t.id)) },
+      agendados: s.agendados.filter(a => !idsAgendadosBorrados.has(a.id))
+    }));
+
+    // 3. Si no hay contacto activo o no tiene fecha objetivo, salir
+    if (!contactoActivo || !contactoActivo.agendadoPara) return;
+
+    // 4. Generar lo nuevo según el tipo
+    if (contactoActivo.tipo === 'agendado') {
+      try {
+        const ag = await calendarApi.agendar(prospectoId, contactoActivo.agendadoPara, contactoActivo.observacion || '');
+        setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
+      } catch (e) { console.error('agendar:', e); }
+    } else {
+      const colAbordar = (prevState.tareas?.columnas || []).find(c => c.slug === 'abordar');
+      if (!colAbordar) { console.warn('No hay columna Abordar'); return; }
+      const prospect = prevState.prospectos.find(p => p.id === prospectoId);
+      const titulo = prospect?.nombre || 'Seguimiento';
+      const { fecha, hora } = splitFechaHora(contactoActivo.agendadoPara);
+      const cfgTipo = tipoConfig(contactoActivo.tipo);
+      const obsTarea = [cfgTipo?.label, contactoActivo.observacion]
+        .filter(Boolean).join(' — ');
+      try {
+        const tarea = await storage.createTarea({
+          columnaId: colAbordar.id,
+          prospectoId,
+          titulo,
+          fechaRecordatorio: fecha,
+          horaRecordatorio: hora,
+          observacion: obsTarea
+        });
+        setState(s => ({ ...s, tareas: { ...s.tareas, items: [...s.tareas.items, tarea] } }));
+      } catch (e) { console.error('crear tarea auto:', e); }
+    }
+  };
+
   const handleAddContacto = async (prospectoId, contacto) => {
     try {
       const nuevo = await storage.createContacto(prospectoId, contacto);
       const nuevoEstado = tipoConfig(nuevo.tipo)?.estado || 'nuevo';
       const nuevoProx = nuevo.agendadoPara || null;
+
+      // Update local: agregar contacto al prospecto + estado/próximoContacto derivados
       setState(s => ({
         ...s,
         prospectos: s.prospectos.map(p => p.id === prospectoId
           ? { ...p, contactos: [...(p.contactos || []), nuevo], proximoContacto: nuevoProx, estado: nuevoEstado, updatedAt: new Date().toISOString() }
           : p)
       }));
-      // Sincronizo estado y proximoContacto en el prospecto en DB
       await storage.updateProspecto(prospectoId, { estado: nuevoEstado, proximoContacto: nuevoProx });
-      // Si es agendado, registrar también en abordaje_agendados
-      if (contacto.tipo === 'agendado' && contacto.agendadoPara) {
-        try {
-          const ag = await calendarApi.agendar(prospectoId, contacto.agendadoPara, contacto.observacion || '');
-          setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
-        } catch (e) { console.error('agendar:', e); }
+
+      // Sincronización tarea/agenda automática (solo si trae fecha objetivo)
+      if (contacto.agendadoPara) {
+        await sincronizarSeguimiento(prospectoId, nuevo, state);
       }
+
       showToast('Gestión registrada');
     } catch (e) { handleErr(e, 'createContacto'); }
   };
@@ -2416,42 +2837,42 @@ function App({ user, onLogout }) {
   const handleEditContacto = async (prospectoId, contactoId, patch) => {
     try {
       await storage.updateContacto(contactoId, patch);
+
+      // Reconstruir el contacto con el patch aplicado (para usarlo en sincronización)
+      const prevState = state;
+      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
+      if (!prospectAnterior) return;
+      const contactosAct = (prospectAnterior.contactos || []).map(c => {
+        if (c.id !== contactoId) return c;
+        const merged = { ...c, ...patch };
+        if ('agendadoPara' in patch) {
+          merged.agendadoPara = patch.agendadoPara;
+        } else if ('fecha' in patch || 'hora' in patch) {
+          merged.agendadoPara = merged.fecha
+            ? (merged.hora ? `${merged.fecha}T${merged.hora}` : merged.fecha)
+            : null;
+        }
+        return merged;
+      });
+      const ultimo = contactosAct[contactosAct.length - 1];
+      const proxNuevo = ultimo?.agendadoPara || null;
+      const estadoNuevo = ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo';
+
       setState(s => ({
         ...s,
-        prospectos: s.prospectos.map(p => {
-          if (p.id !== prospectoId) return p;
-          const contactos = (p.contactos || []).map(c => {
-            if (c.id !== contactoId) return c;
-            const merged = { ...c, ...patch };
-            // Recalcular agendadoPara si cambia fecha/hora/agendadoPara
-            if ('agendadoPara' in patch) {
-              merged.agendadoPara = patch.agendadoPara;
-            } else if ('fecha' in patch || 'hora' in patch) {
-              merged.agendadoPara = merged.fecha
-                ? (merged.hora ? `${merged.fecha}T${merged.hora}` : merged.fecha)
-                : null;
-            }
-            return merged;
-          });
-          const ultimo = contactos[contactos.length - 1];
-          return {
-            ...p,
-            contactos,
-            proximoContacto: ultimo?.agendadoPara || null,
-            estado: ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo',
-            updatedAt: new Date().toISOString()
-          };
-        })
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
       }));
-      // sincronizar estado + proximoContacto del prospecto
-      const p = state.prospectos.find(x => x.id === prospectoId);
-      if (p) {
-        const contactos = (p.contactos || []).map(c => c.id === contactoId ? { ...c, ...patch } : c);
-        const ultimo = contactos[contactos.length - 1];
-        const proxNuevo = ultimo?.agendadoPara || null;
-        const estadoNuevo = ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo';
-        await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+
+      // Si el contacto editado es el último (define el seguimiento vigente),
+      // resincronizamos tarea/agenda con la versión nueva.
+      const editadoEsUltimo = ultimo?.id === contactoId;
+      if (editadoEsUltimo) {
+        await sincronizarSeguimiento(prospectoId, ultimo, prevState);
       }
+
       showToast('Gestión actualizada');
     } catch (e) { handleErr(e, 'updateContacto'); }
   };
@@ -2577,6 +2998,11 @@ function App({ user, onLogout }) {
 
   const handleRenameColumna = async (columnaId, nuevoTitulo) => {
     if (!nuevoTitulo || !nuevoTitulo.trim()) return;
+    const col = state.tareas.columnas.find(c => c.id === columnaId);
+    if (col?.protegida) {
+      showToast('La columna "Abordar" no se puede renombrar');
+      return;
+    }
     const prev = state.tareas.columnas;
     setState(s => ({
       ...s,
@@ -2594,6 +3020,11 @@ function App({ user, onLogout }) {
   };
 
   const handleDeleteColumna = async (columnaId) => {
+    const col = state.tareas.columnas.find(c => c.id === columnaId);
+    if (col?.protegida) {
+      showToast('La columna "Abordar" no se puede eliminar');
+      return;
+    }
     const tareasEnCol = state.tareas.items.filter(t => t.columnaId === columnaId).length;
     let msg = '¿Eliminar esta columna?';
     if (tareasEnCol > 0) {
@@ -2675,18 +3106,18 @@ function App({ user, onLogout }) {
       />
 
       <div className="main-head">
-        <div>
-          <h1>Mi lista de abordaje</h1>
-          <div className="subhead">
-            {state.prospectos.length === 0
-              ? 'Sin prospectos cargados todavía'
-              : `${state.prospectos.length} ${state.prospectos.length === 1 ? 'prospecto' : 'prospectos'} en gestión`
-            }
-          </div>
+        <h1>Mi lista de abordaje</h1>
+        <div className="main-head-actions">
+          <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">
+            Excel
+          </button>
+          <button className="btn-export" onClick={() => exportarProspectosPDF(state.prospectos, user)} title="Descargar lista en PDF">
+            PDF
+          </button>
+          <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+            + Nuevo prospecto
+          </button>
         </div>
-        <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-          + Nuevo prospecto
-        </button>
       </div>
 
       <ViewTabs view={view} setView={setView} />
@@ -2972,19 +3403,22 @@ function TimelineCell({ contactos }) {
   const restantes = contactos.length - ultimos.length;
   return (
     <div className="timeline-cell">
-      {ultimos.map(c => {
+      {ultimos.map((c, i) => {
         const cfg = tipoConfig(c.tipo);
+        const fechaReg = c.createdAt || c.fecha;
+        const tooltipObj = c.tipo === 'agendado' ? 'Cita' : 'Próximo contacto';
         return (
-          <div key={c.id} className="timeline-row">
+          <div key={c.id} className="timeline-row" style={{ marginLeft: i * 14 + 'px' }}>
+            <span className="timeline-fecha-reg" title="Registrado el">{formatFechaCorta(fechaReg)}</span>
             <span className="chip" style={{color: cfg?.color, background: cfg?.bg}}>
               {cfg?.label || c.tipo}
             </span>
-            <div className="body">
-              <span className="fecha">{formatFechaCorta(c.fecha)}</span>
-              {c.observacion && (
-                <span className="obs" title={c.observacion}>{c.observacion}</span>
-              )}
-            </div>
+            {c.agendadoPara && (
+              <span className="timeline-fecha-obj" title={tooltipObj}>{formatFechaHora(c.agendadoPara)}</span>
+            )}
+            {c.observacion && (
+              <span className="timeline-obs" title={c.observacion}>{c.observacion}</span>
+            )}
           </div>
         );
       })}
@@ -3364,7 +3798,14 @@ function HistorialEditForm({ contacto, settings, onSave, onCancel }) {
         patch.agendadoPara = new Date(fechaIso + 'T' + hora + ':00').toISOString();
         patch.duracionMin = parseInt(duracionMin, 10) || defaultDur;
       } else {
-        patch.agendadoPara = new Date(fechaIso + 'T10:00:00').toISOString();
+        // Días completos sin hora específica → default 09:00
+        patch.agendadoPara = new Date(fechaIso + 'T09:00:00').toISOString();
+      }
+      // Si la fecha cambió respecto al original, la etiqueta original ya no aplica.
+      // Convertimos automáticamente a "fecha_exacta" (salvo que ya sea agendado, que mantiene tipo).
+      const cambioFecha = patch.agendadoPara !== contacto.agendadoPara;
+      if (cambioFecha && contacto.tipo !== 'agendado' && contacto.tipo !== 'fecha_exacta') {
+        patch.tipo = 'fecha_exacta';
       }
     }
     onSave(patch);
@@ -3979,7 +4420,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, goPrev, goN
                 const vencido = ev < now && !isToday(ev);
                 return (
                   <div key={e.id}
-                    className={`cal-week-event ${e.kind === 'tarea' ? 'cal-event-tarea' : ''} ${vencido ? 'vencido' : ''}`}
+                    className={`cal-week-event ${e.kind === 'tarea' ? 'cal-event-tarea' : ''} ${e.tareaData?.prospectoId ? 'cal-event-tarea-auto' : ''} ${vencido ? 'vencido' : ''}`}
                     style={{
                       top: top, height,
                       background: cfg?.bg || '#f3f4f6',
@@ -4028,7 +4469,7 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
         return (
           <div
             key={e.id}
-            className={`cal-event ${e.kind === 'tarea' ? 'cal-event-tarea' : ''} ${vencido ? 'vencido' : ''}`}
+            className={`cal-event ${e.kind === 'tarea' ? 'cal-event-tarea' : ''} ${e.tareaData?.prospectoId ? 'cal-event-tarea-auto' : ''} ${vencido ? 'vencido' : ''}`}
             style={{
               background: cfg?.bg || '#f3f4f6',
               borderLeftColor: cfg?.color || '#6b7280',
@@ -4257,18 +4698,22 @@ function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveT
   };
 
   return (
-    <div className="kanban-col">
+    <div className={`kanban-col ${columna.protegida ? 'kanban-col-protegida' : ''}`}>
       <div className="kanban-col-head">
         <input
           className="kanban-col-titulo"
           value={tituloEdit}
+          readOnly={!!columna.protegida}
+          title={columna.protegida ? 'Columna fija — no se puede renombrar' : undefined}
           onChange={(e) => setTituloEdit(e.target.value)}
           onBlur={commitTitulo}
           onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setTituloEdit(columna.titulo); e.target.blur(); } }}
           aria-label="Nombre de columna"
         />
         <span className="kanban-col-count">{tareas.length}</span>
-        <button className="kanban-col-del" onClick={onDelete} title="Eliminar columna" aria-label="Eliminar columna">×</button>
+        {!columna.protegida && (
+          <button className="kanban-col-del" onClick={onDelete} title="Eliminar columna" aria-label="Eliminar columna">×</button>
+        )}
       </div>
       <div
         className="kanban-col-body"
@@ -4372,7 +4817,7 @@ function TareaCard({ tarea, onClick, onMoveTarea }) {
   return (
     <div
       ref={cardRef}
-      className={`tarea-card activated ${dragging ? 'dragging' : ''}`}
+      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -4457,9 +4902,15 @@ function TareaModal({ tarea, columnas, onClose, onSave, onDelete, onConvertir })
               disabled={!form.fechaRecordatorio} />
           </div>
           <div className="field">
-            <label>Observación / detalle</label>
+            <label>Observación / detalle <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(Enter guarda · Shift+Enter nueva línea)</span></label>
             <textarea value={form.observacion}
               onChange={e => upd('observacion', e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                  e.preventDefault();
+                  guardar();
+                }
+              }}
               placeholder="Descripción libre de la tarea, pasos, contexto..." />
           </div>
         </div>
