@@ -1667,6 +1667,43 @@
     margin-right: 2px;
   }
 
+  /* Banner "Viendo como" (modo solo lectura como otro asesor) */
+  .view-as-banner {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    color: #78350f;
+    padding: 8px 22px;
+    margin: 0 -22px 12px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid rgba(120,53,15,0.18);
+  }
+  .view-as-banner strong { font-weight: 800; }
+  .view-as-readonly {
+    background: rgba(120,53,15,0.18);
+    padding: 2px 9px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-left: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .view-as-exit-btn {
+    background: rgba(120,53,15,0.9);
+    color: #fef3c7;
+    border: none;
+    border-radius: 7px;
+    padding: 6px 14px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: background 0.12s;
+    flex-shrink: 0;
+  }
+  .view-as-exit-btn:hover { background: #78350f; }
+
   /* ── RESPONSIVE ── */
   @media (max-width: 900px) {
     .col-referente, .col-pref { display: none; }
@@ -1854,16 +1891,20 @@ const auth = {
 
 // ── Storage Supabase ───────────────────────────────────────────
 const storage = {
-  async loadState() {
+  async loadState(targetAgenteId) {
     const user = await auth.getUser();
     if (!user) return emptyState();
+    // Por default vemos lo nuestro. Si el admin entra en modo "Ver como",
+    // pasamos el id del otro asesor para filtrar.
+    const agenteId = targetAgenteId || user.id;
+    const viendoAOtro = !!targetAgenteId && targetAgenteId !== user.id;
 
     const [prosRes, conRes, colRes, tarRes, agnRes] = await Promise.all([
-      sb.from('abordaje_prospectos').select('*').order('created_at', { ascending: false }),
-      sb.from('abordaje_prospecto_contactos').select('*').order('created_at'),
-      sb.from('abordaje_tareas_columnas').select('*').order('orden'),
-      sb.from('abordaje_tareas').select('*').order('created_at'),
-      sb.from('abordaje_agendados').select('*').order('fecha')
+      sb.from('abordaje_prospectos').select('*').eq('agente_id', agenteId).order('created_at', { ascending: false }),
+      sb.from('abordaje_prospecto_contactos').select('*').eq('agente_id', agenteId).order('created_at'),
+      sb.from('abordaje_tareas_columnas').select('*').eq('agente_id', agenteId).order('orden'),
+      sb.from('abordaje_tareas').select('*').eq('agente_id', agenteId).order('created_at'),
+      sb.from('abordaje_agendados').select('*').eq('agente_id', agenteId).order('fecha')
     ]);
 
     [prosRes, conRes, colRes, tarRes, agnRes].forEach(r => {
@@ -1872,8 +1913,9 @@ const storage = {
 
     let columnas = (colRes.data || []).map(mapColumnaFromDB);
 
-    // Sembrar columnas default si el asesor entra por primera vez
-    if (columnas.length === 0) {
+    // Sembrar columnas default solo cuando es el user mismo y nunca entró.
+    // Si estás viendo como OTRO, no semillamos sus columnas — vemos lo que tenga.
+    if (columnas.length === 0 && !viendoAOtro) {
       const inserts = TAREAS_COLUMNAS_DEFAULT.map(c => ({
         agente_id: user.id, titulo: c.titulo, orden: c.orden, slug: c.slug
       }));
@@ -1881,8 +1923,7 @@ const storage = {
         .insert(inserts).select().order('orden');
       if (!error && data) columnas = data.map(mapColumnaFromDB);
       else if (error) console.error('seed columnas:', error.message);
-    } else if (!columnas.some(c => c.slug === 'abordar')) {
-      // Asesor existente sin columna Abordar — la creamos para que las tareas auto-generadas tengan adónde ir
+    } else if (!viendoAOtro && !columnas.some(c => c.slug === 'abordar')) {
       const { data, error } = await sb.from('abordaje_tareas_columnas')
         .insert({ agente_id: user.id, titulo: 'Abordar', orden: columnas.length, slug: 'abordar' })
         .select().single();
@@ -2712,9 +2753,19 @@ async function exportarProspectosPDF(prospectos, user) {
 }
 
 // ── APP ────────────────────────────────────────────────────────
-function App({ user, agente, onLogout }) {
+function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
+  const readOnly = !!viewAs;
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
+
+  // Guard común para handlers de escritura: bloquea si estamos viendo como otro
+  const guardReadOnly = () => {
+    if (readOnly) {
+      showToast('Vista de solo lectura — volvé a tu vista para editar');
+      return true;
+    }
+    return false;
+  };
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -2725,12 +2776,13 @@ function App({ user, agente, onLogout }) {
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
 
-  // Carga inicial desde Supabase
+  // Carga inicial desde Supabase. Si hay viewAs, filtra por su id.
   useEffect(() => {
     let cancel = false;
+    setLoading(true);
     (async () => {
       try {
-        const s = await storage.loadState();
+        const s = await storage.loadState(viewAs?.id);
         if (!cancel) setState(s);
       } catch (e) {
         console.error('loadState:', e);
@@ -2740,7 +2792,7 @@ function App({ user, agente, onLogout }) {
       }
     })();
     return () => { cancel = true; };
-  }, []);
+  }, [viewAs?.id]);
 
   const handleErr = (e, ctx) => {
     console.error(ctx, e);
@@ -2748,6 +2800,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const upsertProspecto = useCallback(async (id, patch) => {
+    if (readOnly) { showToast('Vista de solo lectura'); return; }
     const prevList = state.prospectos;
     // Optimistic update
     setState(s => ({
@@ -2762,9 +2815,10 @@ function App({ user, agente, onLogout }) {
       handleErr(e, 'updateProspecto');
       setState(s => ({ ...s, prospectos: prevList }));
     }
-  }, [state.prospectos]);
+  }, [state.prospectos, readOnly]);
 
   const handleAdd = async (data) => {
+    if (guardReadOnly()) return;
     try {
       const prospecto = await storage.createProspecto(data);
       setState(s => ({ ...s, prospectos: [prospecto, ...s.prospectos] }));
@@ -2774,6 +2828,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleDelete = async (id) => {
+    if (guardReadOnly()) return;
     if (!confirm('¿Eliminar este prospecto? No se puede deshacer.')) return;
     const prev = state.prospectos;
     setState(s => ({ ...s, prospectos: s.prospectos.filter(p => p.id !== id) }));
@@ -2848,6 +2903,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleAddContacto = async (prospectoId, contacto) => {
+    if (guardReadOnly()) return;
     try {
       const nuevo = await storage.createContacto(prospectoId, contacto);
       const nuevoEstado = tipoConfig(nuevo.tipo)?.estado || 'nuevo';
@@ -2872,6 +2928,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleEditContacto = async (prospectoId, contactoId, patch) => {
+    if (guardReadOnly()) return;
     try {
       await storage.updateContacto(contactoId, patch);
 
@@ -2915,6 +2972,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleDeleteContacto = async (prospectoId, contactoId) => {
+    if (guardReadOnly()) return;
     if (!confirm('¿Eliminar este registro de gestión?')) return;
     try {
       const prevState = state;
@@ -2952,6 +3010,7 @@ function App({ user, agente, onLogout }) {
 
   // ── TAREAS HANDLERS ──
   const handleAddTarea = async (columnaId, titulo = '') => {
+    if (guardReadOnly()) return;
     try {
       const tarea = await storage.createTarea({ columnaId, titulo: titulo.trim() });
       setState(s => ({
@@ -2962,6 +3021,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
+    if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
     if (!tarea || tarea.columnaId === nuevaColumnaId) return;
     // Optimistic
@@ -2991,6 +3051,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleUpdateTarea = async (id, patch) => {
+    if (guardReadOnly()) return;
     const prev = state.tareas.items.find(t => t.id === id);
     setState(s => ({
       ...s,
@@ -3012,6 +3073,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleDeleteTarea = async (id) => {
+    if (guardReadOnly()) return;
     if (!confirm('¿Eliminar esta tarea?')) return;
     const prev = state.tareas.items;
     setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
@@ -3026,6 +3088,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleAddColumna = async () => {
+    if (guardReadOnly()) return;
     const titulo = prompt('Nombre de la nueva columna:');
     if (!titulo || !titulo.trim()) return;
     try {
@@ -3039,6 +3102,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleMoveColumna = async (columnaId, targetColumnaId, position) => {
+    if (guardReadOnly()) return;
     if (columnaId === targetColumnaId) return;
     const prev = state.tareas.columnas;
     const ordenadas = [...prev].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
@@ -3065,6 +3129,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleRenameColumna = async (columnaId, nuevoTitulo) => {
+    if (guardReadOnly()) return;
     if (!nuevoTitulo || !nuevoTitulo.trim()) return;
     const col = state.tareas.columnas.find(c => c.id === columnaId);
     if (col?.protegida) {
@@ -3088,6 +3153,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleDeleteColumna = async (columnaId) => {
+    if (guardReadOnly()) return;
     const col = state.tareas.columnas.find(c => c.id === columnaId);
     if (col?.protegida) {
       showToast('La columna "Abordar" no se puede eliminar');
@@ -3114,6 +3180,7 @@ function App({ user, agente, onLogout }) {
   };
 
   const handleConvertirTareaAProspect = async (tareaId, nombre, apellido) => {
+    if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
     if (!tarea) return;
     const notasParts = [];
@@ -3170,12 +3237,23 @@ function App({ user, agente, onLogout }) {
       <HeaderActions
         user={user}
         agente={agente}
+        viewAs={viewAs}
+        onExitViewAs={onExitViewAs}
         onLogout={onLogout}
         onOpenSettings={() => setShowSettings(true)}
       />
+      {viewAs && (
+        <div className="view-as-banner">
+          <div>
+            👁 Estás viendo Abordaje como <strong>{viewAs.display_name || viewAs.email}</strong>
+            <span className="view-as-readonly"> · solo lectura</span>
+          </div>
+          <button className="view-as-exit-btn" onClick={onExitViewAs}>← Volver a tu vista</button>
+        </div>
+      )}
 
       <div className="main-head">
-        <h1>Mi lista de abordaje</h1>
+        <h1>{viewAs ? `Lista de ${viewAs.display_name || viewAs.email}` : 'Mi lista de abordaje'}</h1>
         <div className="main-head-actions">
           <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">
             Excel
@@ -3183,9 +3261,11 @@ function App({ user, agente, onLogout }) {
           <button className="btn-export" onClick={() => exportarProspectosPDF(state.prospectos, user)} title="Descargar lista en PDF">
             PDF
           </button>
-          <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-            + Nuevo prospecto
-          </button>
+          {!readOnly && (
+            <button className="btn-primary" onClick={() => setShowAddModal(true)}>
+              + Nuevo prospecto
+            </button>
+          )}
         </div>
       </div>
 
@@ -3223,6 +3303,7 @@ function App({ user, agente, onLogout }) {
       {view === 'tareas' && (
         <TareasView
           tareasState={state.tareas}
+          readOnly={readOnly}
           onAddTarea={handleAddTarea}
           onMoveTarea={handleMoveTarea}
           onEditarTarea={(t) => setTareaEditando(t)}
@@ -3265,6 +3346,7 @@ function App({ user, agente, onLogout }) {
           settings={settings}
           agente={agente}
           currentUser={user}
+          onViewAs={(p) => { onViewAs(p); setShowSettings(false); }}
           onCancel={() => setShowSettings(false)}
           onSave={(s) => { setSettings(s); persistSettings(s); showToast('Ajustes guardados'); }}
         />
@@ -3297,6 +3379,7 @@ function App({ user, agente, onLogout }) {
         <PanelLateral
           prospecto={selectedProspecto}
           settings={settings}
+          readOnly={readOnly}
           onClose={() => setSelectedId(null)}
           onUpdate={(patch) => upsertProspecto(selectedProspecto.id, patch)}
           onDelete={() => handleDelete(selectedProspecto.id)}
@@ -3310,9 +3393,10 @@ function App({ user, agente, onLogout }) {
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, agente, onLogout, onOpenSettings }) {
+function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings }) {
   const esAdmin = agente?.role === 'admin';
   const displayName = agente?.display_name || user?.email || '';
+  const enViewAs = !!viewAs;
   useEffect(() => {
     const target = document.getElementById('headerActions');
     if (!target) return;
@@ -3510,7 +3594,7 @@ function TimelineCell({ contactos }) {
 }
 
 // ── PANEL LATERAL (gestión arriba, datos abajo, historial abajo) ─
-function PanelLateral({ prospecto, settings, onClose, onUpdate, onDelete, onAddContacto, onEditContacto, onDeleteContacto }) {
+function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onAddContacto, onEditContacto, onDeleteContacto }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -3529,16 +3613,19 @@ function PanelLateral({ prospecto, settings, onClose, onUpdate, onDelete, onAddC
           <button className="panel-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
 
-        <div className="panel-section">
-          <h4>Registrar gestión</h4>
-          <RegistrarGestion onSubmit={onAddContacto} settings={settings} />
-        </div>
+        {!readOnly && (
+          <div className="panel-section">
+            <h4>Registrar gestión</h4>
+            <RegistrarGestion onSubmit={onAddContacto} settings={settings} />
+          </div>
+        )}
 
         <div className="panel-section">
           <h4>Historial de gestiones</h4>
           <HistorialList
             contactos={prospecto.contactos || []}
             settings={settings}
+            readOnly={readOnly}
             onEdit={onEditContacto}
             onDelete={onDeleteContacto}
           />
@@ -3546,19 +3633,21 @@ function PanelLateral({ prospecto, settings, onClose, onUpdate, onDelete, onAddC
 
         <div className="panel-section">
           <h4>Datos del prospecto</h4>
-          <FieldsProspecto prospecto={prospecto} onUpdate={onUpdate} />
+          <FieldsProspecto prospecto={prospecto} readOnly={readOnly} onUpdate={onUpdate} />
         </div>
 
-        <div className="panel-section" style={{display:'flex', justifyContent:'flex-end'}}>
-          <button className="btn-danger" onClick={onDelete}>Eliminar prospecto</button>
-        </div>
+        {!readOnly && (
+          <div className="panel-section" style={{display:'flex', justifyContent:'flex-end'}}>
+            <button className="btn-danger" onClick={onDelete}>Eliminar prospecto</button>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
 // ── FIELDS PROSPECTO (autosave on blur) ────────────────────────
-function FieldsProspecto({ prospecto, onUpdate }) {
+function FieldsProspecto({ prospecto, readOnly, onUpdate }) {
   const [draft, setDraft] = useState({
     nombre: prospecto.nombre || '',
     telefono: prospecto.telefono || '',
@@ -3586,20 +3675,20 @@ function FieldsProspecto({ prospecto, onUpdate }) {
     <div>
       <div className="field-inline">
         <label>Nombre</label>
-        <input type="text" value={draft.nombre}
+        <input type="text" value={draft.nombre} readOnly={readOnly}
           onChange={e => upd('nombre', e.target.value)}
           onBlur={() => commit('nombre')} />
       </div>
       <div className="field-inline-row">
         <div className="field-inline">
           <label>Teléfono</label>
-          <input type="tel" value={draft.telefono}
+          <input type="tel" value={draft.telefono} readOnly={readOnly}
             onChange={e => upd('telefono', e.target.value)}
             onBlur={() => commit('telefono')} />
         </div>
         <div className="field-inline">
           <label>Preferencia</label>
-          <select value={draft.preferenciaContacto}
+          <select value={draft.preferenciaContacto} disabled={readOnly}
             onChange={e => { upd('preferenciaContacto', e.target.value); setTimeout(() => onUpdate({ preferenciaContacto: e.target.value }), 0); }}>
             <option value="">— Seleccionar —</option>
             {PREFS_CONTACTO.map(p => <option key={p} value={p}>{p}</option>)}
@@ -3608,19 +3697,19 @@ function FieldsProspecto({ prospecto, onUpdate }) {
       </div>
       <div className="field-inline">
         <label>Detalle</label>
-        <input type="text" value={draft.detalle}
+        <input type="text" value={draft.detalle} readOnly={readOnly}
           onChange={e => upd('detalle', e.target.value)}
           onBlur={() => commit('detalle')} />
       </div>
       <div className="field-inline">
         <label>Referente</label>
-        <input type="text" value={draft.referente}
+        <input type="text" value={draft.referente} readOnly={readOnly}
           onChange={e => upd('referente', e.target.value)}
           onBlur={() => commit('referente')} />
       </div>
       <div className="field-inline">
         <label>Observaciones generales</label>
-        <textarea value={draft.observaciones}
+        <textarea value={draft.observaciones} readOnly={readOnly}
           onChange={e => upd('observaciones', e.target.value)}
           onBlur={() => commit('observaciones')} />
       </div>
@@ -3796,7 +3885,7 @@ function RegistrarGestion({ onSubmit, settings }) {
 }
 
 // ── HISTORIAL ──────────────────────────────────────────────────
-function HistorialList({ contactos, settings, onEdit, onDelete }) {
+function HistorialList({ contactos, settings, readOnly, onEdit, onDelete }) {
   if (!contactos || contactos.length === 0) {
     return <div className="historial-vacio">Sin gestiones registradas todavía.</div>;
   }
@@ -3804,7 +3893,7 @@ function HistorialList({ contactos, settings, onEdit, onDelete }) {
   return (
     <div className="historial-list">
       {ordenados.map(c => (
-        <HistorialItem key={c.id} contacto={c} settings={settings}
+        <HistorialItem key={c.id} contacto={c} settings={settings} readOnly={readOnly}
           onSave={(patch) => onEdit(c.id, patch)}
           onDelete={() => onDelete(c.id)} />
       ))}
@@ -3812,7 +3901,7 @@ function HistorialList({ contactos, settings, onEdit, onDelete }) {
   );
 }
 
-function HistorialItem({ contacto, settings, onSave, onDelete }) {
+function HistorialItem({ contacto, settings, readOnly, onSave, onDelete }) {
   const [editing, setEditing] = useState(false);
   const cfg = tipoConfig(contacto.tipo);
 
@@ -3849,8 +3938,12 @@ function HistorialItem({ contacto, settings, onSave, onDelete }) {
         {contacto.observacion && (
           <span className="hist-obs" title={contacto.observacion}>{contacto.observacion}</span>
         )}
-        <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
-        <button className="btn-hist-del" onClick={onDelete} title="Eliminar este registro">×</button>
+        {!readOnly && (
+          <>
+            <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
+            <button className="btn-hist-del" onClick={onDelete} title="Eliminar este registro">×</button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -4721,7 +4814,7 @@ function AdminTh({ children, right }) {
 }
 
 // ── SECCIÓN USUARIOS — copia literal del patrón Comisiones ─────
-function UsuariosSection({ currentUser }) {
+function UsuariosSection({ currentUser, onViewAs }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
@@ -4919,7 +5012,14 @@ function UsuariosSection({ currentUser }) {
                           <button onClick={cancelEdit} style={adminBtnGhost}>Cancelar</button>
                         </>
                       ) : (
-                        <button onClick={() => startEdit(p)} style={adminBtnGhost}>Editar</button>
+                        <>
+                          <button onClick={() => startEdit(p)} style={adminBtnGhost}>Editar</button>
+                          {onViewAs && p.id !== currentUser.id && (
+                            <button onClick={() => onViewAs(p)} title={`Ver Abordaje como ${p.display_name || p.email}`} style={adminBtnGhost}>
+                              Ver como
+                            </button>
+                          )}
+                        </>
                       )}
                     </td>
                   </tr>
@@ -4943,7 +5043,7 @@ function UsuariosSection({ currentUser }) {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onCancel, onSave }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -5052,7 +5152,7 @@ function SettingsModal({ settings, agente, currentUser, onCancel, onSave }) {
             </div>
           </section>
 
-          {esAdmin && <UsuariosSection currentUser={currentUser} />}
+          {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
         </div>
       </div>
     </div>
@@ -5060,7 +5160,7 @@ function SettingsModal({ settings, agente, currentUser, onCancel, onSave }) {
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna }) {
+function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna }) {
   const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   return (
     <div className="kanban-wrap">
@@ -5071,6 +5171,7 @@ function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAdd
             key={col.id}
             columna={col}
             tareas={items}
+            readOnly={readOnly}
             onRename={(nuevo) => onRenameColumna(col.id, nuevo)}
             onDelete={() => onDeleteColumna(col.id)}
             onAddTarea={(titulo) => onAddTarea(col.id, titulo)}
@@ -5080,12 +5181,14 @@ function TareasView({ tareasState, onAddTarea, onMoveTarea, onEditarTarea, onAdd
           />
         );
       })}
-      <button className="kanban-add-col" onClick={onAddColumna}>+ Nueva columna</button>
+      {!readOnly && (
+        <button className="kanban-add-col" onClick={onAddColumna}>+ Nueva columna</button>
+      )}
     </div>
   );
 }
 
-function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea }) {
+function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
@@ -5127,6 +5230,7 @@ function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveT
   };
 
   const onHeadPointerDown = (e) => {
+    if (readOnly) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     // No iniciar drag si el click va sobre un input o botón del header
     const tag = e.target.tagName;
@@ -5214,10 +5318,10 @@ function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveT
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} onClick={() => onEditarTarea(t)} onMoveTarea={onMoveTarea} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} onClick={() => onEditarTarea(t)} onMoveTarea={onMoveTarea} />)
         )}
       </div>
-      {agregando ? (
+      {!readOnly && (agregando ? (
         <input
           className="kanban-col-add-input"
           autoFocus
@@ -5229,12 +5333,12 @@ function TareaColumna({ columna, tareas, onRename, onDelete, onAddTarea, onMoveT
         />
       ) : (
         <button className="kanban-col-add" onClick={() => setAgregando(true)}>+ Nueva tarea</button>
-      )}
+      ))}
     </div>
   );
 }
 
-function TareaCard({ tarea, onClick, onMoveTarea }) {
+function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
   const cardRef = useRef(null);
   const dragRef = useRef({ active: false, startX: 0, startY: 0, dragging: false, pointerId: null });
   const [dragging, setDragging] = useState(false);
@@ -5258,6 +5362,7 @@ function TareaCard({ tarea, onClick, onMoveTarea }) {
   };
 
   const onPointerDown = (e) => {
+    if (readOnly) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     dragRef.current = { active: true, startX: e.clientX, startY: e.clientY, dragging: false, pointerId: e.pointerId };
   };
@@ -5627,20 +5732,19 @@ function Root() {
 function AppShell() {
   const [user, setUser] = useState(null);
   const [agente, setAgente] = useState(null);  // perfil con rol/nombre
+  const [viewAs, setViewAs] = useState(null);  // perfil seleccionado para "Ver como"
 
   useEffect(() => {
     let mounted = true;
     auth.getUser().then(u => { if (mounted) setUser(u); });
     const { data } = auth.onChange((event, session) => {
       if (!mounted) return;
-      if (event === 'SIGNED_OUT') { setUser(null); setAgente(null); }
+      if (event === 'SIGNED_OUT') { setUser(null); setAgente(null); setViewAs(null); }
       else if (session?.user) setUser(session.user);
     });
     return () => { mounted = false; data?.subscription?.unsubscribe?.(); };
   }, []);
 
-  // Cargar perfil del usuario (role, display_name) cuando hay user.
-  // La tabla `profiles` es compartida entre todas las apps IFS (Comisiones, Abordaje, etc).
   useEffect(() => {
     if (!user) { setAgente(null); return; }
     let cancel = false;
@@ -5654,10 +5758,24 @@ function AppShell() {
     await auth.signOut();
     setUser(null);
     setAgente(null);
+    setViewAs(null);
   };
 
   if (!user) return null;
-  return <App key={user.id} user={user} agente={agente} onLogout={handleLogout} />;
+  // key incluye viewAs.id para forzar re-mount cuando cambia el "Ver como" — esto
+  // resetea state interno (filtros, selección, etc.) limpiamente.
+  const appKey = `${user.id}|${viewAs?.id || 'self'}`;
+  return (
+    <App
+      key={appKey}
+      user={user}
+      agente={agente}
+      viewAs={viewAs}
+      onViewAs={setViewAs}
+      onExitViewAs={() => setViewAs(null)}
+      onLogout={handleLogout}
+    />
+  );
 }
 
 window.__abordajeMount = function() {
