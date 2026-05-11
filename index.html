@@ -4731,6 +4731,20 @@ async function createUser(payload) {
   return data;
 }
 
+// Borra un user (cascade borra profile + datos en todas las apps).
+async function deleteUser(userId) {
+  const { data, error } = await sb.functions.invoke('delete-user', { body: { user_id: userId } });
+  if (error) throw new Error(data?.error || error.message);
+  return data;
+}
+
+// Cambia el password de un user. Solo admin.
+async function updateUserPassword(userId, password) {
+  const { data, error } = await sb.functions.invoke('update-user-password', { body: { user_id: userId, password } });
+  if (error) throw new Error(data?.error || error.message);
+  return data;
+}
+
 // ── UI primitivas y estilos (copia literal del patrón Comisiones) ─
 const adminOverlayStyle = {
   position: 'fixed', inset: 0, zIndex: 1000,
@@ -4788,6 +4802,12 @@ const adminBtnGhost = {
   padding: '5px 12px', fontSize: 11, fontWeight: 600,
   cursor: 'pointer', marginLeft: 4,
 };
+const adminBtnDanger = {
+  background: 'transparent', color: '#dc2626',
+  border: '1px solid #fecaca', borderRadius: 6,
+  padding: '5px 12px', fontSize: 11, fontWeight: 600,
+  cursor: 'pointer', marginLeft: 4,
+};
 
 function AdminField({ label, hint, children }) {
   return (
@@ -4815,6 +4835,7 @@ function AdminTh({ children, right }) {
 
 // ── SECCIÓN USUARIOS — copia literal del patrón Comisiones ─────
 function UsuariosSection({ currentUser, onViewAs }) {
+  const currentUserId = currentUser?.id;
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
@@ -4824,6 +4845,10 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const [creating, setCreating] = useState(false);
   const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent' });
   const [createBusy, setCreateBusy] = useState(false);
+  const [passEditingId, setPassEditingId] = useState(null);
+  const [passDraft, setPassDraft] = useState('');
+  const [passBusy, setPassBusy] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -4866,6 +4891,35 @@ function UsuariosSection({ currentUser, onViewAs }) {
       setCreating(false);
     } catch (err) { setError(err.message); }
     setCreateBusy(false);
+  };
+
+  const savePassword = async id => {
+    setError(null);
+    if (!passDraft || passDraft.length < 8) {
+      setError('La contraseña debe tener al menos 8 caracteres');
+      return;
+    }
+    setPassBusy(true);
+    try {
+      await updateUserPassword(id, passDraft);
+      setPassEditingId(null);
+      setPassDraft('');
+    } catch (err) { setError(err.message); }
+    setPassBusy(false);
+  };
+
+  const handleDelete = async p => {
+    const label = p.display_name || p.email;
+    if (!confirm(`¿Eliminar a "${label}"?\n\nEsto borra el usuario y todos sus datos en todas las apps IFS. No se puede deshacer.`)) {
+      return;
+    }
+    setError(null);
+    setDeletingId(p.id);
+    try {
+      await deleteUser(p.id);
+      setProfiles(ps => ps.filter(x => x.id !== p.id));
+    } catch (err) { setError(err.message); }
+    setDeletingId(null);
   };
 
   return (
@@ -5011,12 +5065,41 @@ function UsuariosSection({ currentUser, onViewAs }) {
                           </button>
                           <button onClick={cancelEdit} style={adminBtnGhost}>Cancelar</button>
                         </>
+                      ) : passEditingId === p.id ? (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          <input
+                            type="text" autoFocus
+                            value={passDraft}
+                            onChange={e => setPassDraft(e.target.value)}
+                            placeholder="Nueva contraseña (mín 8)"
+                            style={{ ...adminInpStyle, width: 200, marginRight: 4 }}
+                          />
+                          <button onClick={() => savePassword(p.id)} disabled={passBusy} style={adminBtnPrimary}>
+                            {passBusy ? '…' : 'Guardar'}
+                          </button>
+                          <button onClick={() => { setPassEditingId(null); setPassDraft(''); setError(null); }} style={adminBtnGhost}>
+                            Cancelar
+                          </button>
+                        </div>
                       ) : (
                         <>
                           <button onClick={() => startEdit(p)} style={adminBtnGhost}>Editar</button>
-                          {onViewAs && p.id !== currentUser.id && (
-                            <button onClick={() => onViewAs(p)} title={`Ver Abordaje como ${p.display_name || p.email}`} style={adminBtnGhost}>
+                          <button onClick={() => { setPassEditingId(p.id); setPassDraft(''); setError(null); }} style={adminBtnGhost} title="Cambiar contraseña">
+                            🔑 Pass
+                          </button>
+                          {onViewAs && p.id !== currentUserId && (
+                            <button onClick={() => onViewAs(p)} style={adminBtnGhost} title={`Ver Abordaje como ${p.display_name || p.email}`}>
                               Ver como
+                            </button>
+                          )}
+                          {p.id !== currentUserId && (
+                            <button
+                              onClick={() => handleDelete(p)}
+                              disabled={deletingId === p.id}
+                              style={adminBtnDanger}
+                              title={`Borrar ${p.display_name || p.email}`}
+                            >
+                              {deletingId === p.id ? '…' : 'Borrar'}
                             </button>
                           )}
                         </>
