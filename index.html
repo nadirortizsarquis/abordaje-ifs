@@ -1913,22 +1913,26 @@ const storage = {
 
     let columnas = (colRes.data || []).map(mapColumnaFromDB);
 
-    // Sembrar columnas default solo cuando es el user mismo y nunca entró.
-    // Si estás viendo como OTRO, no semillamos sus columnas — vemos lo que tenga.
-    if (columnas.length === 0 && !viendoAOtro) {
-      const inserts = TAREAS_COLUMNAS_DEFAULT.map(c => ({
-        agente_id: user.id, titulo: c.titulo, orden: c.orden, slug: c.slug
-      }));
-      const { data, error } = await sb.from('abordaje_tareas_columnas')
-        .insert(inserts).select().order('orden');
-      if (!error && data) columnas = data.map(mapColumnaFromDB);
-      else if (error) console.error('seed columnas:', error.message);
-    } else if (!viendoAOtro && !columnas.some(c => c.slug === 'abordar')) {
-      const { data, error } = await sb.from('abordaje_tareas_columnas')
-        .insert({ agente_id: user.id, titulo: 'Abordar', orden: columnas.length, slug: 'abordar' })
-        .select().single();
-      if (!error && data) columnas = [...columnas, mapColumnaFromDB(data)];
-      else if (error) console.error('seed Abordar:', error.message);
+    // Auto-completar columnas default que falten — solo cuando es el user mismo.
+    // No semillamos cuando admin entra a "Ver como" otro (vemos lo que tenga).
+    if (!viendoAOtro) {
+      const tieneTitulo = new Set(columnas.map(c => c.titulo.toLowerCase()));
+      const tieneAbordarSlug = columnas.some(c => c.slug === 'abordar');
+      const faltantes = [];
+      for (const def of TAREAS_COLUMNAS_DEFAULT) {
+        // Si es la columna Abordar y ya hay una con slug='abordar', no duplicamos.
+        if (def.slug === 'abordar' && tieneAbordarSlug) continue;
+        // Si ya tiene columna con ese título, no duplicamos.
+        if (tieneTitulo.has(def.titulo.toLowerCase())) continue;
+        const ordenLibre = columnas.length + faltantes.length;
+        faltantes.push({ agente_id: user.id, titulo: def.titulo, orden: ordenLibre, slug: def.slug });
+      }
+      if (faltantes.length > 0) {
+        const { data, error } = await sb.from('abordaje_tareas_columnas')
+          .insert(faltantes).select();
+        if (error) console.error('seed default columnas:', error.message);
+        else if (data) columnas = [...columnas, ...data.map(mapColumnaFromDB)];
+      }
     }
 
     return {
