@@ -1667,6 +1667,125 @@
     margin-right: 2px;
   }
 
+  /* ── Campanita de notificaciones ── */
+  .bell-btn {
+    position: relative;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.18);
+    color: white;
+    padding: 6px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    line-height: 0;
+    transition: background 0.15s, border-color 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .bell-btn svg { display: block; }
+  .bell-btn:hover { background: rgba(255,255,255,0.16); border-color: rgba(255,255,255,0.35); }
+  .bell-badge {
+    position: absolute;
+    top: -6px; right: -6px;
+    background: #dc2626;
+    color: white;
+    font-size: 0.62rem;
+    font-weight: 800;
+    padding: 1px 6px;
+    border-radius: 8px;
+    min-width: 16px;
+    text-align: center;
+    border: 2px solid #1e1b4b;
+    line-height: 1.2;
+  }
+  .bell-dropdown {
+    position: fixed;
+    top: calc(var(--header-h) + 6px);
+    right: 22px;
+    width: 380px;
+    max-width: calc(100vw - 44px);
+    max-height: calc(100vh - var(--header-h) - 30px);
+    background: white;
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    box-shadow: 0 12px 40px rgba(15,17,41,0.3);
+    z-index: 9999;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .bell-dropdown-header {
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--borde);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 0.92rem;
+    color: var(--azul-oscuro);
+  }
+  .bell-empty {
+    padding: 30px 16px;
+    text-align: center;
+    color: var(--texto-suave);
+    font-size: 0.86rem;
+  }
+  .bell-group {
+    display: flex; flex-direction: column;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .bell-group:last-child { border-bottom: none; }
+  .bell-group-header {
+    padding: 6px 14px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .bell-group-count {
+    background: rgba(0,0,0,0.08);
+    padding: 1px 7px;
+    border-radius: 7px;
+    font-size: 0.66rem;
+    margin-left: auto;
+  }
+  .bell-item {
+    padding: 10px 14px;
+    display: flex; align-items: flex-start; gap: 10px;
+    cursor: pointer;
+    border-top: 1px solid #f3f4f6;
+    transition: background 0.1s;
+  }
+  .bell-item:hover { background: #f9fafb; }
+  .bell-item-icon {
+    font-size: 1.05rem;
+    line-height: 1;
+    margin-top: 1px;
+  }
+  .bell-item-body { flex: 1; min-width: 0; }
+  .bell-item-titulo {
+    font-size: 0.86rem;
+    font-weight: 600;
+    color: var(--texto);
+    line-height: 1.3;
+  }
+  .bell-item-detalle {
+    font-size: 0.74rem;
+    color: var(--texto-suave);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bell-item-fecha {
+    font-size: 0.74rem;
+    color: var(--azul-oscuro);
+    font-weight: 700;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  /* Scroll interno cuando muchos items */
+  .bell-group:not(:first-of-type) { overflow-y: visible; }
+  .bell-dropdown { overflow-y: auto; }
+
   /* Banner "Viendo como" (modo solo lectura como otro asesor) */
   .view-as-banner {
     background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
@@ -2766,6 +2885,133 @@ async function exportarProspectosPDF(prospectos, user) {
   doc.save(`IFS_Abordaje_${ts}.pdf`);
 }
 
+// ── NOTIFICACIONES (campanita) ─────────────────────────────────
+// Calcula la lista de eventos pendientes (vencidos + hoy + próximos 24h + semana)
+// a partir del state actual. No consulta DB — todo viene de prospectos, tareas
+// y agendados ya cargados.
+function clasificarUrgenciaNotif(fecha, now, en24h) {
+  if (fecha < now) return 'vencido';
+  if (isToday(fecha)) return 'hoy';
+  if (fecha <= en24h) return '24h';
+  return 'semana';
+}
+
+function calcularNotificaciones(state) {
+  const now = new Date();
+  const en24h = new Date(now.getTime() + 24 * 3600 * 1000);
+  const en7d = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+
+  const items = [];
+
+  // Agendados (citas formales — eventos azules en calendario)
+  for (const a of state.agendados || []) {
+    const fecha = new Date(a.fecha);
+    if (fecha > en7d) continue;
+    const prospect = state.prospectos.find(p => p.id === a.prospectoId);
+    items.push({
+      key: 'ag_' + a.id,
+      tipo: 'agendado',
+      fecha,
+      titulo: prospect?.nombre || '(sin nombre)',
+      detalle: a.nota || 'Cita agendada',
+      prospectoId: a.prospectoId,
+      urgencia: clasificarUrgenciaNotif(fecha, now, en24h),
+    });
+  }
+
+  // Tareas con vencimiento
+  for (const t of state.tareas?.items || []) {
+    if (!t.fechaRecordatorio) continue;
+    const fecha = t.horaRecordatorio
+      ? new Date(`${t.fechaRecordatorio}T${t.horaRecordatorio}:00`)
+      : new Date(`${t.fechaRecordatorio}T23:59:59`);
+    if (fecha > en7d) continue;
+    items.push({
+      key: 'ta_' + t.id,
+      tipo: 'tarea',
+      fecha,
+      titulo: t.titulo || '(tarea sin título)',
+      detalle: t.observacion || '',
+      tareaId: t.id,
+      prospectoId: t.prospectoId || null,
+      urgencia: clasificarUrgenciaNotif(fecha, now, en24h),
+    });
+  }
+
+  items.sort((a, b) => a.fecha - b.fecha);
+  return items;
+}
+
+const URGENCIA_META = {
+  vencido: { label: 'Vencidos',         color: '#dc2626', bg: '#fef2f2', emoji: '🔴' },
+  hoy:     { label: 'Hoy',              color: '#ea580c', bg: '#fff7ed', emoji: '🟠' },
+  '24h':   { label: 'Próximas 24 hs',   color: '#a16207', bg: '#fefce8', emoji: '🟡' },
+  semana:  { label: 'Esta semana',      color: '#1e40af', bg: '#eff6ff', emoji: '🔵' },
+};
+
+function NotificacionesDropdown({ items, onClose, onClickItem }) {
+  // Agrupar por urgencia
+  const grupos = ['vencido', 'hoy', '24h', 'semana']
+    .map(u => ({ urgencia: u, items: items.filter(i => i.urgencia === u) }))
+    .filter(g => g.items.length > 0);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    const onClick = (e) => {
+      if (!e.target.closest('.bell-dropdown') && !e.target.closest('.bell-btn')) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="bell-dropdown">
+      <div className="bell-dropdown-header">
+        <strong>Notificaciones</strong>
+        <span style={{fontSize:'0.72rem', color:'var(--texto-suave)'}}>
+          {items.length} {items.length === 1 ? 'evento' : 'eventos'}
+        </span>
+      </div>
+      {grupos.length === 0 && (
+        <div className="bell-empty">Sin eventos pendientes 🎉</div>
+      )}
+      {grupos.map(g => {
+        const meta = URGENCIA_META[g.urgencia];
+        return (
+          <div key={g.urgencia} className="bell-group">
+            <div className="bell-group-header" style={{color: meta.color, background: meta.bg}}>
+              {meta.emoji} {meta.label} <span className="bell-group-count">{g.items.length}</span>
+            </div>
+            {g.items.map(it => {
+              const dt = it.fecha;
+              const hh = String(dt.getHours()).padStart(2,'0');
+              const mm = String(dt.getMinutes()).padStart(2,'0');
+              const hoy = isToday(dt);
+              const fechaStr = hoy
+                ? `${hh}:${mm}`
+                : `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')} ${hh}:${mm}`;
+              return (
+                <div key={it.key} className="bell-item" onClick={() => onClickItem(it)}>
+                  <div className="bell-item-icon">{it.tipo === 'agendado' ? '📅' : '📌'}</div>
+                  <div className="bell-item-body">
+                    <div className="bell-item-titulo">{it.titulo}</div>
+                    {it.detalle && <div className="bell-item-detalle">{it.detalle}</div>}
+                  </div>
+                  <div className="bell-item-fecha">{fechaStr}</div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -2791,9 +3037,22 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
       try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged)); } catch {}
     }
   }, [agente?.id]);
+
+  // Tick cada 60s para que las urgencias de notificaciones se recalculen
+  // (ej. "Llamar en 15min" → cuando pasen los 15 min pasa de "Hoy" a "Vencido"
+  // sin necesidad de recargar la página).
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  const notificaciones = useMemo(() => calcularNotificaciones(state), [state, tick]);
+  const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [bellOpen, setBellOpen] = useState(false);
+  const [tick, setTick] = useState(0);  // re-render cada 60s para recalcular urgencias
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
@@ -3266,7 +3525,25 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         onExitViewAs={onExitViewAs}
         onLogout={onLogout}
         onOpenSettings={() => setShowSettings(true)}
+        notifCount={notifUrgentes}
+        onToggleBell={() => setBellOpen(o => !o)}
       />
+      {bellOpen && (
+        <NotificacionesDropdown
+          items={notificaciones}
+          onClose={() => setBellOpen(false)}
+          onClickItem={(it) => {
+            setBellOpen(false);
+            if (it.tipo === 'tarea') {
+              const t = state.tareas.items.find(x => x.id === it.tareaId);
+              if (t) setTareaEditando(t);
+            } else if (it.tipo === 'agendado') {
+              if (it.prospectoId) setSelectedId(it.prospectoId);
+              else setView('calendario');
+            }
+          }}
+        />
+      )}
       {viewAs && (
         <div className="view-as-banner">
           <div>
@@ -3419,7 +3696,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings }) {
+function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, notifCount, onToggleBell }) {
   const esAdmin = agente?.role === 'admin';
   const displayName = agente?.display_name || user?.email || '';
   const enViewAs = !!viewAs;
@@ -3435,6 +3712,41 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       b.onclick = fn;
       return b;
     };
+    // Campanita primero (visible para todos los users) — SVG vectorial blanco.
+    // Uso createElementNS para garantizar el namespace correcto (innerHTML con
+    // SVG inline a veces no renderiza porque parsea los <path> como HTML).
+    if (onToggleBell) {
+      const bell = document.createElement('button');
+      bell.className = 'bell-btn';
+      bell.title = notifCount > 0 ? `${notifCount} evento${notifCount === 1 ? '' : 's'} urgente${notifCount === 1 ? '' : 's'}` : 'Notificaciones';
+      bell.onclick = onToggleBell;
+
+      const SVG_NS = 'http://www.w3.org/2000/svg';
+      const svg = document.createElementNS(SVG_NS, 'svg');
+      svg.setAttribute('viewBox', '0 0 24 24');
+      svg.setAttribute('fill', 'none');
+      svg.setAttribute('stroke', 'white');
+      svg.setAttribute('stroke-width', '2');
+      svg.setAttribute('stroke-linecap', 'round');
+      svg.setAttribute('stroke-linejoin', 'round');
+      svg.setAttribute('width', '18');
+      svg.setAttribute('height', '18');
+      const p1 = document.createElementNS(SVG_NS, 'path');
+      p1.setAttribute('d', 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9');
+      const p2 = document.createElementNS(SVG_NS, 'path');
+      p2.setAttribute('d', 'M13.73 21a2 2 0 0 1-3.46 0');
+      svg.appendChild(p1);
+      svg.appendChild(p2);
+      bell.appendChild(svg);
+
+      if (notifCount > 0) {
+        const badge = document.createElement('span');
+        badge.className = 'bell-badge';
+        badge.textContent = notifCount > 9 ? '9+' : String(notifCount);
+        bell.appendChild(badge);
+      }
+      target.appendChild(bell);
+    }
     target.appendChild(mk('Ajustes', esAdmin ? 'Configuración y gestión de usuarios' : 'Configurar horario y vista', onOpenSettings));
     if (user) {
       const sep = document.createElement('div');
@@ -3453,7 +3765,7 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       target.appendChild(u);
       target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
     }
-  }, [user, esAdmin, displayName, onLogout, onOpenSettings]);
+  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onToggleBell]);
   return null;
 }
 
