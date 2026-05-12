@@ -667,8 +667,8 @@
   @keyframes toastIn { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
 
   /* ── ESTADO BADGE (col Estado) ── */
-  .estado-cell { white-space: nowrap; }
-  .estado-badge-wrap { display: inline-flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+  .estado-cell { white-space: nowrap; text-align: left; vertical-align: middle; }
+  .estado-badge-wrap { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
   .estado-badge {
     display: inline-block;
     padding: 4px 11px;
@@ -679,11 +679,14 @@
     text-transform: uppercase;
     line-height: 1.2;
   }
+  /* Texto secundario (hora / próximo contacto) — padding-left coincide con el
+     padding interno del badge para que ambos textos arranquen alineados. */
   .estado-subtxt {
     font-size: 0.7rem;
     color: var(--texto-suave);
     font-weight: 500;
     letter-spacing: 0.2px;
+    padding-left: 11px;
   }
   .estado-subtxt.urgente { color: var(--estado-rechazado); font-weight: 600; }
   .estado-subtxt.hoy     { color: #c2410c; font-weight: 600; }
@@ -1458,6 +1461,12 @@
     overflow: auto;
     max-height: 70vh;
     background: white;
+    padding-bottom: 24px;
+  }
+  /* Margen extra debajo del calendario para que al scrollear hasta el final
+     la última hora no quede pegada al borde inferior del viewport */
+  .cal-wrap {
+    margin-bottom: 32px;
   }
   .cal-hours-col {
     border-right: 1px solid var(--borde);
@@ -1478,6 +1487,10 @@
     border-right: 1px solid var(--borde);
   }
   .cal-day-col:last-child { border-right: none; }
+  .cal-day-col.clickable { cursor: cell; }
+  .cal-day-col.clickable:hover .cal-hour-cell {
+    background: rgba(0, 152, 218, 0.025);
+  }
   .cal-hour-cell {
     border-bottom: 1px dashed var(--borde);
     box-sizing: border-box;
@@ -1497,6 +1510,29 @@
     width: 10px; height: 10px;
     border-radius: 50%;
     background: var(--estado-rechazado);
+  }
+  /* Atenuación de las celdas fuera del horario laboral (de Ajustes) */
+  .cal-offhours {
+    position: absolute;
+    left: 0; right: 0;
+    background: repeating-linear-gradient(
+      135deg,
+      rgba(148,163,184,0.06) 0,
+      rgba(148,163,184,0.06) 8px,
+      rgba(148,163,184,0.10) 8px,
+      rgba(148,163,184,0.10) 16px
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+  /* Línea punteada que marca el inicio / fin del horario laboral */
+  .cal-workhours-line {
+    position: absolute;
+    left: 0; right: 0;
+    border-top: 1.5px dashed var(--azul);
+    z-index: 4;
+    pointer-events: none;
+    opacity: 0.55;
   }
   .cal-week-event {
     position: absolute;
@@ -1693,7 +1729,13 @@
 
   .header-user {
     color: rgba(255,255,255,0.85); font-size: 0.82rem; font-weight: 600;
-    padding-right: 4px; letter-spacing: 0.2px;
+    padding: 3px 8px; letter-spacing: 0.2px;
+    background: transparent; border: none; font-family: inherit;
+    cursor: pointer; border-radius: 6px;
+    transition: background 0.15s;
+  }
+  .header-user:hover {
+    background: rgba(255,255,255,0.12);
   }
   .header-admin-badge {
     background: #7dd3fc;
@@ -3314,7 +3356,13 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showPassModal, setShowPassModal] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
+  // Click en una celda libre del calendario: muestra mini-modal Prospect/Tarea.
+  // `pendingSlot` guarda la fecha/hora elegida hasta que el flujo de creación de
+  // prospect/tarea la consuma.
+  const [slotPicker, setSlotPicker] = useState(null);
+  const [pendingSlot, setPendingSlot] = useState(null);
   const [tick, setTick] = useState(0);  // re-render cada 60s para recalcular urgencias
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
@@ -3370,6 +3418,17 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
       const prospecto = await storage.createProspecto(data);
       setState(s => ({ ...s, prospectos: [prospecto, ...s.prospectos] }));
       setShowAddModal(false);
+      // Si el prospect viene de un click en celda del calendario, agregamos
+      // un primer contacto tipo 'agendado' para esa fecha/hora — eso dispara
+      // sincronización automática y aparece como evento en el calendar.
+      if (pendingSlot) {
+        const slot = pendingSlot;
+        setPendingSlot(null);
+        const agendadoPara = `${slot.date.getFullYear()}-${pad2(slot.date.getMonth()+1)}-${pad2(slot.date.getDate())}T${pad2(slot.hour)}:${pad2(slot.minute)}`;
+        try {
+          await handleAddContacto(prospecto.id, { tipo: 'agendado', agendadoPara, observacion: '' });
+        } catch (e) { console.error('addContacto desde slot:', e); }
+      }
       showToast('Prospecto agregado');
     } catch (e) { handleErr(e, 'createProspecto'); }
   };
@@ -3565,6 +3624,42 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         tareas: { ...s.tareas, items: [...s.tareas.items, tarea] }
       }));
     } catch (e) { handleErr(e, 'createTarea'); }
+  };
+
+  // Click en celda del calendario → "Nueva tarea": la creo en la primera columna
+  // disponible (Abordar por slug, o la primera) con fecha/hora preset y abro el
+  // modal de edición para que el user complete el título y guarde.
+  const handleCreateTareaEnSlot = async (slot) => {
+    if (guardReadOnly()) return;
+    const cols = state.tareas?.columnas || [];
+    const colDest = cols.find(c => c.slug === 'abordar') || cols[0];
+    if (!colDest) { showToast('No hay columnas de tareas'); return; }
+    const fechaYMD = `${slot.date.getFullYear()}-${pad2(slot.date.getMonth()+1)}-${pad2(slot.date.getDate())}`;
+    const horaHM = `${pad2(slot.hour)}:${pad2(slot.minute)}`;
+    try {
+      const tarea = await storage.createTarea({
+        columnaId: colDest.id,
+        titulo: '',
+        fechaRecordatorio: fechaYMD,
+        horaRecordatorio: horaHM,
+      });
+      setState(s => ({
+        ...s,
+        tareas: { ...s.tareas, items: [...s.tareas.items, tarea] }
+      }));
+      setSlotPicker(null);
+      setTareaEditando(tarea);
+    } catch (e) { handleErr(e, 'createTarea'); }
+  };
+
+  // Click en celda del calendario → "Nuevo prospect": guardo el slot y abro
+  // el modal de nuevo prospect. Al guardar, handleAdd consume pendingSlot y
+  // agrega un primer contacto tipo agendado.
+  const handleCreateProspectEnSlot = (slot) => {
+    if (guardReadOnly()) return;
+    setPendingSlot(slot);
+    setSlotPicker(null);
+    setShowAddModal(true);
   };
 
   const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
@@ -3803,9 +3898,16 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         onExitViewAs={onExitViewAs}
         onLogout={onLogout}
         onOpenSettings={() => setShowSettings(true)}
+        onChangePassword={viewAs ? null : () => setShowPassModal(true)}
         notifCount={notifUrgentes}
         onToggleBell={() => setBellOpen(o => !o)}
       />
+      {showPassModal && (
+        <ChangePasswordModal
+          displayName={agente?.display_name || agente?.email || user?.email}
+          onClose={() => setShowPassModal(false)}
+        />
+      )}
       <MountInSlot slotId="headerSearch">
         <BuscadorGlobal state={state} onClickItem={handleNavToItem} />
       </MountInSlot>
@@ -3904,14 +4006,25 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
             settings={settings}
             onSelectProspecto={setSelectedId}
             onSelectTarea={(t) => setTareaEditando(t)}
+            onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
         </>
       )}
 
       {showAddModal && (
         <NuevoProspectoModal
-          onCancel={() => setShowAddModal(false)}
+          onCancel={() => { setShowAddModal(false); setPendingSlot(null); }}
           onSave={handleAdd}
+          slotInfo={pendingSlot}
+        />
+      )}
+
+      {slotPicker && (
+        <SlotChooserModal
+          slot={slotPicker}
+          onCancel={() => setSlotPicker(null)}
+          onProspect={() => handleCreateProspectEnSlot(slotPicker)}
+          onTarea={() => handleCreateTareaEnSlot(slotPicker)}
         />
       )}
 
@@ -3968,7 +4081,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, notifCount, onToggleBell }) {
+function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, onChangePassword, notifCount, onToggleBell }) {
   const esAdmin = agente?.role === 'admin';
   const displayName = agente?.display_name || user?.email || '';
   const enViewAs = !!viewAs;
@@ -4030,14 +4143,16 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
         badge.textContent = 'ADMIN';
         target.appendChild(badge);
       }
-      const u = document.createElement('div');
+      const u = document.createElement('button');
       u.className = 'header-user';
+      u.type = 'button';
       u.textContent = displayName;
-      u.title = user.email;
+      u.title = onChangePassword ? 'Cambiar contraseña' : user.email;
+      if (onChangePassword) u.onclick = onChangePassword;
       target.appendChild(u);
       target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
     }
-  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onToggleBell]);
+  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onToggleBell]);
   return null;
 }
 
@@ -4650,12 +4765,19 @@ function HistorialEditForm({ contacto, settings, onSave, onCancel }) {
 }
 
 // ── MODAL NUEVO PROSPECTO ──────────────────────────────────────
-function NuevoProspectoModal({ onCancel, onSave }) {
+function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
   const [form, setForm] = useState({
     nombre: '', telefono: '', preferenciaContacto: '',
     detalle: '', referente: '', observaciones: ''
   });
   const [errors, setErrors] = useState({});
+  const slotLabel = slotInfo
+    ? (() => {
+        const d = slotInfo.date;
+        const dow = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][d.getDay()];
+        return `${dow} ${d.getDate()} de ${NOMBRES_MES[d.getMonth()]} · ${pad2(slotInfo.hour)}:${pad2(slotInfo.minute)}`;
+      })()
+    : null;
 
   const upd = (k, v) => setForm(f => ({...f, [k]: v}));
 
@@ -4687,6 +4809,16 @@ function NuevoProspectoModal({ onCancel, onSave }) {
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
+          {slotLabel && (
+            <div style={{
+              background: '#eff6ff', border: '1px solid #bfdbfe',
+              color: 'var(--azul-oscuro)', borderRadius: 8,
+              padding: '10px 12px', fontSize: '0.82rem', marginBottom: 14,
+              textTransform: 'capitalize',
+            }}>
+              Se agendará para <strong>{slotLabel}</strong> apenas se guarde.
+            </div>
+          )}
           <div className="field">
             <label>Nombre <span className="req">*</span></label>
             <input type="text" value={form.nombre}
@@ -4900,11 +5032,9 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, settings, onSelectProspecto, onSelectTarea }) {
-  const [mode, setMode] = useState('mes'); // 'mes' | 'semana' | 'hoy'
-  const [cursor, setCursor] = useState(() => {
-    const d = new Date(); d.setHours(0,0,0,0); return d;
-  });
+function CalendarioView({ prospectos, tareasState, settings, onSelectProspecto, onSelectTarea, onSlotClick }) {
+  const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
+  const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
 
   const events = useMemo(() => extractCalendarEvents(prospectos, tareasState), [prospectos, tareasState]);
@@ -4991,6 +5121,7 @@ function CalendarioView({ prospectos, tareasState, settings, onSelectProspecto, 
       events={events}
       settings={settings}
       onSelectEvent={onSelectEvent}
+      onSlotClick={onSlotClick}
       goPrev={goPrev} goNext={goNext} goToday={goToday}
       onJumpTo={jumpTo}
       subTabs={subTabs}
@@ -5003,6 +5134,7 @@ function CalendarioView({ prospectos, tareasState, settings, onSelectProspecto, 
     events={events}
     settings={settings}
     onSelectEvent={onSelectEvent}
+    onSlotClick={onSlotClick}
     goPrev={goPrev} goNext={goNext} goToday={goToday}
     onJumpTo={jumpTo}
     subTabs={subTabs}
@@ -5121,21 +5253,26 @@ function MonthCalendar({ cursor, events, eventsByKey, selectedDay, setSelectedDa
 }
 
 // ── VISTA SEMANA / HOY (grid de horas) ────────────────────────
-function WeekCalendar({ anchorDate, events, settings, onSelectEvent, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
+function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
   const [showPicker, setShowPicker] = useState(false);
+  const bodyRef = useRef(null);
   const HOUR_HEIGHT = 56;
   const startHour = Math.max(0, Math.min(23, settings.workStartHour ?? 9));
   const startMinSetting = Math.max(0, Math.min(59, settings.workStartMin ?? 0));
   const endHour = Math.max(startHour + 1, Math.min(24, settings.workEndHour ?? 19));
   const endMinSetting = Math.max(0, Math.min(59, settings.workEndMin ?? 0));
-  // Grid de horas: redondea hacia abajo el inicio y hacia arriba el fin para mostrar siempre horas enteras
-  const gridStartHour = startHour;
-  const gridEndHour = endMinSetting > 0 ? endHour + 1 : endHour;
+  // El calendario muestra siempre las 24 horas para no esconder eventos cargados
+  // fuera del rango laboral. Las preferencias de horario se muestran como
+  // marcas (línea punteada en inicio y fin) y atenuación visual del rango fuera.
+  const gridStartHour = 0;
+  const gridEndHour = 24;
   const hours = [];
   for (let h = gridStartHour; h < gridEndHour; h++) hours.push(h);
   const slotMin = settings.slotDurationMin || 60;
   const startMinTotal = startHour * 60 + startMinSetting;
   const endMinTotal = endHour * 60 + endMinSetting;
+  const workStartTop = (startMinTotal / 60) * HOUR_HEIGHT;
+  const workEndTop = (endMinTotal / 60) * HOUR_HEIGHT;
 
   // Build days array
   const start = singleDay ? new Date(anchorDate) : startOfWeek(anchorDate);
@@ -5172,6 +5309,15 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, goPrev, goN
       nowLineTop = (nowMin / 60) * HOUR_HEIGHT;
     }
   }
+
+  // Al montar, scrollea el grid para que el horario laboral quede visible al
+  // tope (con un poco de aire arriba). Sin esto, el usuario ve las 00:00 por
+  // defecto porque ahora siempre mostramos las 24 horas.
+  useEffect(() => {
+    if (bodyRef.current) {
+      bodyRef.current.scrollTop = Math.max(0, workStartTop - 20);
+    }
+  }, [workStartTop, ndays, singleDay]);
 
   return (
     <div className="cal-wrap">
@@ -5211,7 +5357,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, goPrev, goN
             </div>
           ))}
         </div>
-        <div className="cal-week-body" style={{gridTemplateColumns: gridCols}}>
+        <div ref={bodyRef} className="cal-week-body" style={{gridTemplateColumns: gridCols}}>
           <div className="cal-hours-col">
             {hours.map(h => (
               <div key={h} className="cal-hour-label" style={{height: HOUR_HEIGHT}}>
@@ -5220,10 +5366,30 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, goPrev, goN
             ))}
           </div>
           {days.map((d, dIdx) => (
-            <div key={d.toISOString()} className="cal-day-col" style={{height: totalHeight}}>
+            <div key={d.toISOString()} className={`cal-day-col ${onSlotClick ? 'clickable' : ''}`} style={{height: totalHeight}}
+              onClick={(e) => {
+                if (!onSlotClick) return;
+                // El click sobre un evento ya dispara onSelectEvent — no abrimos slot picker.
+                if (e.target.closest('.cal-week-event')) return;
+                const rect = e.currentTarget.getBoundingClientRect();
+                const y = e.clientY - rect.top;
+                const totalMin = Math.max(0, Math.min(23 * 60 + 45, Math.round((y / HOUR_HEIGHT) * 60)));
+                const snapped = Math.round(totalMin / 15) * 15;
+                onSlotClick(d, Math.floor(snapped / 60), snapped % 60);
+              }}>
               {hours.map(h => (
                 <div key={h} className="cal-hour-cell" style={{height: HOUR_HEIGHT}}></div>
               ))}
+              {/* Atenuación visual del rango fuera del horario laboral */}
+              {workStartTop > 0 && (
+                <div className="cal-offhours" style={{ top: 0, height: workStartTop }} />
+              )}
+              {workEndTop < totalHeight && (
+                <div className="cal-offhours" style={{ top: workEndTop, height: totalHeight - workEndTop }} />
+              )}
+              {/* Líneas punteadas marcando inicio y fin del horario laboral */}
+              <div className="cal-workhours-line" style={{ top: workStartTop }} />
+              <div className="cal-workhours-line" style={{ top: workEndTop }} />
               {dIdx === todayIdx && nowLineTop != null && (
                 <div className="cal-now-line" style={{top: nowLineTop}}></div>
               )}
@@ -6349,6 +6515,124 @@ function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={confirmar}>Convertir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: CAMBIAR CONTRASEÑA PROPIA ───────────────────────────
+// El user en sesión cambia su propio password vía supabase.auth.updateUser.
+// La sesión activa prueba identidad, no se pide la contraseña actual.
+function ChangePasswordModal({ displayName, onClose }) {
+  const [pwd, setPwd]   = useState('');
+  const [pwd2, setPwd2] = useState('');
+  const [err, setErr]   = useState('');
+  const [ok, setOk]     = useState(false);
+  const [busy, setBusy] = useState(false);
+  const firstInput = useRef(null);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    setTimeout(() => firstInput.current?.focus(), 40);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const submit = async (e) => {
+    if (e) e.preventDefault();
+    setErr('');
+    if (pwd.length < 8) { setErr('Mínimo 8 caracteres.'); return; }
+    if (pwd !== pwd2)   { setErr('Las contraseñas no coinciden.'); return; }
+    setBusy(true);
+    const { error } = await sb.auth.updateUser({ password: pwd });
+    setBusy(false);
+    if (error) { setErr(error.message || 'No se pudo actualizar.'); return; }
+    setOk(true);
+    setTimeout(onClose, 1300);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit}>
+        <div className="modal-header">
+          <h3>Cambiar contraseña</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          {displayName && (
+            <div style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginBottom: 12 }}>
+              {displayName}
+            </div>
+          )}
+          <div className="field">
+            <label>Nueva contraseña</label>
+            <input ref={firstInput} type="password" autoComplete="new-password"
+              value={pwd} onChange={e => setPwd(e.target.value)}
+              placeholder="Mínimo 8 caracteres" />
+          </div>
+          <div className="field">
+            <label>Confirmar</label>
+            <input type="password" autoComplete="new-password"
+              value={pwd2} onChange={e => setPwd2(e.target.value)}
+              placeholder="Repetí la nueva contraseña" />
+          </div>
+          {err && <div className="field-error" style={{ marginTop: 6 }}>{err}</div>}
+          {ok  && <div style={{
+            background: '#f0fdf4', border: '1px solid #bbf7d0',
+            color: '#15803d', borderRadius: 6, padding: '8px 12px',
+            fontSize: '0.85rem', fontWeight: 600, marginTop: 6,
+          }}>Contraseña actualizada.</div>}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={busy}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={busy || ok}>
+            {busy ? 'Guardando…' : ok ? 'Listo' : 'Guardar'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── MINI-MODAL: ELEGIR QUÉ CREAR DESDE UNA CELDA DEL CALENDARIO ─
+// Aparece cuando el user clickea un slot libre. Le propone crear un prospect
+// (con primer contacto agendado para ese slot) o una tarea (con recordatorio).
+function SlotChooserModal({ slot, onCancel, onProspect, onTarea }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const dow = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][slot.date.getDay()];
+  const cuando = `${dow} ${slot.date.getDate()} de ${NOMBRES_MES[slot.date.getMonth()]} · ${pad2(slot.hour)}:${pad2(slot.minute)}`;
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <h3>Crear evento</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ fontSize: '0.92rem', color: 'var(--texto)', marginBottom: 14, textTransform: 'capitalize' }}>
+            {cuando}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button className="btn-primary" style={{ padding: '12px 16px', textAlign: 'left' }} onClick={onProspect}>
+              <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Nuevo prospecto agendado</div>
+              <div style={{ fontWeight: 400, fontSize: '0.76rem', opacity: 0.85, marginTop: 2 }}>
+                Crea el prospect y deja la cita confirmada en este horario.
+              </div>
+            </button>
+            <button className="btn-secondary" style={{ padding: '12px 16px', textAlign: 'left' }} onClick={onTarea}>
+              <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Nueva tarea</div>
+              <div style={{ fontWeight: 400, fontSize: '0.76rem', opacity: 0.8, marginTop: 2 }}>
+                Tarea suelta con recordatorio para este día y hora.
+              </div>
+            </button>
+          </div>
         </div>
       </div>
     </div>
