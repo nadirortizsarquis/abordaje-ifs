@@ -215,6 +215,15 @@
     font-size: 0.76rem;
     color: var(--texto-suave);
   }
+  table.prospectos td.col-detalle,
+  table.prospectos thead th.col-detalle {
+    font-size: 0.78rem;
+    color: var(--texto);
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   table.prospectos td.col-referente,
   table.prospectos td.col-pref,
   table.prospectos thead th.col-referente,
@@ -1036,11 +1045,23 @@
     font-weight: 500;
   }
 
-  /* ── COLUMN WIDTHS ── */
-  table.prospectos col.col-w-tel       { width: 110px; }
-  table.prospectos col.col-w-estado    { width: 130px; }
+  /* ── COLUMN WIDTHS ──
+     Nombre + Telefono compactos a la izquierda;
+     Detalle ancho medio; Estado compacto pegado al detalle;
+     Timeline (Último contacto/Observación) sin width: toma todo el ancho que sobra;
+     Referente y Pref compactos a la derecha. */
+  table.prospectos col.col-w-nombre    { width: 180px; }
+  table.prospectos col.col-w-tel       { width: 120px; }
+  table.prospectos col.col-w-detalle   { width: 220px; }
+  table.prospectos col.col-w-estado    { width: 140px; }
   table.prospectos col.col-w-referente { width: 90px; }
   table.prospectos col.col-w-pref      { width: 70px; }
+  /* Telefono más pegado al nombre */
+  table.prospectos td.col-telefono,
+  table.prospectos thead th.col-telefono { padding-left: 4px; }
+  /* Estado más pegado al detalle */
+  table.prospectos td.estado-cell,
+  table.prospectos thead th.col-estado-h { padding-left: 4px; }
 
   /* ── EDIT BUTTON en historial ── */
   .btn-edit-mini {
@@ -4215,10 +4236,11 @@ function ProspectosTable({ prospectos, onSelect }) {
     <div className="table-wrap">
       <table className="prospectos">
         <colgroup>
-          <col />
+          <col className="col-w-nombre" />
           <col className="col-w-tel" />
+          <col className="col-w-detalle" />
           <col className="col-w-estado" />
-          <col />
+          <col /> {/* timeline — toma el resto */}
           <col className="col-w-referente" />
           <col className="col-w-pref" />
         </colgroup>
@@ -4226,7 +4248,8 @@ function ProspectosTable({ prospectos, onSelect }) {
           <tr>
             <th>Nombre</th>
             <th className="col-telefono">Teléfono</th>
-            <th>Estado</th>
+            <th className="col-detalle">Detalle</th>
+            <th className="col-estado-h">Estado</th>
             <th>Último contacto / Observación</th>
             <th className="col-referente">Referente</th>
             <th className="col-pref">Pref.</th>
@@ -4251,6 +4274,9 @@ function FilaProspecto({ prospecto, onClick }) {
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
       </td>
       <td className="col-telefono">{prospecto.telefono || '—'}</td>
+      <td className="col-detalle">
+        {prospecto.detalle || <span style={{color:'var(--texto-suave)'}}>—</span>}
+      </td>
       <td className="estado-cell"><BadgeEstado prospecto={prospecto} /></td>
       <td><TimelineCell contactos={prospecto.contactos || []} /></td>
       <td className="col-referente">{prospecto.referente || <span style={{color:'var(--texto-suave)'}}>—</span>}</td>
@@ -4421,7 +4447,7 @@ function FieldsProspecto({ prospecto, readOnly, onUpdate }) {
         </div>
       </div>
       <div className="field-inline">
-        <label>Detalle</label>
+        <label>Detalle <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(visible en tablero)</span></label>
         <input type="text" value={draft.detalle} readOnly={readOnly}
           onChange={e => upd('detalle', e.target.value)}
           onBlur={() => commit('detalle')} />
@@ -4537,7 +4563,7 @@ function RegistrarGestion({ onSubmit, settings }) {
       </div>
 
       {cfg && (
-        <div className="gestion-form">
+        <form className="gestion-form" onSubmit={(e) => { e.preventDefault(); confirmar(); }}>
           <div className="gestion-form-title">
             <span>Confirmar gestión:</span>
             <span className="chip" style={{
@@ -4600,10 +4626,10 @@ function RegistrarGestion({ onSubmit, settings }) {
           </div>
 
           <div className="actions">
-            <button className="btn-mini" onClick={reset}>Cancelar</button>
-            <button className="btn-mini primary" onClick={confirmar}>Registrar</button>
+            <button type="button" className="btn-mini" onClick={reset}>Cancelar</button>
+            <button type="submit" className="btn-mini primary">Registrar</button>
           </div>
-        </div>
+        </form>
       )}
     </div>
   );
@@ -4803,10 +4829,11 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true">
+      <form className="modal" role="dialog" aria-modal="true"
+        onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="modal-header">
           <h3>Nuevo prospecto</h3>
-          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
           {slotLabel && (
@@ -4843,7 +4870,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
             </div>
           </div>
           <div className="field">
-            <label>Detalle</label>
+            <label>Detalle <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(visible en tablero)</span></label>
             <input type="text" value={form.detalle}
               onChange={e => upd('detalle', e.target.value)}
               placeholder="Ej: Empresario, 45 años, casado" />
@@ -4862,10 +4889,10 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
           </div>
         </div>
         <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button className="btn-primary" onClick={submit}>Guardar</button>
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button type="submit" className="btn-primary">Guardar</button>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
@@ -6389,10 +6416,11 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="modal" role="dialog" aria-modal="true">
+      <form className="modal" role="dialog" aria-modal="true"
+        onSubmit={(e) => { e.preventDefault(); if (!readOnly) guardar(); }}>
         <div className="modal-header">
           <h3>{readOnly ? 'Detalle de tarea' : 'Editar tarea'}</h3>
-          <button className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
           <div className="field">
@@ -6446,14 +6474,14 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
           )}
         </div>
         <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
-          {!readOnly && <button className="btn-danger" onClick={onDelete}>Eliminar</button>}
+          {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
           <div style={{ display: 'flex', gap: 10 }}>
-            {!readOnly && <button className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>}
-            <button className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
-            {!readOnly && <button className="btn-primary" onClick={guardar}>Guardar</button>}
+            {!readOnly && <button type="button" className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>}
+            <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+            {!readOnly && <button type="submit" className="btn-primary">Guardar</button>}
           </div>
         </div>
-      </div>
+      </form>
     </div>
   );
 }
