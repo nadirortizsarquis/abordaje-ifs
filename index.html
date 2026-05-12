@@ -1615,6 +1615,34 @@
     color: rgba(255,255,255,0.18); font-size: 10px;
     letter-spacing: 2px; text-transform: uppercase; font-weight: 500;
   }
+  .login-divider {
+    display: flex; align-items: center;
+    width: 100%; max-width: 320px;
+    margin: 14px 0 12px;
+    color: rgba(255,255,255,0.4); font-size: 11px;
+    letter-spacing: 1px;
+  }
+  .login-divider::before, .login-divider::after {
+    content: ''; flex: 1; height: 1px;
+    background: rgba(255,255,255,0.12);
+  }
+  .login-divider span { padding: 0 12px; }
+  .login-google-btn {
+    width: 100%; max-width: 320px;
+    padding: 11px 14px;
+    background: white; color: #3c4043;
+    border: none; border-radius: 10px;
+    font-size: 14px; font-weight: 600;
+    cursor: pointer;
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    font-family: inherit;
+    transition: filter 0.15s, transform 0.1s;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  .login-google-btn:hover:not(:disabled) { filter: brightness(0.97); }
+  .login-google-btn:active:not(:disabled) { transform: translateY(1px); }
+  .login-google-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
   .login-shake { animation: login-shake 0.3s; }
   @keyframes login-shake {
     0%, 100% { transform: translateX(0); }
@@ -1949,7 +1977,7 @@
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false }
+  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true, flowType: 'pkce' }
 });
 
 const TAREAS_COLUMNAS_DEFAULT = [
@@ -2061,6 +2089,14 @@ const auth = {
   },
   async signIn(email, password) {
     return await sb.auth.signInWithPassword({ email, password });
+  },
+  async signInWithGoogle() {
+    return await sb.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin + window.location.pathname,
+      }
+    });
   },
   async signOut() {
     return await sb.auth.signOut();
@@ -6251,10 +6287,19 @@ function LoginScreen({ onLoggedIn }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [shake, setShake] = useState(false);
 
   useEffect(() => {
     document.body.classList.add('login-mode');
+    // Detectar mensaje de error en URL (post-callback fallido)
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('error') === 'not_authorized') {
+      setError('Tu cuenta no está habilitada. Contactá al administrador.');
+      // Limpiar el query param sin recargar
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, '', cleanUrl);
+    }
     return () => document.body.classList.remove('login-mode');
   }, []);
 
@@ -6271,6 +6316,21 @@ function LoginScreen({ onLoggedIn }) {
       return;
     }
     onLoggedIn(data.user);
+  };
+
+  const handleGoogle = async () => {
+    setError(''); setGoogleLoading(true);
+    try {
+      const { error: err } = await auth.signInWithGoogle();
+      if (err) {
+        setError('No se pudo iniciar sesión con Google: ' + err.message);
+        setGoogleLoading(false);
+      }
+      // Si no hay error, el browser redirige a Google y vuelve solo
+    } catch (e) {
+      setError('Error: ' + (e.message || e));
+      setGoogleLoading(false);
+    }
   };
 
   return (
@@ -6333,6 +6393,16 @@ function LoginScreen({ onLoggedIn }) {
           {loading ? 'Ingresando…' : 'Ingresar'}
         </button>
       </form>
+      <div className="login-divider"><span>o</span></div>
+      <button type="button" className="login-google-btn" disabled={googleLoading} onClick={handleGoogle}>
+        <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg" style={{display:'block'}}>
+          <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"/>
+          <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z"/>
+          <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"/>
+          <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"/>
+        </svg>
+        <span>{googleLoading ? 'Redirigiendo a Google…' : 'Continuar con Google'}</span>
+      </button>
       <div className="login-footer">
         <div className="login-footer-l">www.broker-ifs.com</div>
         <div className="login-footer-r">Planificador de Abordaje</div>
@@ -6406,8 +6476,23 @@ function AppShell() {
   useEffect(() => {
     if (!user) { setAgente(null); return; }
     let cancel = false;
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings').eq('id', user.id).single()
-      .then(({ data }) => { if (!cancel && data) setAgente(data); })
+    // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
+    // activado, el id del user de Google coincide con el id de profiles
+    // (mismo email = mismo auth.users.id).
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings').eq('id', user.id).maybeSingle()
+      .then(async ({ data }) => {
+        if (cancel) return;
+        if (data) { setAgente(data); return; }
+        // No hay profile para este user → email no autorizado (caso típico:
+        // alguien con Gmail random intentó entrar con Google sin estar
+        // pre-cargado en profiles por el admin).
+        try { await sb.auth.signOut(); } catch (_) {}
+        const url = new URL(window.location.href);
+        url.searchParams.set('error', 'not_authorized');
+        url.searchParams.delete('code');
+        url.hash = '';
+        window.location.replace(url.toString());
+      })
       .catch(() => {});
     return () => { cancel = true; };
   }, [user?.id]);
