@@ -85,3 +85,89 @@ Single endpoint con ops: `list`, `create`, `update`, `delete`, `listCalendars` (
 - `.gcp-sa-key.json` (gitignored).
 - `.gitignore` (modificado, agrega la key).
 - Esta nota: `NOTAS-GCAL-REFACTOR.md`.
+
+---
+
+# Fase 1 (DONE — testing) — Toggle opt-in en Ajustes para Workspace
+
+Implementado el 2026-05-13 (commit `7de5227`). Status: en producción, testing.
+
+## Qué cambió
+- Columna `profiles.gcal_enabled` (boolean, default false). El agente decide si vincular.
+- Nueva sección "Google Calendar" en SettingsModal con explicación + toggle.
+- `isPilotUser(user)` → reemplazado por `isGoogleCalendarUser(profile)`: valida `gcal_enabled=true` AND dominio Workspace `@ifs-broker.com`. `canEnableGoogleCalendar(profile)` decide si mostrar el toggle.
+- Edge function `gcal-events` v5: acepta cualquier user del dominio Workspace (no email hardcodeado) y valida `gcal_enabled=true`.
+- `nortiz@ifs-broker.com` arrancó con `gcal_enabled=true` para no perder el calendar al deployar.
+
+## Casos por tipo de cuenta (Fase 1)
+- **`@ifs-broker.com`** (Workspace) → ve toggle en Ajustes. Click → vinculación automática vía DWD (cero clicks extra).
+- **Cualquier otro email** → ve mensaje informativo "Por ahora solo cuentas del dominio…" sin toggle.
+
+## Pending para Fase 1
+- Testing con varios agentes del dominio (Nadir va a probar mañana o cuando pueda).
+- Decidir si los agentes que entren por primera vez tienen el toggle off por default y se les avisa, o si conviene un onboarding automático.
+
+---
+
+# Fase 2 (PENDIENTE) — OAuth user-level para gmail personales
+
+Objetivo: que los agentes con gmail personal (`@gmail.com`, no del dominio Workspace) puedan también vincular su Google Calendar a Abordaje sin que DWD aplique.
+
+## Cómo funcionaría desde el lado del agente
+1. Logueado con su gmail, entra a Ajustes → Google Calendar.
+2. Ve mensaje específico: *"Tu cuenta es gmail.com. Click en Vincular. Google te va a pedir permiso una vez."*
+3. Click → pantalla de Google: *"Abordaje quiere ver y editar tu calendar. ¿Permitir?"*.
+4. Click Permitir → vuelve a Abordaje con `gcal_enabled=true` automáticamente. Listo.
+
+Solo agrega 1 pantalla extra la primera vez, comparado con dominio Workspace.
+
+## Lo que falta implementar
+1. **Google Cloud Console** (manual, Nadir):
+   - Agregar scope `https://www.googleapis.com/auth/calendar` a las credenciales OAuth Web Application existentes (las del "Continuar con Google" del login).
+   - **OAuth Consent Screen** en modo Testing (alcanza para pocos users): agregar cada gmail del agente como **Test User** en Google Cloud Console. **Pega importante**: los test users van a ver una pantalla *"App no verificada"* con botón "Continuar (no seguro)" — feo pero funcional para piloto.
+   - Cuando crezca, pasar a modo Production (requiere Google Verification, 4-6 semanas).
+
+2. **Supabase** (yo):
+   - Nueva tabla:
+     ```sql
+     create table public.user_google_tokens (
+       user_id      uuid primary key references auth.users(id) on delete cascade,
+       refresh_token text not null,
+       granted_at   timestamptz not null default now()
+     );
+     alter table public.user_google_tokens enable row level security;
+     revoke all on public.user_google_tokens from anon, authenticated;
+     ```
+   - Considerar encriptar `refresh_token` con pgcrypto o usar Supabase Vault.
+
+3. **Frontend** (yo):
+   - En `GoogleCalendarSection`, branch para gmail externo: botón "Vincular con Google" en lugar de toggle. Dispara `supabase.auth.signInWithOAuth({ provider: 'google', options: { scopes: 'https://www.googleapis.com/auth/calendar', queryParams: { access_type: 'offline', prompt: 'consent' } } })`.
+   - Callback: cuando vuelve con código, una edge function nueva `gcal-oauth-link` intercambia código por refresh_token, lo guarda en `user_google_tokens`, setea `gcal_enabled=true`.
+   - Para desactivar: borrar la fila de `user_google_tokens` + `gcal_enabled=false`.
+
+4. **Edge function `gcal-events` v6** (yo):
+   - Detecta el tipo de user:
+     - Si email es del dominio Workspace → usar DWD (flujo actual).
+     - Si NO es del dominio → buscar `user_google_tokens.refresh_token`, intercambiarlo por access_token, usar ese.
+   - Manejo de refresh transparente (Google da access_tokens de 1 hora; el refresh_token se usa internamente cada vez).
+
+5. **`isGoogleCalendarUser`** (yo) — actualizar para que devuelva true si:
+   - `gcal_enabled=true` AND (es del dominio Workspace OR tiene refresh_token en `user_google_tokens`).
+
+## Trade-offs / consideraciones
+- **Pantalla "App no verificada"**: en modo Testing, Google muestra warning a los users. Para que desaparezca hay que hacer Google Verification (proceso largo y formal).
+- **Privacidad y consentimiento**: a diferencia de DWD donde el admin del dominio autoriza, acá cada user da consentimiento individual. Más alineado con buenas prácticas.
+- **Revocación**: el user puede revocar el acceso desde Google Account Settings → eventos van a fallar hasta que reactive. Hay que manejar el error 401/403 en la edge function.
+- **Tokens encriptados**: para producción, mejor encriptar el refresh_token con pgcrypto (key en secret de Supabase) en vez de plaintext.
+
+## Cómo retomar Fase 2
+1. Confirmar con Nadir cuántos agentes tienen gmail personal (cantidad aproximada para decidir si Testing alcanza).
+2. Nadir hace los pasos manuales en Google Cloud Console (agregar scope + test users).
+3. Aplicar migration de `user_google_tokens`.
+4. Implementar edge function `gcal-oauth-link` para el callback.
+5. Actualizar `gcal-events` para detectar tipo de user y usar el flujo correspondiente.
+6. Actualizar `GoogleCalendarSection` UI con branch para gmail externo.
+7. Testing con 1 agente externo.
+8. Roll-out al resto.
+
+Estimado: 3-4 horas de implementación + 30 min de setup manual + testing.
