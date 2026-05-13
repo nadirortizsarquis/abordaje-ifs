@@ -2461,11 +2461,26 @@ const gcalApi = {
   }
 };
 
-// Detector de modo piloto del calendar Google. Por ahora hardcodeado en email.
-// Cuando todos los users estén en Workspace, se elimina el flag y el calendar
-// pasa a ser Google para todos (con fallback para gmail personales).
-function isPilotUser(user) {
-  return (user?.email || '').toLowerCase() === 'nortiz@ifs-broker.com';
+// Dominio Workspace cubierto por Domain-Wide Delegation. Cualquier user con
+// email de este dominio puede activar la sincronización con Google Calendar
+// desde Ajustes sin pasos extra (DWD ya autoriza al service account a impersonar
+// a cualquier user del dominio).
+const WORKSPACE_DOMAIN = 'ifs-broker.com';
+
+// El user puede activar/desactivar la vinculación con Google Calendar desde
+// Ajustes (profiles.gcal_enabled). Se aplica si además su email es del dominio
+// Workspace (los gmail externos van por OAuth user-level — fase 2).
+function isGoogleCalendarUser(profile) {
+  if (!profile?.gcal_enabled) return false;
+  const email = (profile?.email || '').toLowerCase();
+  return email.endsWith('@' + WORKSPACE_DOMAIN);
+}
+
+// Indica si el user puede activar el toggle de Google Calendar en Ajustes
+// (no si ya está activado — solo si la cuenta es elegible).
+function canEnableGoogleCalendar(profile) {
+  const email = (profile?.email || '').toLowerCase();
+  return email.endsWith('@' + WORKSPACE_DOMAIN);
 }
 
 // Construye el body de un evento de Google Calendar.
@@ -3417,14 +3432,24 @@ function NotificacionesDropdown({ items, onClose, onClickItem }) {
 }
 
 // ── APP ────────────────────────────────────────────────────────
-function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
+function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
-  // Modo piloto: el calendar usa Google Calendar como fuente de verdad.
-  // En viewAs admin no se aplica (estamos mirando otro user, no a nosotros).
-  const isPilot = isPilotUser(user) && !viewAs;
+  // Calendar usa Google como fuente cuando el agente lo activó desde Ajustes y
+  // su email es del dominio Workspace. En viewAs admin no aplica.
+  const isPilot = isGoogleCalendarUser(agente) && !viewAs;
   // Bumpea para forzar re-fetch de eventos de Google tras crear/editar/borrar.
   const [gcalReloadKey, setGcalReloadKey] = useState(0);
   const bumpGcal = () => setGcalReloadKey(k => k + 1);
+
+  // Toggle de vinculación con Google Calendar (Ajustes). Persiste en profiles.gcal_enabled.
+  const handleToggleGcal = async (enabled) => {
+    if (!agente?.id) return;
+    const { error } = await sb.from('profiles').update({ gcal_enabled: enabled }).eq('id', agente.id);
+    if (error) throw error;
+    setAgente(a => a ? { ...a, gcal_enabled: enabled } : a);
+    bumpGcal();
+    showToast(enabled ? 'Google Calendar vinculado' : 'Google Calendar desvinculado');
+  };
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
 
@@ -4339,6 +4364,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
           onViewAs={(p) => { onViewAs(p); setShowSettings(false); }}
           onCancel={() => setShowSettings(false)}
           onSave={(s) => { setSettings(s); persistSettings(s, user.id); showToast('Ajustes guardados'); }}
+          onToggleGcal={handleToggleGcal}
         />
       )}
 
@@ -6094,6 +6120,74 @@ function AdminTh({ children, right }) {
 // Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
 const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
+function GoogleCalendarSection({ agente, onToggleGcal }) {
+  const enabled = !!agente?.gcal_enabled;
+  const elegible = canEnableGoogleCalendar(agente);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+
+  const toggle = async () => {
+    if (busy || !elegible) return;
+    setErr(null); setBusy(true);
+    try {
+      await onToggleGcal(!enabled);
+    } catch (e) {
+      setErr(e?.message || String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section style={adminSectionStyle}>
+      <h3 style={adminSectionTitleStyle}>📅 Google Calendar</h3>
+      {elegible ? (
+        <>
+          <p style={adminSectionDescStyle}>
+            Vinculá tu Google Calendar a Abordaje. Cuando esté activado:
+          </p>
+          <ul style={{ ...adminSectionDescStyle, paddingLeft: 18, margin: '6px 0 12px' }}>
+            <li>Las agendas y tareas con fecha que cargues en Abordaje aparecen en tu Google Calendar (y se borran cuando las borrás acá).</li>
+            <li>El calendario de Abordaje muestra todos tus eventos de Google (laboral + personales que tengas suscriptos).</li>
+            <li>Cuando movés o borrás un evento en Google, el cambio se refleja en Abordaje al volver a abrir la tab.</li>
+          </ul>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
+            <div
+              className={`toggle-switch ${enabled ? 'on' : ''}`}
+              onClick={toggle}
+              role="switch"
+              aria-checked={enabled}
+              aria-disabled={busy}
+              style={busy ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+            />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+                {enabled ? 'Activado' : 'Desactivado'}
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                Cuenta: <strong>{agente?.email}</strong> · Vinculación automática vía Workspace.
+              </div>
+            </div>
+          </div>
+          {err && (
+            <div style={{ marginTop: 10, background:'#fef2f2', border:'1px solid #fecaca',
+              color:'#b91c1c', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
+              {err}
+            </div>
+          )}
+        </>
+      ) : (
+        <p style={adminSectionDescStyle}>
+          Por ahora la vinculación con Google Calendar está disponible solo para cuentas
+          del dominio <strong>@{WORKSPACE_DOMAIN}</strong> (Workspace).
+          {' '}Tu cuenta actual es <strong>{agente?.email || '—'}</strong>.
+          {' '}Cuando migres a Workspace, vas a poder activar la sincronización desde acá.
+        </p>
+      )}
+    </section>
+  );
+}
+
 function UsuariosSection({ currentUser, onViewAs }) {
   const currentUserId = currentUser?.id;
   const esMegaAdmin = (currentUser?.email || '').toLowerCase() === MEGAADMIN_EMAIL;
@@ -6387,7 +6481,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -6495,6 +6589,8 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
               <button onClick={guardar} style={adminBtnPrimary}>Guardar configuración</button>
             </div>
           </section>
+
+          <GoogleCalendarSection agente={agente} onToggleGcal={onToggleGcal} />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
         </div>
@@ -7464,7 +7560,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) { setAgente(data); return; }
@@ -7498,6 +7594,7 @@ function AppShell() {
       key={appKey}
       user={user}
       agente={agente}
+      setAgente={setAgente}
       viewAs={viewAs}
       onViewAs={setViewAs}
       onExitViewAs={() => setViewAs(null)}
