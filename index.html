@@ -2144,6 +2144,7 @@ function mapTareaFromDB(t) {
     fechaRecordatorio: t.fecha_recordatorio,
     horaRecordatorio: t.hora_recordatorio ? t.hora_recordatorio.slice(0, 5) : null,
     observacion: t.observacion || '',
+    googleEventId: t.google_event_id || null,
     createdAt: t.created_at,
     updatedAt: t.updated_at
   };
@@ -2154,8 +2155,7 @@ function mapAgendadoFromDB(a) {
     id: a.id,
     prospectoId: a.prospecto_id,
     fecha: a.fecha,
-    nota: a.nota || '',
-    sincGoogle: !!a.sinc_google
+    nota: a.nota || ''
   };
 }
 
@@ -2383,6 +2383,7 @@ const storage = {
     if ('observacion' in patch) dbPatch.observacion = patch.observacion;
     if ('fechaRecordatorio' in patch) dbPatch.fecha_recordatorio = patch.fechaRecordatorio;
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
+    if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
     if (Object.keys(dbPatch).length === 0) return;
     const { error } = await sb.from('abordaje_tareas').update(dbPatch).eq('id', id);
     if (error) throw error;
@@ -2394,6 +2395,8 @@ const storage = {
   },
 
   // ── Agendados ──
+  // Solo se usan en modo NO piloto. En piloto, el calendar es Google directo
+  // y no se persisten agendados en Supabase.
   async createAgendado(prospectoId, fechaISO, nota) {
     const user = await auth.getUser();
     const { data, error } = await sb.from('abordaje_agendados').insert({
@@ -2409,8 +2412,83 @@ const storage = {
   async deleteAgendado(id) {
     const { error } = await sb.from('abordaje_agendados').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  async updateAgendado(id, patch) {
+    const dbPatch = {};
+    if ('fecha' in patch) dbPatch.fecha = patch.fecha;
+    if ('nota' in patch)  dbPatch.nota  = patch.nota;
+    const { data, error } = await sb.from('abordaje_agendados').update(dbPatch).eq('id', id).select().single();
+    if (error) throw error;
+    return mapAgendadoFromDB(data);
   }
 };
+
+// Wrapper de la edge function gcal-events (modo piloto). Habla con Google
+// Calendar via Domain-Wide Delegation. La edge function valida el JWT del user
+// y lo impersona en Calendar.
+const gcalApi = {
+  async list(timeMin, timeMax) {
+    const { data, error } = await sb.functions.invoke('gcal-events', {
+      body: { op: 'list', timeMin, timeMax }
+    });
+    if (error) throw error;
+    if (data?.skip) return null;
+    return data.events || [];
+  },
+  async create(event) {
+    const { data, error } = await sb.functions.invoke('gcal-events', {
+      body: { op: 'create', event }
+    });
+    if (error) throw error;
+    if (data?.skip) return null;
+    return data.event;
+  },
+  async update(eventId, event) {
+    const { data, error } = await sb.functions.invoke('gcal-events', {
+      body: { op: 'update', eventId, event }
+    });
+    if (error) throw error;
+    if (data?.skip) return null;
+    return data.event;
+  },
+  async delete(eventId) {
+    const { data, error } = await sb.functions.invoke('gcal-events', {
+      body: { op: 'delete', eventId }
+    });
+    if (error) throw error;
+    return data;
+  }
+};
+
+// Detector de modo piloto del calendar Google. Por ahora hardcodeado en email.
+// Cuando todos los users estén en Workspace, se elimina el flag y el calendar
+// pasa a ser Google para todos (con fallback para gmail personales).
+function isPilotUser(user) {
+  return (user?.email || '').toLowerCase() === 'nortiz@ifs-broker.com';
+}
+
+// Construye el body de un evento de Google Calendar.
+//   startIso: ISO con TZ (ej. local Argentina serializado con toISOString())
+//   durationMin: duración en minutos (default 60)
+//   prospectId / tareaId: opcionales, se guardan en extendedProperties.private
+//     para que el calendar pueda identificar a qué entidad de Abordaje corresponden.
+const GCAL_TZ = 'America/Argentina/Buenos_Aires';
+function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
+  const start = new Date(startIso);
+  const end = new Date(start.getTime() + durationMin * 60_000);
+  const body = {
+    summary: summary || 'Agenda IFS',
+    description: description || '',
+    start: { dateTime: start.toISOString(), timeZone: GCAL_TZ },
+    end:   { dateTime: end.toISOString(),   timeZone: GCAL_TZ },
+  };
+  const ext = {};
+  if (prospectId) ext.abordaje_prospect_id = prospectId;
+  if (tareaId)    ext.abordaje_tarea_id    = tareaId;
+  if (Object.keys(ext).length) body.extendedProperties = { private: ext };
+  return body;
+}
 
 // Helper: factory de prospecto en memoria (para handlers que necesitan un objeto antes de persistir)
 function newProspecto(input) {
@@ -3341,6 +3419,12 @@ function NotificacionesDropdown({ items, onClose, onClickItem }) {
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
+  // Modo piloto: el calendar usa Google Calendar como fuente de verdad.
+  // En viewAs admin no se aplica (estamos mirando otro user, no a nosotros).
+  const isPilot = isPilotUser(user) && !viewAs;
+  // Bumpea para forzar re-fetch de eventos de Google tras crear/editar/borrar.
+  const [gcalReloadKey, setGcalReloadKey] = useState(0);
+  const bumpGcal = () => setGcalReloadKey(k => k + 1);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
 
@@ -3379,11 +3463,13 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const [showSettings, setShowSettings] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
-  // Click en una celda libre del calendario: muestra mini-modal Prospect/Tarea.
-  // `pendingSlot` guarda la fecha/hora elegida hasta que el flujo de creación de
-  // prospect/tarea la consuma.
+  // Click en una celda libre del calendario: muestra mini-modal Agenda/Tarea.
+  // `slotPicker` controla el chooser inicial; `nuevaAgendaSlot` controla el
+  // modal de Nueva agenda (con campos de agenda y opción de vincular prospect).
   const [slotPicker, setSlotPicker] = useState(null);
-  const [pendingSlot, setPendingSlot] = useState(null);
+  const [nuevaAgendaSlot, setNuevaAgendaSlot] = useState(null);
+  // Edición de agendas standalone (click en evento del calendar sin prospect)
+  const [agendaEditando, setAgendaEditando] = useState(null);
   const [tick, setTick] = useState(0);  // re-render cada 60s para recalcular urgencias
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
@@ -3439,17 +3525,6 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
       const prospecto = await storage.createProspecto(data);
       setState(s => ({ ...s, prospectos: [prospecto, ...s.prospectos] }));
       setShowAddModal(false);
-      // Si el prospect viene de un click en celda del calendario, agregamos
-      // un primer contacto tipo 'agendado' para esa fecha/hora — eso dispara
-      // sincronización automática y aparece como evento en el calendar.
-      if (pendingSlot) {
-        const slot = pendingSlot;
-        setPendingSlot(null);
-        const agendadoPara = `${slot.date.getFullYear()}-${pad2(slot.date.getMonth()+1)}-${pad2(slot.date.getDate())}T${pad2(slot.hour)}:${pad2(slot.minute)}`;
-        try {
-          await handleAddContacto(prospecto.id, { tipo: 'agendado', agendadoPara, observacion: '' });
-        } catch (e) { console.error('addContacto desde slot:', e); }
-      }
       showToast('Prospecto agregado');
     } catch (e) { handleErr(e, 'createProspecto'); }
   };
@@ -3473,24 +3548,45 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   // contactoActivo: el contacto que define el seguimiento vigente. Si null/sin agendadoPara,
   // sólo limpia (no crea nada).
   const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
-    // 1. Limpiar tareas auto-generadas del prospect
+    // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
     const tareasAuto = (prevState.tareas?.items || []).filter(t => t.prospectoId === prospectoId);
     for (const t of tareasAuto) {
-      try { await storage.deleteTarea(t.id); }
-      catch (e) { console.error('limpieza tarea auto:', e); }
+      try {
+        if (isPilot && t.googleEventId) {
+          try { await gcalApi.delete(t.googleEventId); } catch (e) { console.warn('gcal del tarea auto:', e); }
+        }
+        await storage.deleteTarea(t.id);
+      } catch (e) { console.error('limpieza tarea auto:', e); }
     }
-    // 2. Limpiar agendados anteriores del prospect que NO estén vencidos
+    // 2. Limpiar agendados anteriores del prospect que NO estén vencidos.
+    //    En piloto los agendados de prospect viven en Google (no en abordaje_agendados),
+    //    así que listamos eventos de Google con abordaje_prospect_id=prospectoId y los borramos.
     const ahora = new Date();
-    const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
-      if (a.prospectoId !== prospectoId) return false;
-      return new Date(a.fecha) >= ahora;
-    });
-    for (const a of agendadosNoVencidos) {
-      try { await storage.deleteAgendado(a.id); }
-      catch (e) { console.error('limpieza agendado:', e); }
+    let idsAgendadosBorrados = new Set();
+    if (isPilot) {
+      try {
+        const now = new Date();
+        const futuroMax = new Date(); futuroMax.setMonth(futuroMax.getMonth() + 6);
+        const evts = await gcalApi.list(now.toISOString(), futuroMax.toISOString());
+        for (const ev of (evts || [])) {
+          const pid = ev.extendedProperties?.private?.abordaje_prospect_id;
+          if (pid === prospectoId) {
+            try { await gcalApi.delete(ev.id); } catch (e) { console.warn('gcal del agenda prospect:', e); }
+          }
+        }
+      } catch (e) { console.warn('gcal list prospect:', e); }
+    } else {
+      const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
+        if (a.prospectoId !== prospectoId) return false;
+        return new Date(a.fecha) >= ahora;
+      });
+      for (const a of agendadosNoVencidos) {
+        try { await storage.deleteAgendado(a.id); }
+        catch (e) { console.error('limpieza agendado:', e); }
+      }
+      idsAgendadosBorrados = new Set(agendadosNoVencidos.map(a => a.id));
     }
     const idsTareasBorradas = new Set(tareasAuto.map(t => t.id));
-    const idsAgendadosBorrados = new Set(agendadosNoVencidos.map(a => a.id));
     setState(s => ({
       ...s,
       tareas: { ...s.tareas, items: s.tareas.items.filter(t => !idsTareasBorradas.has(t.id)) },
@@ -3498,14 +3594,31 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
     }));
 
     // 3. Si no hay contacto activo o no tiene fecha objetivo, salir
-    if (!contactoActivo || !contactoActivo.agendadoPara) return;
+    if (!contactoActivo || !contactoActivo.agendadoPara) {
+      if (isPilot) bumpGcal();
+      return;
+    }
 
     // 4. Generar lo nuevo según el tipo
     if (contactoActivo.tipo === 'agendado') {
-      try {
-        const ag = await calendarApi.agendar(prospectoId, contactoActivo.agendadoPara, contactoActivo.observacion || '');
-        setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
-      } catch (e) { console.error('agendar:', e); }
+      if (isPilot) {
+        // Crear evento en Google vinculado al prospect.
+        const prospect = prevState.prospectos.find(p => p.id === prospectoId);
+        try {
+          await gcalApi.create(buildGoogleEventBody({
+            startIso: contactoActivo.agendadoPara,
+            summary: `Cita — ${prospect?.nombre || 'prospect'}`,
+            description: contactoActivo.observacion || '',
+            prospectId: prospectoId,
+          }));
+          bumpGcal();
+        } catch (e) { console.error('gcal create agenda prospect:', e); }
+      } else {
+        try {
+          const ag = await calendarApi.agendar(prospectoId, contactoActivo.agendadoPara, contactoActivo.observacion || '');
+          setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
+        } catch (e) { console.error('agendar:', e); }
+      }
     } else {
       const colAbordar = (prevState.tareas?.columnas || []).find(c => c.slug === 'abordar');
       if (!colAbordar) { console.warn('No hay columna Abordar'); return; }
@@ -3524,7 +3637,24 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
           horaRecordatorio: hora,
           observacion: obsTarea
         });
+        // En piloto, también crear evento en Google para que aparezca en el calendar.
+        if (isPilot) {
+          try {
+            const local = new Date(`${fecha}T${(hora || '09:00')}:00`);
+            const evt = await gcalApi.create(buildGoogleEventBody({
+              startIso: local.toISOString(),
+              summary: titulo,
+              description: obsTarea,
+              tareaId: tarea.id,
+            }));
+            if (evt?.id) {
+              await storage.updateTarea(tarea.id, { googleEventId: evt.id });
+              tarea.googleEventId = evt.id;
+            }
+          } catch (e) { console.warn('gcal create tarea auto:', e); }
+        }
         setState(s => ({ ...s, tareas: { ...s.tareas, items: [...s.tareas.items, tarea] } }));
+        if (isPilot) bumpGcal();
       } catch (e) { console.error('crear tarea auto:', e); }
     }
   };
@@ -3650,6 +3780,7 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   // Click en celda del calendario → "Nueva tarea": la creo en la primera columna
   // disponible (Abordar por slug, o la primera) con fecha/hora preset y abro el
   // modal de edición para que el user complete el título y guarde.
+  // En piloto: además crea evento en Google con abordaje_tarea_id en extendedProps.
   const handleCreateTareaEnSlot = async (slot) => {
     if (guardReadOnly()) return;
     const cols = state.tareas?.columnas || [];
@@ -3664,23 +3795,115 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         fechaRecordatorio: fechaYMD,
         horaRecordatorio: horaHM,
       });
+      // En piloto, replicar al calendar de Google con vínculo a la tarea.
+      if (isPilot) {
+        try {
+          const local = new Date(slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(), slot.hour, slot.minute, 0);
+          const evt = await gcalApi.create(buildGoogleEventBody({
+            startIso: local.toISOString(),
+            summary: 'Tarea',
+            tareaId: tarea.id,
+          }));
+          if (evt?.id) {
+            await storage.updateTarea(tarea.id, { googleEventId: evt.id });
+            tarea.googleEventId = evt.id;
+          }
+        } catch (e) { console.warn('gcal create (tarea):', e?.message || e); }
+      }
       setState(s => ({
         ...s,
         tareas: { ...s.tareas, items: [...s.tareas.items, tarea] }
       }));
       setSlotPicker(null);
       setTareaEditando(tarea);
+      if (isPilot) bumpGcal();
     } catch (e) { handleErr(e, 'createTarea'); }
   };
 
-  // Click en celda del calendario → "Nuevo prospect": guardo el slot y abro
-  // el modal de nuevo prospect. Al guardar, handleAdd consume pendingSlot y
-  // agrega un primer contacto tipo agendado.
-  const handleCreateProspectEnSlot = (slot) => {
+  // Click en celda del calendario → "Nueva agenda": abrimos el modal con la
+  // fecha/hora preset. El user decide si vincular un prospect nuevo o no.
+  const handleCreateAgendaEnSlot = (slot) => {
     if (guardReadOnly()) return;
-    setPendingSlot(slot);
     setSlotPicker(null);
-    setShowAddModal(true);
+    setNuevaAgendaSlot(slot);
+  };
+
+  // Update / delete de agendas standalone (click sobre el evento en calendar).
+  // En piloto `agendaId` es el google_event_id del evento; en non-piloto es el id
+  // del agendado en abordaje_agendados.
+  const handleUpdateAgenda = async (agendaId, patch) => {
+    if (guardReadOnly()) return;
+    try {
+      if (isPilot) {
+        await gcalApi.update(agendaId, buildGoogleEventBody({
+          startIso: patch.fecha,
+          summary: (patch.nota || '').split(/\r?\n+/)[0] || 'Agenda IFS',
+          description: patch.nota || '',
+        }));
+        bumpGcal();
+      } else {
+        const updated = await storage.updateAgendado(agendaId, patch);
+        setState(s => ({ ...s, agendados: s.agendados.map(a => a.id === agendaId ? updated : a) }));
+      }
+      setAgendaEditando(null);
+      showToast('Agenda actualizada');
+    } catch (e) { handleErr(e, 'updateAgenda'); }
+  };
+  const handleDeleteAgenda = async (agendaId) => {
+    if (guardReadOnly()) return;
+    if (!confirm('¿Eliminar esta agenda? También se borra del Google Calendar.')) return;
+    try {
+      if (isPilot) {
+        await gcalApi.delete(agendaId);
+        bumpGcal();
+      } else {
+        await storage.deleteAgendado(agendaId);
+        setState(s => ({ ...s, agendados: s.agendados.filter(a => a.id !== agendaId) }));
+      }
+      setAgendaEditando(null);
+      showToast('Agenda eliminada');
+    } catch (e) { handleErr(e, 'deleteAgenda'); }
+  };
+
+  // Guarda una "Nueva agenda" creada desde el calendario.
+  //  - Si form.crearProspect: crea prospect + primer contacto tipo agendado.
+  //  - Si no: crea sólo el evento (sin prospect) → en piloto va directo a Google,
+  //    en non-piloto va a abordaje_agendados.
+  const handleSaveAgenda = async (slot, form) => {
+    if (guardReadOnly()) return;
+    try {
+      const local = new Date(slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(), slot.hour, slot.minute, 0);
+      const agendadoParaIso = local.toISOString();
+      const nota = (form.titulo || '').trim() + (form.observacion ? `\n\n${form.observacion.trim()}` : '');
+
+      if (form.crearProspect && form.prospectoNombre?.trim()) {
+        const prospecto = await storage.createProspecto({
+          nombre: form.prospectoNombre.trim(),
+          telefono: '', preferenciaContacto: '', detalle: '',
+          referente: '', observaciones: '',
+        });
+        setState(s => ({ ...s, prospectos: [prospecto, ...s.prospectos] }));
+        await handleAddContacto(prospecto.id, {
+          tipo: 'agendado',
+          agendadoPara: agendadoParaIso,
+          observacion: nota,
+        });
+      } else if (isPilot) {
+        // Agenda standalone en Google directo (sin prospect, sin abordaje_agendados).
+        await gcalApi.create(buildGoogleEventBody({
+          startIso: agendadoParaIso,
+          summary: (form.titulo || '').trim() || 'Agenda IFS',
+          description: form.observacion || '',
+        }));
+        bumpGcal();
+      } else {
+        // Non-piloto: agenda standalone en DB.
+        const ag = await storage.createAgendado(null, agendadoParaIso, nota);
+        setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
+      }
+      setNuevaAgendaSlot(null);
+      showToast('Agenda creada');
+    } catch (e) { handleErr(e, 'createAgenda'); }
   };
 
   const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
@@ -3726,6 +3949,34 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
     }));
     try {
       await storage.updateTarea(id, patch);
+      // En piloto, sincronizar con Google Calendar.
+      if (isPilot && prev) {
+        const merged = { ...prev, ...patch };
+        const hasFecha = !!merged.fechaRecordatorio;
+        const fechaIso = hasFecha
+          ? new Date(`${merged.fechaRecordatorio}T${(merged.horaRecordatorio || '09:00')}:00`).toISOString()
+          : null;
+        const eventBody = hasFecha ? buildGoogleEventBody({
+          startIso: fechaIso,
+          summary: merged.titulo?.trim() || 'Tarea',
+          description: merged.observacion || '',
+          tareaId: id,
+        }) : null;
+        try {
+          if (merged.googleEventId && hasFecha) {
+            await gcalApi.update(merged.googleEventId, eventBody);
+          } else if (merged.googleEventId && !hasFecha) {
+            // Le quitaron la fecha → borrar evento
+            await gcalApi.delete(merged.googleEventId);
+            await storage.updateTarea(id, { googleEventId: null });
+          } else if (!merged.googleEventId && hasFecha) {
+            // Le pusieron fecha por primera vez → crear evento
+            const evt = await gcalApi.create(eventBody);
+            if (evt?.id) await storage.updateTarea(id, { googleEventId: evt.id });
+          }
+          bumpGcal();
+        } catch (e) { console.warn('gcal sync (update tarea):', e?.message || e); }
+      }
     } catch (e) {
       handleErr(e, 'updateTarea');
       if (prev) setState(s => ({
@@ -3739,10 +3990,17 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
     if (guardReadOnly()) return;
     if (!confirm('¿Eliminar esta tarea?')) return;
     const prev = state.tareas.items;
+    const tarea = prev.find(t => t.id === id);
     setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
     try {
+      // En piloto, borrar primero el evento de Google (si existe).
+      if (isPilot && tarea?.googleEventId) {
+        try { await gcalApi.delete(tarea.googleEventId); }
+        catch (e) { console.warn('gcal sync (delete tarea):', e?.message || e); }
+      }
       await storage.deleteTarea(id);
       setTareaEditando(null);
+      if (isPilot) bumpGcal();
       showToast('Tarea eliminada');
     } catch (e) {
       handleErr(e, 'deleteTarea');
@@ -4024,9 +4282,13 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
           <CalendarioView
             prospectos={filtrados}
             tareasState={state.tareas}
+            agendados={state.agendados}
             settings={settings}
+            isPilot={isPilot}
+            gcalReloadKey={gcalReloadKey}
             onSelectProspecto={setSelectedId}
             onSelectTarea={(t) => setTareaEditando(t)}
+            onSelectAgenda={(a) => setAgendaEditando(a)}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
         </>
@@ -4034,9 +4296,8 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
 
       {showAddModal && (
         <NuevoProspectoModal
-          onCancel={() => { setShowAddModal(false); setPendingSlot(null); }}
+          onCancel={() => setShowAddModal(false)}
           onSave={handleAdd}
-          slotInfo={pendingSlot}
         />
       )}
 
@@ -4044,10 +4305,31 @@ function App({ user, agente, viewAs, onViewAs, onExitViewAs, onLogout }) {
         <SlotChooserModal
           slot={slotPicker}
           onCancel={() => setSlotPicker(null)}
-          onProspect={() => handleCreateProspectEnSlot(slotPicker)}
+          onAgenda={() => handleCreateAgendaEnSlot(slotPicker)}
           onTarea={() => handleCreateTareaEnSlot(slotPicker)}
         />
       )}
+
+      {nuevaAgendaSlot && (
+        <NuevaAgendaModal
+          slot={nuevaAgendaSlot}
+          onCancel={() => setNuevaAgendaSlot(null)}
+          onSave={(form) => handleSaveAgenda(nuevaAgendaSlot, form)}
+        />
+      )}
+
+      {agendaEditando && (() => {
+        const agendaId = agendaEditando.googleEvent ? agendaEditando.googleEvent.id : agendaEditando.id;
+        return (
+          <EditAgendaModal
+            agenda={agendaEditando}
+            readOnly={readOnly}
+            onCancel={() => setAgendaEditando(null)}
+            onSave={(patch) => handleUpdateAgenda(agendaId, patch)}
+            onDelete={() => handleDeleteAgenda(agendaId)}
+          />
+        );
+      })()}
 
       {showSettings && (
         <SettingsModal
@@ -4944,7 +5226,7 @@ function buildMonthGrid(year, month) {
 }
 
 // Extrae eventos de los prospectos (uno por prospecto si tiene proximoContacto y no está rechazado)
-function extractCalendarEvents(prospectos, tareasState) {
+function extractCalendarEvents(prospectos, tareasState, agendados) {
   const events = [];
   // Eventos de prospectos (proximoContacto) — SOLO si el último contacto es
   // una cita formal (tipo 'agendado'). Para los otros tipos (llamar_X,
@@ -4965,6 +5247,22 @@ function extractCalendarEvents(prospectos, tareasState) {
       tipo: 'agendado',
       observacion: ultimoAgendado?.observacion || '',
       duracionMin: ultimoAgendado?.duracionMin || null
+    });
+  }
+  // Agendados standalone (sin prospect): los creados desde "Nueva agenda"
+  // en el calendario. Vienen de abordaje_agendados con prospecto_id NULL.
+  for (const a of (agendados || [])) {
+    if (a.prospectoId) continue; // los de prospect ya están arriba
+    const lines = (a.nota || '').split(/\r?\n+/).filter(Boolean);
+    events.push({
+      id: a.id + '_agenda',
+      kind: 'agenda',
+      agendaData: a,
+      label: lines[0] || 'Agenda',
+      fecha: a.fecha,
+      tipo: 'agendado',
+      observacion: lines.slice(1).join('\n') || '',
+      duracionMin: null
     });
   }
   // Eventos de tareas (con fechaRecordatorio).
@@ -4998,6 +5296,77 @@ function extractCalendarEvents(prospectos, tareasState) {
   return events.sort((a, b) => a.fecha.localeCompare(b.fecha));
 }
 
+// ── MODO PILOTO: helpers para Google Calendar ──────────────────
+// Calcula el rango (timeMin, timeMax) a pedir a Google según el mode visible.
+// Pedimos un poco más que el rango exacto para que las navegaciones cortas
+// no necesiten refetch inmediato.
+function calcRangeForGcal(mode, cursor) {
+  const start = new Date(cursor);
+  let end;
+  if (mode === 'mes') {
+    start.setDate(1); start.setHours(0,0,0,0);
+    end = new Date(start);
+    end.setMonth(end.getMonth() + 1);
+  } else if (mode === 'semana') {
+    // cursor ya está en startOfWeek
+    end = new Date(start);
+    end.setDate(end.getDate() + 7);
+  } else { // 'hoy'
+    start.setHours(0,0,0,0);
+    end = new Date(start);
+    end.setDate(end.getDate() + 1);
+  }
+  // Margen para que la navegación previa/siguiente no recargue de inmediato
+  start.setDate(start.getDate() - 3);
+  end.setDate(end.getDate() + 3);
+  return { timeMin: start.toISOString(), timeMax: end.toISOString() };
+}
+
+// Mapea eventos de Google Calendar al formato interno del calendar de Abordaje.
+// Propaga `gcalColor` (background del calendar de origen) y `gcalCalendarName`
+// para pintar eventos externos con el color/nombre del calendario en Google.
+function extractGcalEventsForCalendar(gcalEvents, prospectos) {
+  const events = [];
+  // Deduplicate por id (eventos compartidos pueden aparecer en varios calendars).
+  const seen = new Set();
+  for (const ev of (gcalEvents || [])) {
+    if (ev.status === 'cancelled') continue;
+    if (seen.has(ev.id)) continue;
+    seen.add(ev.id);
+    const start = ev.start?.dateTime || ev.start?.date;
+    if (!start) continue;
+    const ext = ev.extendedProperties?.private || {};
+    const prospectoId = ext.abordaje_prospect_id || null;
+    const tareaId = ext.abordaje_tarea_id || null;
+    let kind = 'agenda';
+    let prospectoNombre = null;
+    if (prospectoId) {
+      kind = 'prospecto';
+      const p = prospectos.find(x => x.id === prospectoId);
+      prospectoNombre = p?.nombre || '(prospect eliminado)';
+    } else if (tareaId) {
+      kind = 'tarea';
+    }
+    events.push({
+      id: ev.id,
+      kind,
+      googleEvent: ev,
+      prospectoId,
+      tareaId,
+      prospectoNombre,
+      label: prospectoNombre || ev.summary || '(sin título)',
+      fecha: start,
+      tipo: 'agendado',
+      observacion: ev.description || '',
+      duracionMin: null,
+      gcalColor: ev._gcalColor || null,
+      gcalCalendarName: ev._gcalSummary || null,
+      isExternalGcal: !prospectoId && !tareaId,
+    });
+  }
+  return events.sort((a, b) => a.fecha.localeCompare(b.fecha));
+}
+
 // Color del evento en calendario — paleta reducida y consistente:
 //   agendado (cita) → verde
 //   contestador → gris
@@ -5010,7 +5379,27 @@ const CAL_COLOR_AZUL     = { color: '#1e40af', bg: '#dbeafe', border: '#1e40af' 
 const CAL_COLOR_AMARILLO = { color: '#a16207', bg: '#fef9c3', border: '#a16207' };
 const CAL_COLOR_VIOLETA  = { color: '#6d28d9', bg: 'rgba(124,58,237,0.14)', border: '#7c3aed' };
 
+// Convierte un color HEX (#RRGGBB) en una versión clarita (bg) y oscura (text).
+function deriveColorsFromGcalHex(hex) {
+  if (!hex || typeof hex !== 'string') return null;
+  const m = hex.replace('#', '').match(/^([0-9a-f]{6})$/i);
+  if (!m) return null;
+  const n = parseInt(m[1], 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const bg = `rgba(${r},${g},${b},0.18)`;
+  // Texto: oscurecer el color un poco para contraste sobre el bg pastel.
+  const dark = (c) => Math.max(0, Math.floor(c * 0.55));
+  const color = `rgb(${dark(r)},${dark(g)},${dark(b)})`;
+  return { color, bg, border: hex };
+}
+
 function colorCalendarEvento(e) {
+  // Eventos externos de Google (no creados desde Abordaje): usar el color del
+  // calendario de origen para que match con lo que el user ve en Google Calendar.
+  if (e?.isExternalGcal && e.gcalColor) {
+    const c = deriveColorsFromGcalHex(e.gcalColor);
+    if (c) return c;
+  }
   const t = e?.tipo;
   if (t === 'agendado') return CAL_COLOR_VERDE;
   if (t === 'contestador') return CAL_COLOR_GRIS;
@@ -5059,19 +5448,49 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, settings, onSelectProspecto, onSelectTarea, onSlotClick }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSlotClick }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
+  // Eventos de Google Calendar para modo piloto. Se refrescan al cambiar
+  // rango o cuando el padre bumpea `gcalReloadKey` (post create/update/delete).
+  const [gcalEvents, setGcalEvents] = useState([]);
+  const [gcalLoading, setGcalLoading] = useState(false);
 
-  const events = useMemo(() => extractCalendarEvents(prospectos, tareasState), [prospectos, tareasState]);
+  const { timeMin, timeMax } = useMemo(() => calcRangeForGcal(mode, cursor), [mode, cursor]);
+  useEffect(() => {
+    if (!isPilot) return;
+    let cancelled = false;
+    setGcalLoading(true);
+    gcalApi.list(timeMin, timeMax)
+      .then(evts => { if (!cancelled) setGcalEvents(evts || []); })
+      .catch(err => console.warn('gcal list:', err?.message || err))
+      .finally(() => { if (!cancelled) setGcalLoading(false); });
+    return () => { cancelled = true; };
+  }, [isPilot, timeMin, timeMax, gcalReloadKey]);
+
+  const events = useMemo(() => {
+    if (isPilot) return extractGcalEventsForCalendar(gcalEvents, prospectos);
+    return extractCalendarEvents(prospectos, tareasState, agendados);
+  }, [isPilot, gcalEvents, prospectos, tareasState, agendados]);
   const eventsByKey = useMemo(() => eventsByDayKey(events), [events]);
 
   // Dispatcher: cada evento del calendario sabe a dónde abre cuando se clickea.
+  // En piloto los eventos provienen de Google y portan googleEvent/tareaId/prospectoId.
+  // En non-piloto vienen del state local con tareaData/agendaData/prospectoId.
   const onSelectEvent = useCallback((e) => {
-    if (e.kind === 'tarea' && onSelectTarea) onSelectTarea(e.tareaData);
-    else if (onSelectProspecto) onSelectProspecto(e.prospectoId);
-  }, [onSelectProspecto, onSelectTarea]);
+    if (e.kind === 'tarea' && onSelectTarea) {
+      if (e.tareaData) onSelectTarea(e.tareaData);
+      else if (e.tareaId) {
+        const t = tareasState?.items?.find(x => x.id === e.tareaId);
+        if (t) onSelectTarea(t);
+      }
+    } else if (e.kind === 'agenda' && onSelectAgenda) {
+      onSelectAgenda(e.googleEvent ? { googleEvent: e.googleEvent } : e.agendaData);
+    } else if (e.kind === 'prospecto' && onSelectProspecto) {
+      onSelectProspecto(e.prospectoId);
+    }
+  }, [onSelectProspecto, onSelectTarea, onSelectAgenda, tareasState]);
 
   // Cuando cambia el mode, ajustar cursor a un anchor sensato
   useEffect(() => {
@@ -6624,9 +7043,9 @@ function ChangePasswordModal({ displayName, onClose }) {
 }
 
 // ── MINI-MODAL: ELEGIR QUÉ CREAR DESDE UNA CELDA DEL CALENDARIO ─
-// Aparece cuando el user clickea un slot libre. Le propone crear un prospect
-// (con primer contacto agendado para ese slot) o una tarea (con recordatorio).
-function SlotChooserModal({ slot, onCancel, onProspect, onTarea }) {
+// Aparece cuando el user clickea un slot libre. Le propone crear una agenda
+// (reunión, opcionalmente con prospect vinculado) o una tarea.
+function SlotChooserModal({ slot, onCancel, onAgenda, onTarea }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', onKey);
@@ -6648,21 +7067,201 @@ function SlotChooserModal({ slot, onCancel, onProspect, onTarea }) {
             {cuando}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button className="btn-primary" style={{ padding: '12px 16px', textAlign: 'left' }} onClick={onProspect}>
-              <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Nuevo prospecto agendado</div>
+            <button className="btn-primary" style={{ padding: '12px 16px', textAlign: 'left' }} onClick={onAgenda}>
+              <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Nueva agenda</div>
               <div style={{ fontWeight: 400, fontSize: '0.76rem', opacity: 0.85, marginTop: 2 }}>
-                Crea el prospect y deja la cita confirmada en este horario.
+                Reunión / cita en este horario. Sale al calendario sin crear prospect,
+                salvo que lo pidas en el formulario.
               </div>
             </button>
             <button className="btn-secondary" style={{ padding: '12px 16px', textAlign: 'left' }} onClick={onTarea}>
               <div style={{ fontWeight: 700, fontSize: '0.92rem' }}>Nueva tarea</div>
               <div style={{ fontWeight: 400, fontSize: '0.76rem', opacity: 0.8, marginTop: 2 }}>
-                Tarea suelta con recordatorio para este día y hora.
+                Tarea con recordatorio para este día y hora.
               </div>
             </button>
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── MODAL: EDITAR AGENDA STANDALONE ──────────────────────────────
+// Click sobre un evento del calendar que es una "Nueva agenda" (sin prospect).
+// Permite cambiar fecha/hora/título/observación + Eliminar. El sync a Google
+// Calendar se dispara automáticamente desde storage.updateAgendado/deleteAgendado.
+function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
+  // agenda puede venir en dos formatos:
+  //   - modo piloto: { googleEvent: <calendar.event> } — la fuente es Google.
+  //   - non-piloto: { id, fecha, nota } — la fuente es abordaje_agendados.
+  const isGoogle = !!agenda.googleEvent;
+  const initialDate = isGoogle
+    ? new Date(agenda.googleEvent.start?.dateTime || agenda.googleEvent.start?.date)
+    : new Date(agenda.fecha);
+  const initialNota = isGoogle
+    ? [agenda.googleEvent.summary || '', agenda.googleEvent.description || ''].filter(Boolean).join('\n\n')
+    : (agenda.nota || '');
+  const lines = initialNota.split(/\r?\n+/);
+  const [fecha, setFecha] = useState(
+    `${initialDate.getFullYear()}-${pad2(initialDate.getMonth()+1)}-${pad2(initialDate.getDate())}`
+  );
+  const [hora, setHora] = useState(`${pad2(initialDate.getHours())}:${pad2(initialDate.getMinutes())}`);
+  const [titulo, setTitulo] = useState(lines[0] || '');
+  const [observacion, setObservacion] = useState(lines.slice(1).join('\n'));
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const submit = (e) => {
+    if (e) e.preventDefault();
+    if (readOnly) return;
+    setErr('');
+    if (!titulo.trim()) { setErr('Falta el título.'); return; }
+    const [y, m, d] = fecha.split('-').map(Number);
+    const [hh, mm] = hora.split(':').map(Number);
+    if (!y || !m || !d || isNaN(hh) || isNaN(mm)) { setErr('Fecha u hora inválida.'); return; }
+    const local = new Date(y, m - 1, d, hh, mm, 0);
+    const nota = titulo.trim() + (observacion.trim() ? `\n\n${observacion.trim()}` : '');
+    onSave({ fecha: local.toISOString(), nota });
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit} style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3>{readOnly ? 'Detalle de agenda' : 'Editar agenda'}</h3>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <label>Título / Asunto</label>
+            <input type="text" value={titulo} readOnly={readOnly} autoFocus={!readOnly}
+              onChange={e => setTitulo(e.target.value)}
+              placeholder="Ej: Reunión equipo" />
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label>Fecha</label>
+              <input type="date" value={fecha} readOnly={readOnly}
+                onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Hora</label>
+              <input type="time" value={hora} readOnly={readOnly}
+                onChange={e => setHora(e.target.value)} />
+            </div>
+          </div>
+          <div className="field">
+            <label>Observación</label>
+            <textarea value={observacion} readOnly={readOnly}
+              onChange={e => setObservacion(e.target.value)}
+              placeholder="Notas / agenda de la reunión..." rows={3} />
+          </div>
+          {err && <div className="field-error">{err}</div>}
+        </div>
+        <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
+          {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" className="btn-secondary" onClick={onCancel}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
+            {!readOnly && <button type="submit" className="btn-primary">Guardar</button>}
+          </div>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ── MODAL: NUEVA AGENDA (desde click en celda del calendario) ───────
+// Form simple. Por defecto crea sólo un agendado standalone (sin prospect).
+// Si el user tilda "Vincular a un prospecto nuevo", pide el nombre y se crea
+// el prospect + un primer contacto agendado para ese horario.
+function NuevaAgendaModal({ slot, onCancel, onSave }) {
+  const [titulo, setTitulo] = useState('');
+  const [observacion, setObservacion] = useState('');
+  const [crearProspect, setCrearProspect] = useState(false);
+  const [prospectoNombre, setProspectoNombre] = useState('');
+  const [err, setErr] = useState('');
+  // Guard contra doble submit (Enter + click rápido) que generaba eventos duplicados.
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const dow = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][slot.date.getDay()];
+  const cuando = `${dow} ${slot.date.getDate()} de ${NOMBRES_MES[slot.date.getMonth()]} · ${pad2(slot.hour)}:${pad2(slot.minute)}`;
+
+  const submit = async (e) => {
+    if (e) e.preventDefault();
+    if (submitting) return;
+    setErr('');
+    if (!titulo.trim()) { setErr('Poné un título / asunto para la agenda.'); return; }
+    if (crearProspect && !prospectoNombre.trim()) { setErr('Falta el nombre del prospecto.'); return; }
+    setSubmitting(true);
+    try {
+      await onSave({ titulo, observacion, crearProspect, prospectoNombre });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit} style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3>Nueva agenda</h3>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div style={{
+            background: '#eff6ff', border: '1px solid #bfdbfe',
+            color: 'var(--azul-oscuro)', borderRadius: 8,
+            padding: '10px 12px', fontSize: '0.82rem', marginBottom: 14,
+            textTransform: 'capitalize',
+          }}>
+            {cuando}
+          </div>
+          <div className="field">
+            <label>Título / Asunto <span className="req">*</span></label>
+            <input type="text" value={titulo} autoFocus
+              onChange={e => setTitulo(e.target.value)}
+              placeholder="Ej: Reunión equipo, Cita con Pérez..." />
+          </div>
+          <div className="field">
+            <label>Observación</label>
+            <textarea value={observacion}
+              onChange={e => setObservacion(e.target.value)}
+              placeholder="Notas, agenda de la reunión..." rows={3} />
+          </div>
+          <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: '0.86rem', cursor: 'pointer', marginTop: 6 }}>
+            <input type="checkbox" checked={crearProspect}
+              onChange={e => setCrearProspect(e.target.checked)} />
+            <span>Vincular a un prospecto nuevo (se crea en la lista de Abordaje)</span>
+          </label>
+          {crearProspect && (
+            <div className="field" style={{ marginTop: 8 }}>
+              <label>Nombre del prospecto <span className="req">*</span></label>
+              <input type="text" value={prospectoNombre}
+                onChange={e => setProspectoNombre(e.target.value)}
+                placeholder="Ej: Juan Pérez" />
+            </div>
+          )}
+          {err && <div className="field-error" style={{ marginTop: 8 }}>{err}</div>}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancelar</button>
+          <button type="submit" className="btn-primary" disabled={submitting}>
+            {submitting ? 'Guardando…' : 'Guardar'}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
