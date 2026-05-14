@@ -171,3 +171,102 @@ Solo agrega 1 pantalla extra la primera vez, comparado con dominio Workspace.
 8. Roll-out al resto.
 
 Estimado: 3-4 horas de implementación + 30 min de setup manual + testing.
+
+---
+
+# UX y features adicionales (DONE) — 2026-05-14
+
+Después del refactor base, se sumaron mejoras de UX al calendar y a la
+plataforma en general. Todo en producción.
+
+## Calendar — UX visual
+- **Eventos solapados estilo Google** (`commit 6ae32e2`): algoritmo greedy de
+  columnas (`layoutEventsInDay`) divide el ancho horizontal según la cantidad
+  de overlaps. Modifier `.crowded` reduce padding y font-size cuando hay 2+
+  eventos en el mismo horario. Cada uno se posiciona con `left%`/`width%`
+  inline computado.
+- **Tooltip al hover**: cada evento tiene `<div class="cal-event-tooltip">`
+  hijo que aparece a la derecha. Muestra hora, título, observación y nombre
+  del calendar de origen. Flip automático a la izquierda en los últimos 2
+  días para no salirse del viewport. Oculto en mobile (touch no tiene hover
+  real).
+- **Drag & drop**: pointer events con threshold 5px (mouse) para distinguir
+  click de drag. Snap a 15 min al soltar. Preview visual del slot destino
+  (rectángulo punteado azul con la hora exacta).
+- **Long-press en mobile**: 400ms con dedo quieto antes de activar drag, así
+  el scroll touch no se confunde con drag accidental. Feedback visual:
+  evento se "levanta" (scale 1.02 + shadow). `body.cal-dragging` bloquea
+  `touch-action` mientras está activo.
+- **Citas de prospect no-arrastrables**: cursor `not-allowed` + tooltip
+  *"Cita agendada desde prospect — editala desde su ficha"*. El click sigue
+  abriendo el modal del prospect.
+
+## Handler de move
+`handleMoveEvent(e, newStartIso)` en App decide qué entidad actualizar:
+- `kind === 'prospecto'` → toast informativo, no se mueve (hay que editar el
+  contacto del prospect).
+- En piloto + `googleEvent` → `gcalApi.update` directo a Google.
+- En piloto + `kind === 'tarea'` → además actualiza `abordaje_tareas` para
+  que el card del kanban refleje la nueva fecha.
+- En non-piloto: `handleUpdateAgenda` / `handleUpdateTarea` según corresponda.
+
+## Multi-calendar
+`gcal-events` v3+ lista todos los calendars accesibles desde la cuenta
+Workspace (primary + compartidos + suscriptos). Cada evento trae `_gcalId`,
+`_gcalSummary`, `_gcalColor`. Eventos sin `abordaje_*_id` en
+extendedProperties (los "externos") se pintan con el color del calendar de
+origen via `deriveColorsFromGcalHex`.
+
+## Eventos recurrentes (fix)
+`gcal-events` v6: cuando se borra un evento, hace GET previo y si tiene
+`recurringEventId` (es instancia de un recurrente), usa
+**PATCH `status: 'cancelled'`** en vez de DELETE. Sin esto las instancias
+"virtuales" se regeneraban después del refresh.
+
+## Persistencia de vista
+La tab activa (`'lista' | 'tareas' | 'calendario'`) se guarda en
+`localStorage.abordaje_view`. Al refresh se mantiene en lugar de volver a
+"lista".
+
+## Mobile responsive (commit `cbccd38`)
+- **Header**: 2 filas en mobile (logo + título + iconos arriba, buscador
+  full-width abajo). `--header-h` pasa de 78px a 130px.
+- **Calendar semana**: scroll horizontal con `min-width: 95px` por día.
+  Columna de horas pasa de 60px a 44px. Tooltip al hover oculto en touch.
+  Sincronización del scroll horizontal header ↔ body via JS ref + `onScroll`.
+- **Tabla de prospectos**: `overflow-x: auto` con `min-width: 720px` en la
+  tabla → scroll horizontal preserva todas las columnas. (Si querés vista
+  card vertical en mobile, dejarlo para otro round.)
+
+## Edición de email del agente
+Edge function `update-user-email` actualiza `auth.users.email` Y
+`profiles.email` en una sola operación (`auth.admin.updateUserById` con
+`email_confirm: true` para saltar verificación del agente). El `user_id`
+queda intacto → no hay filas viejas.
+
+## Toggle Calendar con `gcal_enabled`
+`profiles.gcal_enabled` (boolean, default false). Sección "Google Calendar"
+en SettingsModal con explicación + toggle. El frontend usa
+`isGoogleCalendarUser(profile)` que valida flag + dominio. Cuando se activa,
+el calendar pasa a Google; cuando se desactiva, vuelve al modelo local.
+
+## API gcalApi — propaga calendarId
+`gcalApi.update(eventId, event, calendarId)` y `gcalApi.delete(eventId,
+calendarId)` ahora reciben el `calendarId` del evento (no siempre 'primary').
+Necesario para operar sobre eventos compartidos del calendar personal.
+`handleMoveEvent`, `handleUpdateAgenda`, `handleDeleteAgenda` pasan
+`e.googleEvent._gcalId`.
+
+## Commits relevantes
+- `7de5227` Calendar Google: toggle opt-in en Ajustes para users del dominio
+  Workspace
+- `eff7c7c` admin: edición de email del agente desde la fila de usuarios
+- `6ae32e2` Calendar: overlap + tooltip + drag&drop + responsive mobile + fixes
+- `cbccd38` Mobile responsive: header 2-filas + tabla scroll horizontal
+- `30a3f01` Calendar mobile: long-press para activar drag en touch
+
+## Estado al cierre del día (2026-05-14)
+- Producción funcionando para `nortiz@ifs-broker.com` con todas las features.
+- Pendiente testing por otros agentes Workspace.
+- Pendiente Fase 2 (OAuth user-level) para gmail personales — ver sección
+  arriba.
