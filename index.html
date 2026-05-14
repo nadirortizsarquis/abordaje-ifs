@@ -2109,12 +2109,43 @@
     .col-referente, .col-pref { display: none; }
   }
   @media (max-width: 720px) {
-    .main { padding: 20px 16px; }
-    .header { padding: 0 14px; }
-    .header-title { font-size: 0.95rem; padding-left: 12px; }
+    /* Header: 2 filas en mobile. La altura sube para que el contenido principal
+       no quede tapado (el `--header-h` se override y el margin-top de .main lo
+       respeta automáticamente). */
+    :root { --header-h: 130px; }
+    .header {
+      height: auto;
+      min-height: var(--header-h);
+      flex-wrap: wrap;
+      padding: 8px 14px;
+      gap: 6px;
+    }
+    .header-logo { height: 38px; max-width: 160px; }
+    .header-title {
+      font-size: 0.88rem;
+      padding-left: 10px;
+      border-left-width: 1px;
+      flex: 1 1 auto;
+    }
     .header-subtitle { display: none; }
+    .header-search-slot {
+      order: 10; flex: 1 100%;
+      margin-left: 0; margin-right: 0;
+    }
+    .header-actions {
+      order: 5; gap: 5px; flex-wrap: wrap; justify-content: flex-end;
+    }
+    .header-btn { padding: 5px 9px; font-size: 0.72rem; }
+    .header-user { font-size: 0.72rem; padding: 3px 6px; }
+    .header-admin-badge { font-size: 0.58rem; padding: 1px 5px; }
+
+    .main { padding: 20px 16px; }
     table.prospectos { font-size: 0.8rem; }
     table.prospectos td, table.prospectos th { padding: 10px 8px; }
+    /* Tabla de prospectos con scroll horizontal — preserva todas las columnas
+       y deja al user deslizar para ver lo que no entra. */
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table.prospectos { min-width: 720px; }
     .field-row, .field-inline-row { grid-template-columns: 1fr; }
     .tipos-grid { grid-template-columns: 1fr 1fr; }
     .panel-side { max-width: 100%; }
