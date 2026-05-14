@@ -2639,26 +2639,34 @@ const gcalApi = {
   }
 };
 
-// Dominio Workspace cubierto por Domain-Wide Delegation. Cualquier user con
-// email de este dominio puede activar la sincronización con Google Calendar
-// desde Ajustes sin pasos extra (DWD ya autoriza al service account a impersonar
-// a cualquier user del dominio).
+// Dominio Workspace cubierto por Domain-Wide Delegation. Users con email del
+// dominio activan Google Calendar con un click (DWD impersona via service
+// account). Users con gmail externo pasan por OAuth user-level (Fase 2) y
+// guardamos su refresh_token en user_google_tokens.
 const WORKSPACE_DOMAIN = 'ifs-broker.com';
 
-// El user puede activar/desactivar la vinculación con Google Calendar desde
-// Ajustes (profiles.gcal_enabled). Se aplica si además su email es del dominio
-// Workspace (los gmail externos van por OAuth user-level — fase 2).
+// Indica si el calendar de Abordaje usa Google como fuente para este agente.
+// Vale para los dos modos (Workspace + DWD, o externo + OAuth user-level).
 function isGoogleCalendarUser(profile) {
-  if (!profile?.gcal_enabled) return false;
-  const email = (profile?.email || '').toLowerCase();
-  return email.endsWith('@' + WORKSPACE_DOMAIN);
+  return !!profile?.gcal_enabled;
 }
 
-// Indica si el user puede activar el toggle de Google Calendar en Ajustes
-// (no si ya está activado — solo si la cuenta es elegible).
-function canEnableGoogleCalendar(profile) {
+// True si el email es del dominio Workspace: en ese caso el toggle se activa
+// sin pasar por OAuth (DWD). Para gmails externos se usa el botón "Vincular".
+function isWorkspaceUser(profile) {
+  return (profile?.email || '').toLowerCase().endsWith('@' + WORKSPACE_DOMAIN);
+}
+
+// True si la cuenta tiene una pinta tal que podría vincularse a Google. Los
+// que no tienen ningún Google (ej. correos custom no-Gmail) caen acá como false.
+function canLinkGoogleCalendar(profile) {
   const email = (profile?.email || '').toLowerCase();
-  return email.endsWith('@' + WORKSPACE_DOMAIN);
+  if (!email) return false;
+  if (email.endsWith('@' + WORKSPACE_DOMAIN)) return true;
+  if (email.endsWith('@gmail.com')) return true;
+  // Otros dominios (Google Workspace de otra empresa) podrían funcionar también
+  // si están como test users — los dejamos optar y Google decidirá.
+  return true;
 }
 
 // Construye el body de un evento de Google Calendar.
@@ -3619,7 +3627,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [gcalReloadKey, setGcalReloadKey] = useState(0);
   const bumpGcal = () => setGcalReloadKey(k => k + 1);
 
-  // Toggle de vinculación con Google Calendar (Ajustes). Persiste en profiles.gcal_enabled.
+  // Toggle de vinculación con Google Calendar para users del dominio Workspace
+  // (Ajustes). DWD ya autoriza, solo persistimos profiles.gcal_enabled.
   const handleToggleGcal = async (enabled) => {
     if (!agente?.id) return;
     const { error } = await sb.from('profiles').update({ gcal_enabled: enabled }).eq('id', agente.id);
@@ -3628,6 +3637,48 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     bumpGcal();
     showToast(enabled ? 'Google Calendar vinculado' : 'Google Calendar desvinculado');
   };
+
+  // Para users con gmail externo: iniciar OAuth user-level. La edge function
+  // gcal-oauth-init genera la URL de consentimiento; el browser redirige a
+  // Google. Después del consent, Google llama a gcal-oauth-callback que guarda
+  // el refresh_token y nos manda de vuelta con ?gcal_linked=1.
+  const handleLinkOAuth = async () => {
+    const returnTo = window.location.origin + window.location.pathname;
+    const { data, error } = await sb.functions.invoke('gcal-oauth-init', {
+      body: { returnTo }
+    });
+    if (error || !data?.url) throw new Error(error?.message || 'No se pudo iniciar OAuth');
+    window.location.href = data.url;
+  };
+  const handleUnlinkOAuth = async () => {
+    if (!agente?.id) return;
+    await sb.from('user_google_tokens').delete().eq('user_id', agente.id);
+    await sb.from('profiles').update({ gcal_enabled: false }).eq('id', agente.id);
+    setAgente(a => a ? { ...a, gcal_enabled: false } : a);
+    bumpGcal();
+    showToast('Google Calendar desvinculado');
+  };
+
+  // Detecta el retorno del flujo OAuth (querystring) y refresca el agente.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('gcal_linked') === '1') {
+      showToast('Google Calendar vinculado!');
+      if (user?.id) {
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled').eq('id', user.id).maybeSingle()
+          .then(({ data }) => { if (data) setAgente(data); bumpGcal(); });
+      }
+      const url = new URL(window.location.href);
+      url.searchParams.delete('gcal_linked');
+      window.history.replaceState({}, '', url.toString());
+    } else if (params.get('gcal_error')) {
+      const errCode = params.get('gcal_error');
+      showToast('No se pudo vincular Google Calendar: ' + errCode, { duration: 5000 });
+      const url = new URL(window.location.href);
+      url.searchParams.delete('gcal_error');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }, [user?.id]);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
 
@@ -4609,6 +4660,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onCancel={() => setShowSettings(false)}
           onSave={(s) => { setSettings(s); persistSettings(s, user.id); showToast('Ajustes guardados'); }}
           onToggleGcal={handleToggleGcal}
+          onLinkOAuth={handleLinkOAuth}
+          onUnlinkOAuth={handleUnlinkOAuth}
         />
       )}
 
@@ -6638,69 +6691,124 @@ function AdminTh({ children, right }) {
 // Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
 const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
-function GoogleCalendarSection({ agente, onToggleGcal }) {
+function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth }) {
   const enabled = !!agente?.gcal_enabled;
-  const elegible = canEnableGoogleCalendar(agente);
+  const workspace = isWorkspaceUser(agente);
+  const canLink = canLinkGoogleCalendar(agente);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
 
-  const toggle = async () => {
-    if (busy || !elegible) return;
+  const toggleWorkspace = async () => {
+    if (busy) return;
     setErr(null); setBusy(true);
-    try {
-      await onToggleGcal(!enabled);
-    } catch (e) {
-      setErr(e?.message || String(e));
-    } finally {
-      setBusy(false);
-    }
+    try { await onToggleGcal(!enabled); }
+    catch (e) { setErr(e?.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  const linkExternal = async () => {
+    if (busy) return;
+    setErr(null); setBusy(true);
+    try { await onLinkOAuth(); }
+    catch (e) { setErr(e?.message || String(e)); setBusy(false); }
+    // No bajamos busy si fue exitoso: el browser redirige a Google.
+  };
+  const unlinkExternal = async () => {
+    if (busy) return;
+    if (!confirm('¿Desvincular Google Calendar? Las agendas existentes en Google quedan pero Abordaje deja de sincronizar.')) return;
+    setErr(null); setBusy(true);
+    try { await onUnlinkOAuth(); }
+    catch (e) { setErr(e?.message || String(e)); }
+    finally { setBusy(false); }
   };
 
   return (
     <section style={adminSectionStyle}>
       <h3 style={adminSectionTitleStyle}>📅 Google Calendar</h3>
-      {elegible ? (
-        <>
-          <p style={adminSectionDescStyle}>
-            Vinculá tu Google Calendar a Abordaje. Cuando esté activado:
-          </p>
-          <ul style={{ ...adminSectionDescStyle, paddingLeft: 18, margin: '6px 0 12px' }}>
-            <li>Las agendas y tareas con fecha que cargues en Abordaje aparecen en tu Google Calendar (y se borran cuando las borrás acá).</li>
-            <li>El calendario de Abordaje muestra todos tus eventos de Google (laboral + personales que tengas suscriptos).</li>
-            <li>Cuando movés o borrás un evento en Google, el cambio se refleja en Abordaje al volver a abrir la tab.</li>
-          </ul>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
-            <div
-              className={`toggle-switch ${enabled ? 'on' : ''}`}
-              onClick={toggle}
-              role="switch"
-              aria-checked={enabled}
-              aria-disabled={busy}
-              style={busy ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
-            />
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
-                {enabled ? 'Activado' : 'Desactivado'}
-              </div>
-              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
-                Cuenta: <strong>{agente?.email}</strong> · Vinculación automática vía Workspace.
-              </div>
+      <p style={adminSectionDescStyle}>
+        Vinculá tu Google Calendar a Abordaje. Cuando esté activado:
+      </p>
+      <ul style={{ ...adminSectionDescStyle, paddingLeft: 18, margin: '6px 0 12px' }}>
+        <li>Las agendas y tareas con fecha que cargues en Abordaje aparecen en tu Google Calendar (y se borran cuando las borrás acá).</li>
+        <li>El calendario de Abordaje muestra todos tus eventos de Google.</li>
+        <li>Cuando movés o borrás un evento en Google, el cambio se refleja en Abordaje al volver a abrir la tab.</li>
+      </ul>
+
+      {!canLink ? (
+        <p style={adminSectionDescStyle}>
+          Tu cuenta <strong>{agente?.email || '—'}</strong> no es una cuenta de Google.
+          Para usar Google Calendar necesitás una cuenta @gmail.com o del dominio @{WORKSPACE_DOMAIN}.
+        </p>
+      ) : workspace ? (
+        // Workspace: toggle simple, DWD lo activa automático.
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 10 }}>
+          <div
+            className={`toggle-switch ${enabled ? 'on' : ''}`}
+            onClick={toggleWorkspace}
+            role="switch"
+            aria-checked={enabled}
+            aria-disabled={busy}
+            style={busy ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+          />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+              {enabled ? 'Activado' : 'Desactivado'}
+            </div>
+            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+              Cuenta: <strong>{agente?.email}</strong> · Vinculación automática vía Workspace.
             </div>
           </div>
-          {err && (
-            <div style={{ marginTop: 10, background:'#fef2f2', border:'1px solid #fecaca',
-              color:'#b91c1c', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
-              {err}
+        </div>
+      ) : (
+        // Gmail externo: botón "Vincular con Google" que abre OAuth.
+        <div style={{ marginTop: 10 }}>
+          {!enabled ? (
+            <button onClick={linkExternal} disabled={busy} style={{
+              background: '#fff', color: '#1e1b4b',
+              border: '1.5px solid #d1d5db', borderRadius: 8,
+              padding: '10px 16px', fontSize: 13, fontWeight: 600,
+              cursor: busy ? 'wait' : 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 10,
+              fontFamily: 'inherit',
+            }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" xmlns="http://www.w3.org/2000/svg">
+                <path fill="#4285F4" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" />
+                <path fill="#34A853" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18z" />
+                <path fill="#FBBC05" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" />
+                <path fill="#EA4335" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" />
+              </svg>
+              {busy ? 'Redirigiendo a Google…' : 'Vincular con Google Calendar'}
+            </button>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div style={{
+                background: '#f0fdf4', border: '1px solid #bbf7d0',
+                color: '#15803d', borderRadius: 8, padding: '8px 12px',
+                fontSize: 13, fontWeight: 600,
+              }}>✓ Vinculado</div>
+              <button onClick={unlinkExternal} disabled={busy} style={{
+                background: '#fff', color: '#b91c1c',
+                border: '1.5px solid #fecaca', borderRadius: 8,
+                padding: '6px 14px', fontSize: 12, fontWeight: 600,
+                cursor: busy ? 'wait' : 'pointer', fontFamily: 'inherit',
+              }}>Desvincular</button>
             </div>
           )}
-        </>
-      ) : (
-        <p style={adminSectionDescStyle}>
-          Por ahora la vinculación con Google Calendar está disponible solo para cuentas
-          del dominio <strong>@{WORKSPACE_DOMAIN}</strong> (Workspace).
-          {' '}Tu cuenta actual es <strong>{agente?.email || '—'}</strong>.
-          {' '}Cuando migres a Workspace, vas a poder activar la sincronización desde acá.
-        </p>
+          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 8 }}>
+            Cuenta: <strong>{agente?.email}</strong>
+            {!enabled && ' · Google te va a pedir permiso una sola vez.'}
+          </div>
+          <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 4, fontStyle: 'italic' }}>
+            Si Google muestra una pantalla "App no verificada", es esperado en
+            modo de prueba — click en "Avanzado → Ir a Abordaje (no seguro)".
+          </div>
+        </div>
+      )}
+
+      {err && (
+        <div style={{ marginTop: 10, background:'#fef2f2', border:'1px solid #fecaca',
+          color:'#b91c1c', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
+          {err}
+        </div>
       )}
     </section>
   );
@@ -7038,7 +7146,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -7147,7 +7255,12 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             </div>
           </section>
 
-          <GoogleCalendarSection agente={agente} onToggleGcal={onToggleGcal} />
+          <GoogleCalendarSection
+            agente={agente}
+            onToggleGcal={onToggleGcal}
+            onLinkOAuth={onLinkOAuth}
+            onUnlinkOAuth={onUnlinkOAuth}
+          />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
         </div>
