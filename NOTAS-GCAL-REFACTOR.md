@@ -270,3 +270,134 @@ Necesario para operar sobre eventos compartidos del calendar personal.
 - Pendiente testing por otros agentes Workspace.
 - Pendiente Fase 2 (OAuth user-level) para gmail personales — ver sección
   arriba.
+
+---
+
+# Fase 2 (DONE) — OAuth user-level para gmail externos
+
+Implementada el 2026-05-14 (commit `4b2f172`). Status: en producción.
+
+## Qué cambió
+- Tabla `user_google_tokens(user_id PK, refresh_token, scope, granted_at,
+  last_used_at)` con RLS deny-all (solo edge functions via service_role).
+- Edge function `gcal-oauth-init`: el frontend la llama para iniciar. Genera
+  URL de OAuth de Google con `state` HMAC-firmado (incluye user_id + returnTo
+  + timestamp).
+- Edge function `gcal-oauth-callback` (verify_jwt: false): Google la llama
+  con `code+state`. Valida state, intercambia code por tokens, guarda
+  refresh_token, activa `profiles.gcal_enabled`, redirige al user.
+- Edge function `gcal-events` v9: detecta tipo de user por dominio:
+  - Workspace → DWD (impersonate via service account).
+  - Externo → busca refresh_token, lo intercambia por access_token cada call.
+    Si `invalid_grant` (token revocado por el user), limpia el row y desactiva
+    `gcal_enabled` para forzar re-link.
+- Frontend `GoogleCalendarSection`: 3 branches según tipo de cuenta.
+  - Workspace: toggle simple (DWD automático).
+  - Gmail externo: botón "Vincular con Google Calendar" + "Desvincular".
+  - Cuenta no-Google: mensaje informativo, sin acciones.
+- App: handlers `handleLinkOAuth` y `handleUnlinkOAuth`. useEffect que
+  detecta `?gcal_linked=1` / `?gcal_error=...` en el querystring al volver
+  del callback y refresca el agente con un toast.
+
+## Setup manual (ya hecho)
+- Google Cloud Console:
+  - Authorized redirect URI agregada:
+    `https://hxjpnekzncqepbhpdkfv.supabase.co/functions/v1/gcal-oauth-callback`
+  - Client Secret nuevo creado y guardado en Supabase como
+    `GOOGLE_OAUTH_CLIENT_SECRET`. El secret viejo sigue vivo (lo usa Supabase
+    para login con Google).
+  - OAuth Consent Screen: scope `https://www.googleapis.com/auth/calendar`
+    agregado.
+  - App pasada de "En producción" a "Modo de prueba". Test users:
+    `maidanavictoria5@gmail.com`, `di.creativo12@gmail.com`. Cada nuevo
+    agente gmail externo debe agregarse acá manualmente.
+- Supabase secrets:
+  - `GOOGLE_OAUTH_CLIENT_ID`
+  - `GOOGLE_OAUTH_CLIENT_SECRET`
+  - `GOOGLE_OAUTH_STATE_SECRET` (random 32 bytes hex, generado al deploy)
+
+## Pega de UX: pantalla "App no verificada"
+Como la app está en modo Testing, Google muestra a los test users una
+advertencia *"Esta app no fue verificada por Google"*. Para pasarla:
+1. Click "Avanzado" (abajo a la izquierda).
+2. Click "Ir a IFS Supabase (no seguro)".
+
+Cuando crezca, pasar a modo Production con Google Verification (proceso de
+4-6 semanas, requiere documentación + video demo). Por ahora alcanza con
+Testing.
+
+---
+
+# Fase 3 (PENDIENTE / en plan) — Modelo de Asistentes
+
+Permitir que un user "asistente" trabaje en nombre de un agente principal:
+ve los mismos prospects/tareas/calendar, puede crear/editar/eliminar como si
+fuera el agente, pero cada acción queda marcada con su `actor_id` para
+trazabilidad.
+
+## Modelo de datos propuesto
+- `profiles.assistant_of_id uuid` (FK a profiles): si está set, este user es
+  asistente del agente referenciado.
+- `profiles.shares_calendar_with_assistant boolean default false`:
+  consentimiento del agente para que su asistente vea su Google Calendar.
+- Por cada tabla operable agregar `actor_id uuid` (`abordaje_prospectos`,
+  `abordaje_prospecto_contactos`, `abordaje_tareas`, `abordaje_agendados`).
+  - `agente_id` = a quién pertenece el registro (sigue como hoy).
+  - `actor_id` = quién hizo la acción (asistente o agente).
+
+## RLS
+Extender las policies de las tablas operables de:
+`agente_id = auth.uid()`
+A:
+`agente_id = auth.uid() OR agente_id = (select assistant_of_id from profiles where id = auth.uid())`
+
+## Frontend
+- Detectar si el user tiene `assistant_of_id` → modo asistente activado.
+- Cargar datos del agente principal (no del asistente). Banner sutil arriba:
+  *"Trabajando como asistente de Federico"*.
+- Toda acción registra `actor_id = auth.uid()`.
+- Marca visual (estrella o similar) en cards/listas donde `actor_id != agente_id`.
+- Bitácora con prefijo *"· asistente"* en entradas creadas por asistente.
+
+## Google Calendar para asistentes
+- **Agente principal — en Ajustes**: nuevo checkbox bajo Google Calendar:
+  *"Permitir que mi asistente vea y edite mi Google Calendar"*. Con texto
+  explicativo de qué implica (lectura + escritura bidireccional).
+- **Asistente — en Ajustes**: branch propio en `GoogleCalendarSection`:
+  - Botón "Vincular **mi** Google Calendar" (su propio calendar personal).
+  - Si el agente principal activó `shares_calendar_with_assistant=true`,
+    aparece info: *"También podés ver el calendar de Federico (autorizado
+    por él)"*.
+  - El asistente puede tener AMBOS calendarios visibles a la vez (el suyo
+    + el del agente). La edge function `gcal-events` itera los calendars
+    accesibles para el caller y los combina.
+
+## Implementación al lado server
+- `gcal-events` actualizado para que cuando el caller es asistente con
+  shares_calendar_with_assistant del principal=true, además de su propio
+  flujo (DWD o refresh_token), agregue los eventos del agente principal
+  (DWD si principal es Workspace, refresh_token si externo). Los eventos
+  del principal vienen marcados con `_isPrincipal: true` para que el
+  frontend pueda colorearlos distinto si quiere.
+
+## Cosas a tener cuidado
+- **RLS son la línea de defensa de la DB**. Probar con casos puntuales antes
+  de pushear: asistente solo ve los del principal, no de otros; principal
+  sigue sin ver nada del asistente.
+- **El consentimiento del agente para compartir calendar es revocable** en
+  cualquier momento. Cuando se desactiva, el asistente deja de ver el
+  calendar del principal en la siguiente refresh.
+
+## Estimación
+- Migration + RLS: 1h.
+- Frontend (modo asistente + marca visual + banner): 2h.
+- Calendar compartido (checkbox + edge function): 1.5h.
+- Testing con cuenta real: 1h.
+
+Total: ~5h.
+
+## Decisión sobre managers / niveles jerárquicos
+Se descartó implementar relaciones de manager (Molina ve a Tarquini/Alonso)
+por ahora, para evitar el riesgo de filtraciones inadvertidas vía RLS mal
+configuradas. Cuando la estructura organizacional crezca y haga sentido,
+se retoma con testing dedicado.
