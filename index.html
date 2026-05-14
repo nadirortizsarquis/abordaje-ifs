@@ -1563,7 +1563,11 @@
     cursor: grab;
     user-select: none;
     -webkit-user-select: none;
-    touch-action: none;
+    /* En desktop bloqueamos touch-action para que mouse drag no haga scroll.
+       En mobile usamos `manipulation` por default (permite scroll vertical y
+       horizontal sobre el evento) y activamos drag sólo tras un long press;
+       eso lo controla `body.cal-dragging`. */
+    touch-action: manipulation;
     /* NO overflow hidden acá: dejamos que el tooltip al hover se proyecte fuera.
        El contenido del evento usa .cal-event-inner con overflow hidden propio. */
     border-left: 3px solid;
@@ -1577,6 +1581,19 @@
   .cal-week-event.dragging {
     opacity: 0.45;
     z-index: 70;
+  }
+  /* Mientras el drag está activo (después del long press en touch), bloqueamos
+     scroll para que el dedo mueva el evento, no la página. */
+  body.cal-dragging .cal-week-event,
+  body.cal-dragging .cal-day-col,
+  body.cal-dragging .cal-week-body { touch-action: none; }
+  /* Feedback visual sutil al iniciar long-press en touch — el evento "se
+     levanta" un poquito antes de empezar a mover. */
+  .cal-week-event.long-press-armed {
+    transform: scale(1.02);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+    z-index: 65;
+    transition: transform 0.15s, box-shadow 0.15s;
   }
   .cal-drag-preview {
     position: absolute;
@@ -6081,9 +6098,18 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
     if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
   }, []);
 
-  // Drag & drop de eventos: maneja move + up a nivel document mientras hay
-  // un drag activo. Threshold de 5px para distinguir click puro de drag.
+  // Drag & drop de eventos:
+  //  - Desktop (mouse): drag arranca al instante; threshold de 5px de movimiento
+  //    para distinguir click de drag real.
+  //  - Mobile (touch): long-press de 400ms con dedo quieto activa el drag. Si
+  //    el dedo se mueve antes (> 8px), cancelamos y dejamos al browser hacer
+  //    scroll normal. Una vez activado el long-press, los pointermove
+  //    actualizan el drag y body.cal-dragging bloquea el scroll.
   const justDraggedRef = useRef(false);
+  const longPressTimerRef = useRef(null);
+  const pendingTouchRef = useRef(null); // { event, startX, startY, eventEl }
+  const [pendingTouchAttempt, setPendingTouchAttempt] = useState(0);
+
   useEffect(() => {
     if (!drag) return;
     const onMove = (e) => {
@@ -6124,6 +6150,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
           // Click sin drag → abrir el modal del evento.
           if (onSelectEvent) onSelectEvent(d.event);
         }
+        document.body.classList.remove('cal-dragging');
         return null;
       });
     };
@@ -6137,21 +6164,94 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
     };
   }, [drag, days, onMoveEvent, onSelectEvent]);
 
+  // Listener separado para manejar el long-press en touch antes de que se
+  // active el drag. Mientras estamos en "wait", monitoreamos movimiento del
+  // dedo y cancelamos si supera ~8px (el user está scrolleando, no presionando).
+  useEffect(() => {
+    if (!pendingTouchRef.current) return;
+    const cancel = (extraReason) => {
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+      if (pendingTouchRef.current?.eventEl) {
+        pendingTouchRef.current.eventEl.classList.remove('long-press-armed');
+      }
+      pendingTouchRef.current = null;
+    };
+    const onMoveWait = (e) => {
+      const p = pendingTouchRef.current;
+      if (!p) return;
+      const moved = Math.abs(e.clientX - p.startX) + Math.abs(e.clientY - p.startY);
+      if (moved > 8) cancel('moved-before-longpress');
+    };
+    const onUpWait = (e) => {
+      const p = pendingTouchRef.current;
+      if (!p) return;
+      // Soltó antes del long press = es un tap. Disparamos onSelectEvent y
+      // marcamos `justDraggedRef` para que el `click` que el browser dispara
+      // después (sintético) no vuelva a abrir el modal.
+      cancel('released-before-longpress');
+      if (onSelectEvent) onSelectEvent(p.event);
+      justDraggedRef.current = true;
+      setTimeout(() => { justDraggedRef.current = false; }, 300);
+    };
+    document.addEventListener('pointermove', onMoveWait);
+    document.addEventListener('pointerup', onUpWait);
+    document.addEventListener('pointercancel', onUpWait);
+    return () => {
+      document.removeEventListener('pointermove', onMoveWait);
+      document.removeEventListener('pointerup', onUpWait);
+      document.removeEventListener('pointercancel', onUpWait);
+    };
+    // pendingTouchAttempt sirve como trigger para re-armar el effect cuando
+    // arranca un nuevo long-press. Lo cambia onEventPointerDown.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingTouchAttempt]);
+
   const onEventPointerDown = (e, ev) => {
     if (e.button !== 0) return;
     if (!onMoveEvent || ev.kind === 'prospecto') {
       // Sin handler de move o evento no-arrastrable: click directo, sin drag.
-      // No prevenimos default; el onClick original maneja el toque.
       return;
     }
     e.stopPropagation();
-    setDrag({
-      event: ev,
-      startX: e.clientX, startY: e.clientY,
-      cursorX: e.clientX, cursorY: e.clientY,
-      active: false,
-      dropTargetDay: null, dropTargetMin: null,
-    });
+
+    if (e.pointerType === 'touch') {
+      // En touch, esperamos 400ms con dedo quieto antes de activar drag.
+      const eventEl = e.currentTarget;
+      pendingTouchRef.current = {
+        event: ev,
+        startX: e.clientX, startY: e.clientY,
+        eventEl,
+      };
+      eventEl.classList.add('long-press-armed');
+      setPendingTouchAttempt(n => n + 1); // re-arma el effect monitor
+      longPressTimerRef.current = setTimeout(() => {
+        const p = pendingTouchRef.current;
+        if (!p) return;
+        pendingTouchRef.current = null;
+        longPressTimerRef.current = null;
+        if (p.eventEl) p.eventEl.classList.remove('long-press-armed');
+        document.body.classList.add('cal-dragging');
+        setDrag({
+          event: p.event,
+          startX: p.startX, startY: p.startY,
+          cursorX: p.startX, cursorY: p.startY,
+          active: true, // touch: el drag se activa solo (no requiere 5px adicional)
+          dropTargetDay: null, dropTargetMin: null,
+        });
+      }, 400);
+    } else {
+      // Mouse: drag inmediato con threshold de 5px.
+      setDrag({
+        event: ev,
+        startX: e.clientX, startY: e.clientY,
+        cursorX: e.clientX, cursorY: e.clientY,
+        active: false,
+        dropTargetDay: null, dropTargetMin: null,
+      });
+    }
   };
 
   return (
@@ -6277,6 +6377,10 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                     }}
                     onPointerDown={(pe) => onEventPointerDown(pe, e)}
                     onClick={() => {
+                      // Si el tap touch ya disparó onSelectEvent vía el listener
+                      // del long-press, el click sintético del browser no debe
+                      // re-abrirlo (justDraggedRef se setea por 300ms tras un tap).
+                      if (justDraggedRef.current) return;
                       // Solo dispara click directo si NO está el drag activo
                       // (i.e. evento no arrastrable como prospect, o no hay onMoveEvent).
                       if (!onMoveEvent || isProspect) onSelectEvent(e);
