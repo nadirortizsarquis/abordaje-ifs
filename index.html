@@ -1560,7 +1560,10 @@
     /* left + width se setean inline para el layout de overlapping; right NO se usa */
     border-radius: 6px;
     font-size: 0.72rem;
-    cursor: pointer;
+    cursor: grab;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
     /* NO overflow hidden acá: dejamos que el tooltip al hover se proyecte fuera.
        El contenido del evento usa .cal-event-inner con overflow hidden propio. */
     border-left: 3px solid;
@@ -1568,6 +1571,26 @@
     transition: box-shadow 0.12s;
     z-index: 2;
     line-height: 1.3;
+  }
+  .cal-week-event:active { cursor: grabbing; }
+  .cal-week-event.no-drag { cursor: not-allowed; }
+  .cal-week-event.dragging {
+    opacity: 0.45;
+    z-index: 70;
+  }
+  .cal-drag-preview {
+    position: absolute;
+    left: 3px; right: 3px;
+    border-radius: 6px;
+    background: rgba(0, 152, 218, 0.16);
+    border: 2px dashed var(--azul);
+    color: var(--azul-oscuro);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 4px 7px;
+    pointer-events: none;
+    z-index: 65;
+    font-variant-numeric: tabular-nums;
   }
   .cal-week-event:hover {
     box-shadow: 0 2px 6px rgba(0,0,0,0.15);
@@ -2103,9 +2126,39 @@
     .cal-title { font-size: 0.95rem; }
     .day-event { flex-wrap: wrap; gap: 6px; }
     .day-event-obs { flex: 1 100%; }
+
+    /* ── Calendar semana / día en mobile ── */
+    /* Cada día tiene min-width fijo (95px). Si el viewport es chico, el grid
+       supera el ancho y aparece scroll horizontal. El header y el body
+       scrollean sincronizados (mismo grid-template). Las CSS vars hacen que
+       el grid-template-columns inline también responda. */
+    .cal-week-body, .cal-week-header {
+      overflow-x: auto;
+      --cal-hour-col-w: 44px;
+      --cal-day-min-w: 95px;
+    }
+    .cal-hours-col, .cal-hour-label { font-size: 0.62rem; padding-right: 4px; }
+    .cal-week-day-h { padding: 8px 4px; }
+    .cal-week-day-h .dow { font-size: 0.6rem; letter-spacing: 0.3px; }
+    .cal-week-day-h .num { font-size: 0.9rem; width: 24px; height: 24px; }
+    .cal-week-event { font-size: 0.62rem; }
+    .cal-week-event .event-time { font-size: 0.58rem; }
+    .cal-week-event .cal-event-inner { padding: 3px 5px; }
+    /* Tooltip al hover sobre eventos: ocultarlo en touch (el tap abre el modal,
+       no hace falta preview adicional y el tooltip se ve mal en pantallas chicas). */
+    .cal-event-tooltip { display: none; }
+    /* Nav del calendar más compacto */
+    .cal-header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
+    .cal-nav-btn { padding: 4px 8px; font-size: 0.75rem; }
   }
   @media (max-width: 560px) {
     .col-telefono { display: none; }
+  }
+  /* En pantallas muy chicas, achicar más la columna de horas y el ancho
+     mínimo de cada día para que entren más en pantalla sin scroll horizontal
+     extremo. */
+  @media (max-width: 480px) {
+    .cal-hours-col { font-size: 0.58rem; }
   }
 </style>
 </head>
@@ -2513,25 +2566,25 @@ const gcalApi = {
     if (data?.skip) return null;
     return data.events || [];
   },
-  async create(event) {
+  async create(event, calendarId) {
     const { data, error } = await sb.functions.invoke('gcal-events', {
-      body: { op: 'create', event }
+      body: { op: 'create', event, calendarId }
     });
     if (error) throw error;
     if (data?.skip) return null;
     return data.event;
   },
-  async update(eventId, event) {
+  async update(eventId, event, calendarId) {
     const { data, error } = await sb.functions.invoke('gcal-events', {
-      body: { op: 'update', eventId, event }
+      body: { op: 'update', eventId, event, calendarId }
     });
     if (error) throw error;
     if (data?.skip) return null;
     return data.event;
   },
-  async delete(eventId) {
+  async delete(eventId, calendarId) {
     const { data, error } = await sb.functions.invoke('gcal-events', {
-      body: { op: 'delete', eventId }
+      body: { op: 'delete', eventId, calendarId }
     });
     if (error) throw error;
     return data;
@@ -3576,7 +3629,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
-  const [view, setView] = useState('lista');
+  // Persistimos la vista activa en localStorage para que sobreviva al refresh.
+  const [view, setView] = useState(() => {
+    try {
+      const v = localStorage.getItem('abordaje_view');
+      return ['lista','tareas','calendario'].includes(v) ? v : 'lista';
+    } catch { return 'lista'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('abordaje_view', view); } catch {}
+  }, [view]);
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
 
@@ -3933,7 +3995,62 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Update / delete de agendas standalone (click sobre el evento en calendar).
   // En piloto `agendaId` es el google_event_id del evento; en non-piloto es el id
   // del agendado en abordaje_agendados.
-  const handleUpdateAgenda = async (agendaId, patch) => {
+  // Mover un evento del calendar (drag & drop). Decide qué entidad actualizar
+  // según el tipo del evento. Las citas de prospect no son arrastrables porque
+  // están vinculadas a un contacto del prospect — se editan desde la ficha.
+  const handleMoveEvent = async (e, newStartIso) => {
+    if (guardReadOnly()) return;
+    if (e.kind === 'prospecto') {
+      showToast('Esta cita viene del prospect — editala desde su ficha', { duration: 3500 });
+      return;
+    }
+    try {
+      if (isPilot && e.googleEvent) {
+        // Piloto: cualquier evento (agenda/tarea/externo) se mueve en Google.
+        // Conservamos la duración original calculando desde el end/start originales.
+        const oldStart = new Date(e.googleEvent.start?.dateTime || e.googleEvent.start?.date);
+        const oldEnd = new Date(e.googleEvent.end?.dateTime || e.googleEvent.end?.date);
+        const durMs = (oldEnd - oldStart) || 60 * 60_000;
+        const newStart = new Date(newStartIso);
+        const newEnd = new Date(newStart.getTime() + durMs);
+        await gcalApi.update(e.googleEvent.id, {
+          start: { dateTime: newStart.toISOString(), timeZone: GCAL_TZ },
+          end:   { dateTime: newEnd.toISOString(),   timeZone: GCAL_TZ },
+        }, e.googleEvent._gcalId);
+        // Si era una tarea local, también actualizar abordaje_tareas para que
+        // los cards del kanban reflejen la nueva fecha.
+        if (e.kind === 'tarea' && e.tareaId) {
+          const d = new Date(newStartIso);
+          const newF = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+          const newH = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+          await sb.from('abordaje_tareas').update({
+            fecha_recordatorio: newF, hora_recordatorio: newH,
+          }).eq('id', e.tareaId);
+          setState(s => ({
+            ...s,
+            tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === e.tareaId
+              ? { ...t, fechaRecordatorio: newF, horaRecordatorio: newH } : t) }
+          }));
+        }
+        bumpGcal();
+        showToast('Evento movido');
+      } else if (e.kind === 'tarea') {
+        // Non-piloto: tarea local.
+        const tareaId = e.tareaData?.id;
+        if (!tareaId) return;
+        const d = new Date(newStartIso);
+        await handleUpdateTarea(tareaId, {
+          fechaRecordatorio: `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`,
+          horaRecordatorio: `${pad2(d.getHours())}:${pad2(d.getMinutes())}`,
+        });
+      } else if (e.kind === 'agenda' && e.agendaData) {
+        // Non-piloto: agenda standalone.
+        await handleUpdateAgenda(e.agendaData.id, { fecha: newStartIso, nota: e.agendaData.nota });
+      }
+    } catch (err) { handleErr(err, 'moveEvent'); }
+  };
+
+  const handleUpdateAgenda = async (agendaId, patch, gcalCalendarId) => {
     if (guardReadOnly()) return;
     try {
       if (isPilot) {
@@ -3941,7 +4058,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           startIso: patch.fecha,
           summary: (patch.nota || '').split(/\r?\n+/)[0] || 'Agenda IFS',
           description: patch.nota || '',
-        }));
+        }), gcalCalendarId);
         bumpGcal();
       } else {
         const updated = await storage.updateAgendado(agendaId, patch);
@@ -3951,12 +4068,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       showToast('Agenda actualizada');
     } catch (e) { handleErr(e, 'updateAgenda'); }
   };
-  const handleDeleteAgenda = async (agendaId) => {
+  const handleDeleteAgenda = async (agendaId, gcalCalendarId) => {
     if (guardReadOnly()) return;
     if (!confirm('¿Eliminar esta agenda? También se borra del Google Calendar.')) return;
     try {
       if (isPilot) {
-        await gcalApi.delete(agendaId);
+        await gcalApi.delete(agendaId, gcalCalendarId);
         bumpGcal();
       } else {
         await storage.deleteAgendado(agendaId);
@@ -4391,6 +4508,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectProspecto={setSelectedId}
             onSelectTarea={(t) => setTareaEditando(t)}
             onSelectAgenda={(a) => setAgendaEditando(a)}
+            onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
         </>
@@ -4422,13 +4540,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
       {agendaEditando && (() => {
         const agendaId = agendaEditando.googleEvent ? agendaEditando.googleEvent.id : agendaEditando.id;
+        const gcalCalId = agendaEditando.googleEvent?._gcalId || null;
         return (
           <EditAgendaModal
             agenda={agendaEditando}
             readOnly={readOnly}
             onCancel={() => setAgendaEditando(null)}
-            onSave={(patch) => handleUpdateAgenda(agendaId, patch)}
-            onDelete={() => handleDeleteAgenda(agendaId)}
+            onSave={(patch) => handleUpdateAgenda(agendaId, patch, gcalCalId)}
+            onDelete={() => handleDeleteAgenda(agendaId, gcalCalId)}
           />
         );
       })()}
@@ -5551,7 +5670,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSlotClick }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onMoveEvent, onSlotClick }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -5671,6 +5790,7 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       settings={settings}
       onSelectEvent={onSelectEvent}
       onSlotClick={onSlotClick}
+      onMoveEvent={onMoveEvent}
       goPrev={goPrev} goNext={goNext} goToday={goToday}
       onJumpTo={jumpTo}
       subTabs={subTabs}
@@ -5684,6 +5804,7 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     settings={settings}
     onSelectEvent={onSelectEvent}
     onSlotClick={onSlotClick}
+    onMoveEvent={onMoveEvent}
     goPrev={goPrev} goNext={goNext} goToday={goToday}
     onJumpTo={jumpTo}
     subTabs={subTabs}
@@ -5845,10 +5966,18 @@ function layoutEventsInDay(eventsDayRaw, defaultDurMin) {
   return items;
 }
 
-function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
+function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick, onMoveEvent, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
   const [showPicker, setShowPicker] = useState(false);
   const bodyRef = useRef(null);
   const HOUR_HEIGHT = 56;
+  // Drag & drop de eventos. `drag` describe el estado actual:
+  //  - eventId: id del evento que se está arrastrando.
+  //  - startX, startY: pixels donde arrancó el pointer down.
+  //  - active: true cuando superó el threshold de inicio (~5px).
+  //  - cursorX, cursorY: posición actual del cursor para preview visual.
+  //  - dropTargetDay (index 0..ndays-1) y dropTargetMin (minuto del día snapeado).
+  const [drag, setDrag] = useState(null);
+  const dragRef = useRef(null); // mirror para handlers async
   const startHour = Math.max(0, Math.min(23, settings.workStartHour ?? 9));
   const startMinSetting = Math.max(0, Math.min(59, settings.workStartMin ?? 0));
   const endHour = Math.max(startHour + 1, Math.min(24, settings.workEndHour ?? 19));
@@ -5883,7 +6012,10 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
   }
 
   const totalHeight = HOUR_HEIGHT * hours.length;
-  const gridCols = `60px repeat(${ndays}, 1fr)`;
+  // Grid responsive: usa CSS vars que cambian por media query.
+  // En mobile la hours col se achica y cada día tiene un min-width para que
+  // el grid horizontal pueda scrollear cuando no entra completo.
+  const gridCols = `var(--cal-hour-col-w, 60px) repeat(${ndays}, minmax(var(--cal-day-min-w, 0px), 1fr))`;
 
   // Eventos por día (solo en rango de horas mostrado)
   const eventsByDay = days.map(d =>
@@ -5910,6 +6042,86 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
       bodyRef.current.scrollTop = Math.max(0, workStartTop - 20);
     }
   }, [workStartTop, ndays, singleDay]);
+
+  // En mobile el body puede scrollear horizontal (grid > viewport). Sincronizamos
+  // el scroll del header para que las etiquetas de día queden alineadas.
+  const headerRef = useRef(null);
+  const onBodyHScroll = useCallback((e) => {
+    if (headerRef.current) headerRef.current.scrollLeft = e.currentTarget.scrollLeft;
+  }, []);
+
+  // Drag & drop de eventos: maneja move + up a nivel document mientras hay
+  // un drag activo. Threshold de 5px para distinguir click puro de drag.
+  const justDraggedRef = useRef(false);
+  useEffect(() => {
+    if (!drag) return;
+    const onMove = (e) => {
+      setDrag(d => {
+        if (!d) return d;
+        const moved = Math.abs(e.clientX - d.startX) + Math.abs(e.clientY - d.startY);
+        const active = d.active || moved > 5;
+        let dropTargetDay = null, dropTargetMin = null;
+        if (active) {
+          const el = document.elementFromPoint(e.clientX, e.clientY);
+          const dayCol = el?.closest('.cal-day-col');
+          if (dayCol && dayCol.dataset.dayIdx != null) {
+            dropTargetDay = parseInt(dayCol.dataset.dayIdx, 10);
+            const rect = dayCol.getBoundingClientRect();
+            const y = e.clientY - rect.top;
+            const totalMin = Math.max(0, Math.min(23 * 60 + 45, (y / HOUR_HEIGHT) * 60));
+            dropTargetMin = Math.round(totalMin / 15) * 15;
+          }
+        }
+        return { ...d, cursorX: e.clientX, cursorY: e.clientY, active, dropTargetDay, dropTargetMin };
+      });
+    };
+    const onUp = () => {
+      setDrag(d => {
+        if (!d) return null;
+        if (d.active) {
+          justDraggedRef.current = true;
+          setTimeout(() => { justDraggedRef.current = false; }, 100);
+          if (d.dropTargetDay != null && d.dropTargetMin != null && onMoveEvent) {
+            const dayDate = days[d.dropTargetDay];
+            if (dayDate) {
+              const newStart = new Date(dayDate);
+              newStart.setHours(Math.floor(d.dropTargetMin / 60), d.dropTargetMin % 60, 0, 0);
+              onMoveEvent(d.event, newStart.toISOString());
+            }
+          }
+        } else {
+          // Click sin drag → abrir el modal del evento.
+          if (onSelectEvent) onSelectEvent(d.event);
+        }
+        return null;
+      });
+    };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+    return () => {
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+    };
+  }, [drag, days, onMoveEvent, onSelectEvent]);
+
+  const onEventPointerDown = (e, ev) => {
+    if (e.button !== 0) return;
+    if (!onMoveEvent || ev.kind === 'prospecto') {
+      // Sin handler de move o evento no-arrastrable: click directo, sin drag.
+      // No prevenimos default; el onClick original maneja el toque.
+      return;
+    }
+    e.stopPropagation();
+    setDrag({
+      event: ev,
+      startX: e.clientX, startY: e.clientY,
+      cursorX: e.clientX, cursorY: e.clientY,
+      active: false,
+      dropTargetDay: null, dropTargetMin: null,
+    });
+  };
 
   return (
     <div className="cal-wrap">
@@ -5940,7 +6152,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
       </div>
 
       <div className="cal-week-wrap">
-        <div className="cal-week-header" style={{gridTemplateColumns: gridCols}}>
+        <div ref={headerRef} className="cal-week-header" style={{gridTemplateColumns: gridCols}}>
           <div className="cal-week-corner"></div>
           {days.map(d => (
             <div key={d.toISOString()} className={`cal-week-day-h ${isToday(d) ? 'today' : ''}`}>
@@ -5949,7 +6161,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
             </div>
           ))}
         </div>
-        <div ref={bodyRef} className="cal-week-body" style={{gridTemplateColumns: gridCols}}>
+        <div ref={bodyRef} className="cal-week-body" style={{gridTemplateColumns: gridCols}} onScroll={onBodyHScroll}>
           <div className="cal-hours-col">
             {hours.map(h => (
               <div key={h} className="cal-hour-label" style={{height: HOUR_HEIGHT}}>
@@ -5958,10 +6170,12 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
             ))}
           </div>
           {days.map((d, dIdx) => (
-            <div key={d.toISOString()} className={`cal-day-col ${onSlotClick ? 'clickable' : ''}`} style={{height: totalHeight}}
+            <div key={d.toISOString()} data-day-idx={dIdx}
+              className={`cal-day-col ${onSlotClick ? 'clickable' : ''}`}
+              style={{height: totalHeight}}
               onClick={(e) => {
                 if (!onSlotClick) return;
-                // El click sobre un evento ya dispara onSelectEvent — no abrimos slot picker.
+                if (justDraggedRef.current) return; // ignorar clicks que vienen de soltar un drag
                 if (e.target.closest('.cal-week-event')) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const y = e.clientY - rect.top;
@@ -5982,6 +6196,22 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
               {/* Líneas punteadas marcando inicio y fin del horario laboral */}
               <div className="cal-workhours-line" style={{ top: workStartTop }} />
               <div className="cal-workhours-line" style={{ top: workEndTop }} />
+              {/* Preview del drop target durante drag & drop */}
+              {drag?.active && drag.dropTargetDay === dIdx && drag.dropTargetMin != null && (() => {
+                const ev = drag.event;
+                let durMin = 60;
+                if (ev?.duracionMin) durMin = ev.duracionMin;
+                else if (ev?.googleEvent?.start?.dateTime && ev?.googleEvent?.end?.dateTime) {
+                  durMin = (new Date(ev.googleEvent.end.dateTime) - new Date(ev.googleEvent.start.dateTime)) / 60000;
+                } else durMin = slotMin;
+                const previewTop = (drag.dropTargetMin / 60) * HOUR_HEIGHT;
+                const previewH = Math.max(28, (durMin / 60) * HOUR_HEIGHT - 2);
+                return (
+                  <div className="cal-drag-preview" style={{ top: previewTop, height: previewH }}>
+                    {pad2(Math.floor(drag.dropTargetMin / 60))}:{pad2(drag.dropTargetMin % 60)}
+                  </div>
+                );
+              })()}
               {dIdx === todayIdx && nowLineTop != null && (
                 <div className="cal-now-line" style={{top: nowLineTop}}></div>
               )}
@@ -6001,9 +6231,11 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                 const widthPct = 100 / totalCols;
                 const leftPct  = col * widthPct;
                 const isCrowded = totalCols > 1;
+                const isProspect = e.kind === 'prospecto';
+                const isDragging = drag?.event?.id === e.id && drag?.active;
                 return (
                   <div key={e.id}
-                    className={`cal-week-event ${vencido ? 'vencido' : ''} ${isCrowded ? 'crowded' : ''} ${dIdx >= ndays - 2 ? 'tooltip-left' : ''}`}
+                    className={`cal-week-event ${vencido ? 'vencido' : ''} ${isCrowded ? 'crowded' : ''} ${dIdx >= ndays - 2 ? 'tooltip-left' : ''} ${isProspect && onMoveEvent ? 'no-drag' : ''} ${isDragging ? 'dragging' : ''}`}
                     style={{
                       top: top, height,
                       left: `calc(${leftPct}% + 3px)`,
@@ -6012,7 +6244,13 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                       borderLeftColor: cfg.border,
                       color: cfg.color
                     }}
-                    onClick={() => onSelectEvent(e)}
+                    onPointerDown={(pe) => onEventPointerDown(pe, e)}
+                    onClick={() => {
+                      // Solo dispara click directo si NO está el drag activo
+                      // (i.e. evento no arrastrable como prospect, o no hay onMoveEvent).
+                      if (!onMoveEvent || isProspect) onSelectEvent(e);
+                    }}
+                    title={isProspect && onMoveEvent ? 'Cita agendada desde prospect — editala desde su ficha' : undefined}
                   >
                     <div className="cal-event-inner">
                       <div className="event-time">{formatHHMM(e.fecha)} · {dur}min</div>
