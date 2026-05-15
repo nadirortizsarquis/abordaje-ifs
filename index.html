@@ -2335,6 +2335,7 @@ function mapContactoFromDB(c) {
     hora: horaCorta,
     observacion: c.observacion || '',
     agendadoPara,
+    prospectoId: c.prospecto_id || null,
     actorId: c.actor_id || null,
     agenteId: c.agente_id,
     createdAt: c.created_at
@@ -2741,9 +2742,10 @@ const storage = {
   }
 };
 
-// Wrapper de la edge function gcal-events (modo piloto). Habla con Google
-// Calendar via Domain-Wide Delegation. La edge function valida el JWT del user
-// y lo impersona en Calendar.
+// Wrapper de la edge function gcal-events. Habla con Google Calendar via
+// Domain-Wide Delegation (users del dominio Workspace) o OAuth user-level
+// (gmail externos). La edge function valida el JWT y resuelve qué calendar
+// tocar (incluyendo modo asistente, que opera sobre el del principal).
 const gcalApi = {
   async list(timeMin, timeMax) {
     const { data, error } = await sb.functions.invoke('gcal-events', {
@@ -3921,12 +3923,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     });
     return () => { cancelled = true; };
   }, [agente?.id]);
-  // Calendar usa Google como fuente cuando el agente lo activó desde Ajustes y
-  // su email es del dominio Workspace. En viewAs admin no aplica.
+  // `isPilot` = true cuando el calendar usa Google como fuente de verdad.
+  // Originalmente era flag exclusivo de nortiz@ifs-broker.com durante el
+  // piloto de Fase 1; hoy es simplemente "user con gcal_enabled=true". El
+  // nombre quedó por compatibilidad con todos los call sites que ya lo usan.
   //
-  // Para asistentes: si el principal compartió su calendar y lo tiene activo,
-  // el asistente también opera contra Google Calendar (el del principal,
-  // resuelto en la edge function via assistant_of_id).
+  // Casos:
+  //   - viewAs admin: false (admin viendo a otro no toca Google).
+  //   - Asistente: true si su principal compartió calendar Y lo tiene activo.
+  //   - Agente normal: true si tiene gcal_enabled en su profile.
   const isPilot = !viewAs && (
     isAssistant
       ? !!(principalProfile?.shares_calendar_with_assistant && principalProfile?.gcal_enabled)

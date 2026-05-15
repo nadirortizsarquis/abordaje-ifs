@@ -1,3 +1,12 @@
+# Changelog — Planificador de Abordaje IFS
+
+> Para el estado actual del proyecto ver `STATE.md`. Este archivo guarda
+> el historial de fases y refactors. Las secciones marcadas como
+> "PENDIENTE" pueden haber sido completadas más abajo; el orden es
+> cronológico.
+
+---
+
 # Refactor Google Calendar como fuente única — Estado al 2026-05-13
 
 ## Resumen
@@ -501,3 +510,70 @@ Push final a Railway tras este commit. El piloto deja de ser exclusivo de
 el toggle en Ajustes empieza a usar Google Calendar como fuente. Gmail
 externos activan vía OAuth user-level (Fase 2). Asistentes ya pueden
 operar dentro del workspace de su principal con trazabilidad por estrella.
+
+---
+
+# Auditoría — Críticos resueltos (2026-05-15)
+
+Auditoría profunda del codebase identificó 25 hallazgos. Resueltos los 5
+críticos + el de seguridad MEDIA. Resto en backlog (ver `STATE.md`).
+
+## Seguridad
+- **Cierre de escalada de privilegios via `assistant_of_id`**: la policy
+  `update_own_metadata` solo bloqueaba cambios al `role`. Cualquier user
+  podía auto-asignarse `assistant_of_id` y ganar acceso al workspace
+  ajeno. Nueva WITH CHECK declara `role`, `assistant_of_id` y `email`
+  inmutables desde update propio. Admins siguen pudiendo cambiarlos via
+  policies `admin_*`. Testeado: Victoria intentando setear
+  `assistant_of_id=Gaston` → `42501: violates RLS policy`.
+- **`admin_full_access` sin DELETE**: la policy original era `cmd=ALL`,
+  permitiendo a cualquier admin hacer DELETE directo de profiles desde
+  el cliente, saltando la edge function `delete-user` (que restringe a
+  megaadmin). Reemplazada por `admin_select_all` + `admin_insert` +
+  `admin_update`. DELETE solo via edge function con service_role.
+- **`user_google_tokens` delete vía edge function**: el frontend hacía
+  `sb.from('user_google_tokens').delete()` desde el cliente, pero la
+  tabla tiene RLS sin policies (intencionalmente — secrets solo
+  service_role), por lo que fallaba silencioso y dejaba refresh_tokens
+  zombi. Migrado a `gcal-events` v11 con nuevo `op="unlink"`.
+
+## DB
+- Índice `profiles(assistant_of_id) WHERE NOT NULL` para acelerar
+  `private.is_assistant_of()`.
+- Índice `abordaje_prospecto_contactos(agente_id)` que faltaba pese a
+  que `loadState` filtra por esa columna.
+- 4 FKs en `actor_id` de las tablas operables con `ON DELETE SET NULL`,
+  validadas (sin huérfanos preexistentes).
+- Constraint `abordaje_prospectos.estado_check` consolidado con
+  `'programado'` como migration nombrada (era un hotfix suelto).
+- Migrations de esta sesión bajadas a `supabase/migrations/` local.
+
+## Frontend
+- 4 useEffects con `setState` async ahora tienen guard
+  `cancelled` para evitar warnings de "setState on unmounted component"
+  cuando se navega rápido entre tabs (el refresh-on-tab-switch agregó
+  presión sobre este patrón).
+- `mapContactoFromDB` ahora retorna también `prospectoId`. Era un
+  campo faltante; nadie lo usaba todavía pero ya estaba listo el bug.
+- Buscador global extendido: ahora también busca en eventos de Google
+  Calendar (summary + description). Carga lazy con cache 5 min, rango
+  -3m / +12m. Resultados con `googleEvent` abren directamente el modal
+  de edición.
+- Comentarios de `isPilot` actualizados: ya no es flag exclusivo de
+  Nadir, es "user con gcal_enabled=true". El nombre de variable quedó
+  por compatibilidad con call sites.
+
+## Edge functions
+- Las 4 funciones de gestión de usuarios (`create-user`, `delete-user`,
+  `update-user-password`, `update-user-email`) ahora usan
+  `_shared/admin-auth.ts` con helper `requireAdmin(req)`. Eliminadas
+  ~100 líneas de boilerplate duplicado.
+- `gcal-events` v11 agregó `op="unlink"` (descrito arriba).
+
+## Docs
+- Doc dividido: `STATE.md` (estado actual) + `CHANGELOG.md`
+  (esta historia). Antes era un solo archivo
+  `NOTAS-GCAL-REFACTOR.md` que mezclaba historia y estado, lo que
+  dificultaba leer "qué está vigente" para alguien nuevo.
+- `supabase/README.md` con overview del schema, edge functions y
+  policies clave.
