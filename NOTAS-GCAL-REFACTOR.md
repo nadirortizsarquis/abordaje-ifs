@@ -401,3 +401,103 @@ Se descartó implementar relaciones de manager (Molina ve a Tarquini/Alonso)
 por ahora, para evitar el riesgo de filtraciones inadvertidas vía RLS mal
 configuradas. Cuando la estructura organizacional crezca y haga sentido,
 se retoma con testing dedicado.
+
+---
+
+# Fase 3 (DONE) — Asistentes + extras de UX (2026-05-14)
+
+Implementación completa de Fase 3, testeada en local con Nadir (principal) y
+Carolina (asistente). En producción tras este commit.
+
+## Modelo de datos aplicado
+- `profiles.assistant_of_id uuid` y `profiles.shares_calendar_with_assistant boolean`.
+- `actor_id uuid` agregado a `abordaje_prospectos`, `abordaje_prospecto_contactos`,
+  `abordaje_tareas`, `abordaje_agendados`.
+- Helper RLS `private.is_assistant_of(target_id uuid) returns boolean`.
+- Policy `profiles_select` actualizada:
+  `auth.uid() = id OR private.is_admin() OR private.is_assistant_of(id)`.
+
+## Backend
+- `gcal-events` v10: si el caller tiene `assistant_of_id`, resuelve el
+  principal y opera sobre su calendar **solo si**
+  `shares_calendar_with_assistant=true` y `gcal_enabled=true`. Si no,
+  devuelve `{skip}` (calendar vacío para el asistente, sin error).
+- `gcalApi.create/update` decoran `extendedProperties.private` con
+  `abordaje_actor_id` y `abordaje_agente_id` para preservar autoría en eventos
+  externos a Abordaje.
+
+## Frontend (modo asistente)
+- `auth.getEffectiveAgenteId()`: si el user es asistente devuelve el id del
+  principal. Cache local.
+- Banner sutil arriba: *"★ Estás trabajando como asistente de NOMBRE · todo
+  lo que hagas queda registrado con tu nombre"*.
+- `isPilot` para asistentes mira `principalProfile.gcal_enabled` y
+  `shares_calendar_with_assistant`, no su propio `gcal_enabled`.
+- `loadAllProfiles` trae `assistant_of_id` y `shares_calendar_with_assistant`.
+- Admin Panel: dropdown "Es asistente de (opcional)" en el form de alta y en
+  el inline edit. Filtro: un asistente no puede serlo de otro asistente.
+- Display "★ asist. de X" en cada fila de profile.
+- Ajustes → Google Calendar: nuevo bloque visible solo si el agente tiene
+  asistente(s) asignado(s), con toggle *"Compartir mi Google Calendar con mi
+  asistente"* + confirmación al activar.
+
+## Marca visual de autor (ActorStar)
+- Cada CREATE y UPDATE de las entidades operables setea
+  `actor_id = user.id` (modelo "último que tocó"; cuando el principal edita,
+  la estrella desaparece automáticamente).
+- `updateTarea` con patch solo de `googleEventId` NO pisa actor (sync interno
+  post-create).
+- Componente `<ActorStar item>` muestra ★ amarillo si `actorId != agenteId`.
+- Context `ActorContext` provee mapa `actor_id → { display_name, email }`
+  cargado una vez en App.
+- Tooltip al hover: *"Modificado por NOMBRE · DD/MM HH:MM"* (usa
+  `updatedAt || createdAt`).
+- Aplicado en: cards de prospects, cards de tareas, filas de timeline,
+  filas de historial (panel lateral), eventos de calendar (mes/semana/día).
+
+## Colores custom de eventos del calendar
+- Tabla `abordaje_event_colors` con `agente_id`, `event_key`, `color`,
+  `actor_id`, `created_at`, `updated_at`, unique `(agente_id, event_key)`.
+- RLS coherente con asistentes/admin.
+- `event_key` formato: `prospecto:UUID`, `tarea:UUID`, `agenda:UUID`,
+  `gcal:GOOGLE_EVENT_ID`.
+- Paleta `EVENT_COLOR_PALETTE` de 8 colores: rojo, naranja, amarillo, verde,
+  turquesa, azul, rosa, gris.
+- `EventColorContext` provee `{colors, setColor}` al árbol.
+- Click derecho sobre cualquier tarjeta del calendar abre popover con los 8
+  swatches + botón "Quitar color".
+- Override es **local** (en nuestra BD), no toca Google. Funciona para
+  eventos nativos y eventos externos de Google Calendar.
+- `colorCalendarEvento(e, colorsMap)` mira override antes de aplicar reglas
+  automáticas. Cuando no hay override, vuelve al color por tipo de gestión.
+
+## Otras mejoras de UX (mismo día)
+- **Modal de Instrucciones**: botón "Instrucciones" a la izquierda del
+  buscador en el header, abre modal con 9 secciones colapsables (Primer
+  arranque, Prospectos, Etiquetas, Tareas, Calendario, Notificaciones,
+  Asistente, Ajustes, Atajos).
+- **Refresh al cambiar de tab**: alternar entre Lista / Tareas / Calendario
+  dispara `loadState` silencioso (sin spinner) + `bumpGcal` si está en
+  modo piloto. Útil cuando asistente y principal trabajan en paralelo.
+- **Alineación del header en monitores grandes**: padding lateral del header
+  matchea el `max-width: 1520` del `.main`, así "Salir" no se desborda más
+  allá del botón "+ Nuevo prospect".
+- **Breakpoint intermedio (721-1280px)**: aprieta header (padding 14, gap
+  10), reduce input del buscador a 180px y compacta el botón Instrucciones.
+
+## Bugs corregidos en esta sesión
+- Constraint `abordaje_prospectos_estado_check` no aceptaba estado
+  `programado` (lo usaban las etiquetas "Llamar semana próx", "Fecha exacta",
+  "Llamar dentro de…"). Migration agregó `programado` al check.
+- Carolina (asistente) no podía leer el `display_name` del principal por RLS.
+  Fix: policy `profiles_select` extendida con `private.is_assistant_of`.
+- Header colors de columnas `col-detalle / col-referente / col-pref` se
+  veían oscuras en mobile (se mezclaba estilo de `td` con el de `th`). Fix:
+  separar selectores en CSS.
+
+## Cierre del proyecto
+Push final a Railway tras este commit. El piloto deja de ser exclusivo de
+`nortiz@ifs-broker.com`: cualquier user del dominio Workspace que active
+el toggle en Ajustes empieza a usar Google Calendar como fuente. Gmail
+externos activan vía OAuth user-level (Fase 2). Asistentes ya pueden
+operar dentro del workspace de su principal con trazabilidad por estrella.

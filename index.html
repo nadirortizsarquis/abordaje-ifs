@@ -42,7 +42,11 @@
     position: fixed; top: 0; left: 0; right: 0; height: var(--header-h);
     background: linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 100%);
     display: flex; align-items: center; gap: 16px;
-    padding: 0 24px;
+    /* El padding lateral matchea el max-width 1520 + padding 22 del .main,
+       así los botones (Salir a la derecha) nunca pasan el borde del
+       "+ Nuevo prospect" del contenido. Background sigue edge-to-edge. */
+    padding-left: max(24px, calc((100vw - 1520px) / 2 + 22px));
+    padding-right: max(24px, calc((100vw - 1520px) / 2 + 22px));
     z-index: 100;
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
   }
@@ -60,7 +64,8 @@
   }
   .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
   .header-actions { display: flex; gap: 10px; align-items: center; }
-  .header-search-slot { margin-left: auto; display: flex; align-items: center; }
+  .header-instr-slot { margin-left: auto; display: flex; align-items: center; }
+  .header-search-slot { display: flex; align-items: center; margin-left: 10px; }
   .header-btn {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -215,8 +220,8 @@
     font-size: 0.76rem;
     color: var(--texto-suave);
   }
-  table.prospectos td.col-detalle,
-  table.prospectos thead th.col-detalle {
+  /* td col-detalle: gris suave + ellipsis */
+  table.prospectos td.col-detalle {
     font-size: 0.78rem;
     color: var(--texto);
     max-width: 220px;
@@ -224,12 +229,21 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* th col-detalle: el color blanco del header lo hereda de thead th */
+  table.prospectos thead th.col-detalle {
+    max-width: 220px;
+  }
+  /* td col-referente / col-pref: gris suave alineado a la derecha */
   table.prospectos td.col-referente,
-  table.prospectos td.col-pref,
-  table.prospectos thead th.col-referente,
-  table.prospectos thead th.col-pref {
+  table.prospectos td.col-pref {
     font-size: 0.72rem;
     color: var(--texto-suave);
+    text-align: right;
+    padding-right: 14px;
+  }
+  /* th de esas columnas: heredar blanco del thead, solo alinear a la derecha */
+  table.prospectos thead th.col-referente,
+  table.prospectos thead th.col-pref {
     text-align: right;
     padding-right: 14px;
   }
@@ -2097,6 +2111,31 @@
     border-bottom: 1px solid rgba(120,53,15,0.18);
   }
   .view-as-banner strong { font-weight: 800; }
+
+  /* Banner "trabajando como asistente" — convive con el principal sin ser
+     invasivo (gradiente celeste, sutil). */
+  .assistant-banner {
+    background: linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
+    color: #075985;
+    padding: 7px 18px;
+    margin: 0 -22px 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-bottom: 1px solid rgba(2,132,199,0.18);
+  }
+  .assistant-banner strong { font-weight: 800; color: #0c4a6e; }
+  .assistant-banner-note {
+    font-weight: 400; opacity: 0.85; font-size: 0.74rem;
+  }
+  /* Estrella de "lo hizo el asistente" en cards/listas. */
+  .actor-star {
+    display: inline-block;
+    color: #f59e0b;
+    font-size: 0.78rem;
+    margin-right: 3px;
+    vertical-align: middle;
+    title: 'Cargado por asistente';
+  }
   .view-as-readonly {
     background: rgba(120,53,15,0.18);
     padding: 2px 9px;
@@ -2125,6 +2164,18 @@
   @media (max-width: 900px) {
     .col-referente, .col-pref { display: none; }
   }
+  /* Breakpoint intermedio (>720 y <=1280): el monitor es chico pero no es
+     mobile. Apretamos padding del header y achicamos buscador + botón
+     Instrucciones para que todo entre sin que "Salir" se desborde. */
+  @media (min-width: 721px) and (max-width: 1280px) {
+    .header { padding-left: 14px; padding-right: 14px; gap: 10px; }
+    .header-title { padding-left: 10px; font-size: 1rem; }
+    .header-subtitle { font-size: 0.7rem; }
+    .header-instr-slot .header-btn { padding: 6px 10px; font-size: 0.72rem; }
+    .buscador-input { width: 180px; font-size: 0.76rem; padding: 6px 10px; }
+    .buscador-input:focus { width: 220px; }
+    .header-btn { padding: 6px 10px; font-size: 0.74rem; }
+  }
   @media (max-width: 720px) {
     /* Header: 2 filas en mobile. La altura sube para que el contenido principal
        no quede tapado (el `--header-h` se override y el margin-top de .main lo
@@ -2148,6 +2199,9 @@
     .header-search-slot {
       order: 10; flex: 1 100%;
       margin-left: 0; margin-right: 0;
+    }
+    .header-instr-slot {
+      order: 4; margin-left: auto; margin-right: 6px;
     }
     .header-actions {
       order: 5; gap: 5px; flex-wrap: wrap; justify-content: flex-end;
@@ -2225,6 +2279,7 @@
       Planificador de Abordaje
       <span class="header-subtitle">Gestión de prospectos · IFS</span>
     </div>
+    <div id="headerInstrucciones" class="header-instr-slot"></div>
     <div id="headerSearch" class="header-search-slot"></div>
     <div class="header-actions" id="headerActions"></div>
   </header>
@@ -2262,7 +2317,8 @@ function emptyState() {
     version: 2,
     prospectos: [],
     agendados: [],
-    tareas: { columnas: [], items: [] }
+    tareas: { columnas: [], items: [] },
+    eventColors: {},
   };
 }
 
@@ -2279,6 +2335,8 @@ function mapContactoFromDB(c) {
     hora: horaCorta,
     observacion: c.observacion || '',
     agendadoPara,
+    actorId: c.actor_id || null,
+    agenteId: c.agente_id,
     createdAt: c.created_at
   };
 }
@@ -2293,6 +2351,7 @@ function mapProspectoFromDB(p, contactosTodos) {
     referente: p.referente || '',
     observaciones: p.observaciones || '',
     agenteId: p.agente_id,
+    actorId: p.actor_id || null,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     proximoContacto: p.proximo_contacto,
@@ -2323,6 +2382,8 @@ function mapTareaFromDB(t) {
     horaRecordatorio: t.hora_recordatorio ? t.hora_recordatorio.slice(0, 5) : null,
     observacion: t.observacion || '',
     googleEventId: t.google_event_id || null,
+    actorId: t.actor_id || null,
+    agenteId: t.agente_id,
     createdAt: t.created_at,
     updatedAt: t.updated_at
   };
@@ -2333,7 +2394,10 @@ function mapAgendadoFromDB(a) {
     id: a.id,
     prospectoId: a.prospecto_id,
     fecha: a.fecha,
-    nota: a.nota || ''
+    nota: a.nota || '',
+    actorId: a.actor_id || null,
+    agenteId: a.agente_id,
+    createdAt: a.created_at
   };
 }
 
@@ -2348,6 +2412,11 @@ function splitFechaHora(iso) {
 }
 
 // ── Auth ───────────────────────────────────────────────────────
+// Cache local del profile minimo (id + assistant_of_id) para resolver rápido
+// quién es el "agente efectivo" cuando el caller es un asistente. Se invalida
+// al cambiar de sesión o cuando explícitamente se actualice.
+let __cachedProfileMin = null;
+
 const auth = {
   async getUser() {
     const { data } = await sb.auth.getUser();
@@ -2357,6 +2426,20 @@ const auth = {
     const { data } = await sb.auth.getSession();
     return data.session || null;
   },
+  // Devuelve el id del agente cuyos datos opera el caller. Si el user es
+  // asistente (profile.assistant_of_id no null), devuelve el id del principal.
+  // Si no, devuelve el propio user.id.
+  async getEffectiveAgenteId() {
+    const user = await this.getUser();
+    if (!user) return null;
+    if (!__cachedProfileMin || __cachedProfileMin.id !== user.id) {
+      const { data } = await sb.from('profiles')
+        .select('id, assistant_of_id').eq('id', user.id).maybeSingle();
+      __cachedProfileMin = data || { id: user.id, assistant_of_id: null };
+    }
+    return __cachedProfileMin.assistant_of_id || user.id;
+  },
+  invalidateProfileCache() { __cachedProfileMin = null; },
   async signIn(email, password) {
     return await sb.auth.signInWithPassword({ email, password });
   },
@@ -2381,22 +2464,27 @@ const storage = {
   async loadState(targetAgenteId) {
     const user = await auth.getUser();
     if (!user) return emptyState();
-    // Por default vemos lo nuestro. Si el admin entra en modo "Ver como",
-    // pasamos el id del otro asesor para filtrar.
-    const agenteId = targetAgenteId || user.id;
+    // Si el admin pasa targetAgenteId (Ver como) usamos eso. Si no, usamos
+    // el agente efectivo (que para un asistente es el principal).
+    const effective = await auth.getEffectiveAgenteId();
+    const agenteId = targetAgenteId || effective || user.id;
     const viendoAOtro = !!targetAgenteId && targetAgenteId !== user.id;
 
-    const [prosRes, conRes, colRes, tarRes, agnRes] = await Promise.all([
+    const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
       sb.from('abordaje_prospectos').select('*').eq('agente_id', agenteId).order('created_at', { ascending: false }),
       sb.from('abordaje_prospecto_contactos').select('*').eq('agente_id', agenteId).order('created_at'),
       sb.from('abordaje_tareas_columnas').select('*').eq('agente_id', agenteId).order('orden'),
       sb.from('abordaje_tareas').select('*').eq('agente_id', agenteId).order('created_at'),
-      sb.from('abordaje_agendados').select('*').eq('agente_id', agenteId).order('fecha')
+      sb.from('abordaje_agendados').select('*').eq('agente_id', agenteId).order('fecha'),
+      sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId)
     ]);
 
-    [prosRes, conRes, colRes, tarRes, agnRes].forEach(r => {
+    [prosRes, conRes, colRes, tarRes, agnRes, evcRes].forEach(r => {
       if (r.error) console.error('loadState:', r.error.message);
     });
+
+    const eventColors = {};
+    for (const row of (evcRes.data || [])) eventColors[row.event_key] = row.color;
 
     let columnas = (colRes.data || []).map(mapColumnaFromDB);
 
@@ -2412,7 +2500,7 @@ const storage = {
         // Si ya tiene columna con ese título, no duplicamos.
         if (tieneTitulo.has(def.titulo.toLowerCase())) continue;
         const ordenLibre = columnas.length + faltantes.length;
-        faltantes.push({ agente_id: user.id, titulo: def.titulo, orden: ordenLibre, slug: def.slug });
+        faltantes.push({ agente_id: agenteId, titulo: def.titulo, orden: ordenLibre, slug: def.slug });
       }
       if (faltantes.length > 0) {
         const { data, error } = await sb.from('abordaje_tareas_columnas')
@@ -2429,17 +2517,47 @@ const storage = {
       tareas: {
         columnas,
         items: (tarRes.data || []).map(mapTareaFromDB)
-      }
+      },
+      eventColors,
     };
+  },
+
+  // ── Event colors (override visual de tarjetas del calendar) ──
+  // event_key formato:
+  //   "prospecto:UUID"  - evento derivado de un prospect
+  //   "tarea:UUID"      - evento derivado de una tarea
+  //   "agenda:UUID"     - agenda nativa de abordaje
+  //   "gcal:GOOGLE_ID"  - evento externo de Google Calendar (modo piloto)
+  async setEventColor(eventKey, color) {
+    const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
+    if (!user?.id || !agenteId || !eventKey) return;
+    if (!color) {
+      const { error } = await sb.from('abordaje_event_colors')
+        .delete().eq('agente_id', agenteId).eq('event_key', eventKey);
+      if (error) throw error;
+      return;
+    }
+    const { error } = await sb.from('abordaje_event_colors')
+      .upsert({
+        agente_id: agenteId,
+        event_key: eventKey,
+        color,
+        actor_id: user.id,
+        updated_at: new Date().toISOString(),
+      }, { onConflict: 'agente_id,event_key' });
+    if (error) throw error;
   },
 
   // ── Prospectos ──
   async createProspecto(input) {
     const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
     const proximoContacto = input.proximoContacto || null;
     const fechaProx = proximoContacto && !proximoContacto.includes('T') ? proximoContacto : (proximoContacto ? proximoContacto.split('T')[0] : null);
     const { data, error } = await sb.from('abordaje_prospectos').insert({
-      agente_id: user.id,
+      agente_id: agenteId,
+      actor_id: user.id,
       nombre: input.nombre || '',
       telefono: input.telefono || '',
       preferencia_contacto: input.preferenciaContacto || '',
@@ -2467,6 +2585,8 @@ const storage = {
       dbPatch.proximo_contacto = v ? (v.includes('T') ? v.split('T')[0] : v) : null;
     }
     if (Object.keys(dbPatch).length === 0) return;
+    const user = await auth.getUser();
+    if (user?.id) dbPatch.actor_id = user.id;
     const { error } = await sb.from('abordaje_prospectos').update(dbPatch).eq('id', id);
     if (error) throw error;
   },
@@ -2479,12 +2599,14 @@ const storage = {
   // ── Contactos (historial de gestiones) ──
   async createContacto(prospectoId, contacto) {
     const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
     const { fecha, hora } = contacto.agendadoPara
       ? splitFechaHora(contacto.agendadoPara)
       : { fecha: contacto.fecha || null, hora: contacto.hora || null };
     const { data, error } = await sb.from('abordaje_prospecto_contactos').insert({
       prospecto_id: prospectoId,
-      agente_id: user.id,
+      agente_id: agenteId,
+      actor_id: user.id,
       tipo: contacto.tipo || '',
       fecha, hora,
       observacion: contacto.observacion || ''
@@ -2505,6 +2627,8 @@ const storage = {
       if ('hora' in patch) dbPatch.hora = patch.hora;
     }
     if (Object.keys(dbPatch).length === 0) return;
+    const user = await auth.getUser();
+    if (user?.id) dbPatch.actor_id = user.id;
     const { error } = await sb.from('abordaje_prospecto_contactos').update(dbPatch).eq('id', id);
     if (error) throw error;
   },
@@ -2516,9 +2640,9 @@ const storage = {
 
   // ── Columnas Kanban ──
   async createColumna(titulo, orden = 999) {
-    const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
     const { data, error } = await sb.from('abordaje_tareas_columnas').insert({
-      agente_id: user.id, titulo, orden
+      agente_id: agenteId, titulo, orden
     }).select().single();
     if (error) throw error;
     return mapColumnaFromDB(data);
@@ -2541,9 +2665,11 @@ const storage = {
   // ── Tareas Kanban ──
   async createTarea({ columnaId, prospectoId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
     const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
     const { data, error } = await sb.from('abordaje_tareas').insert({
       columna_id: columnaId,
-      agente_id: user.id,
+      agente_id: agenteId,
+      actor_id: user.id,
       prospecto_id: prospectoId,
       titulo,
       observacion,
@@ -2563,6 +2689,14 @@ const storage = {
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
     if (Object.keys(dbPatch).length === 0) return;
+    // Solo marcamos actor cuando el cambio incluye campos user-visible. Si el
+    // patch es exclusivamente `googleEventId` (sync interno tras crear el evento
+    // en Google) no pisamos el actor original.
+    const onlyGoogleSync = Object.keys(dbPatch).length === 1 && 'google_event_id' in dbPatch;
+    if (!onlyGoogleSync) {
+      const user = await auth.getUser();
+      if (user?.id) dbPatch.actor_id = user.id;
+    }
     const { error } = await sb.from('abordaje_tareas').update(dbPatch).eq('id', id);
     if (error) throw error;
   },
@@ -2577,9 +2711,11 @@ const storage = {
   // y no se persisten agendados en Supabase.
   async createAgendado(prospectoId, fechaISO, nota) {
     const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
     const { data, error } = await sb.from('abordaje_agendados').insert({
       prospecto_id: prospectoId,
-      agente_id: user.id,
+      agente_id: agenteId,
+      actor_id: user.id,
       fecha: fechaISO,
       nota: nota || ''
     }).select().single();
@@ -2596,6 +2732,9 @@ const storage = {
     const dbPatch = {};
     if ('fecha' in patch) dbPatch.fecha = patch.fecha;
     if ('nota' in patch)  dbPatch.nota  = patch.nota;
+    if (Object.keys(dbPatch).length === 0) return null;
+    const user = await auth.getUser();
+    if (user?.id) dbPatch.actor_id = user.id;
     const { data, error } = await sb.from('abordaje_agendados').update(dbPatch).eq('id', id).select().single();
     if (error) throw error;
     return mapAgendadoFromDB(data);
@@ -2614,17 +2753,34 @@ const gcalApi = {
     if (data?.skip) return null;
     return data.events || [];
   },
+  // Inyecta actor/agente en extendedProperties.private del evento de Google.
+  // Esto permite que el calendar muestre la estrella en eventos creados o
+  // editados por un asistente (incluso aunque el evento físicamente quede en
+  // el calendar del principal). El extractor lee esos campos al renderizar.
+  async _decorate(event) {
+    if (!event) return event;
+    const user = await auth.getUser();
+    const agenteId = await auth.getEffectiveAgenteId();
+    if (!user?.id) return event;
+    const prevExt = event.extendedProperties || {};
+    const prevPriv = prevExt.private || {};
+    const priv = { ...prevPriv, abordaje_actor_id: user.id };
+    if (agenteId) priv.abordaje_agente_id = agenteId;
+    return { ...event, extendedProperties: { ...prevExt, private: priv } };
+  },
   async create(event, calendarId) {
+    const decorated = await this._decorate(event);
     const { data, error } = await sb.functions.invoke('gcal-events', {
-      body: { op: 'create', event, calendarId }
+      body: { op: 'create', event: decorated, calendarId }
     });
     if (error) throw error;
     if (data?.skip) return null;
     return data.event;
   },
   async update(eventId, event, calendarId) {
+    const decorated = await this._decorate(event);
     const { data, error } = await sb.functions.invoke('gcal-events', {
-      body: { op: 'update', eventId, event, calendarId }
+      body: { op: 'update', eventId, event: decorated, calendarId }
     });
     if (error) throw error;
     if (data?.skip) return null;
@@ -2723,7 +2879,55 @@ const calendarApi = {
 
 <!-- ─────────────────── REACT APP ─────────────────── -->
 <script type="text/babel">
-const { useState, useEffect, useCallback, useMemo, useRef } = React;
+const { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext } = React;
+
+// Mapa global de actor_id → { display_name, email } para que ActorStar pueda
+// mostrar "Modificado por NOMBRE" en el tooltip sin tener que recibir el dato
+// por prop en cada call site (hay decenas).
+const ActorContext = createContext({ actors: {}, agenteId: null });
+
+// Paleta fija de 8 colores para overrides custom del calendar.
+// Cada entry: {color: texto, bg: fondo, border: borde, label: nombre humano}.
+const EVENT_COLOR_PALETTE = {
+  rojo:     { color: '#991b1b', bg: '#fee2e2', border: '#dc2626', label: 'Rojo' },
+  naranja:  { color: '#9a3412', bg: '#fed7aa', border: '#c2410c', label: 'Naranja' },
+  amarillo: { color: '#854d0e', bg: '#fef9c3', border: '#ca8a04', label: 'Amarillo' },
+  verde:    { color: '#065f46', bg: '#d1fae5', border: '#15803d', label: 'Verde' },
+  turquesa: { color: '#115e59', bg: '#ccfbf1', border: '#0d9488', label: 'Turquesa' },
+  azul:     { color: '#1e40af', bg: '#dbeafe', border: '#1d4ed8', label: 'Azul' },
+  rosa:     { color: '#9d174d', bg: '#fce7f3', border: '#db2777', label: 'Rosa' },
+  gris:     { color: '#1f2937', bg: '#e5e7eb', border: '#4b5563', label: 'Gris' },
+};
+const EVENT_COLOR_ORDER = ['rojo','naranja','amarillo','verde','turquesa','azul','rosa','gris'];
+
+// Construye la clave que identifica univocamente un evento del calendar para
+// guardar su override de color. Eventos del kind 'agenda' usan el id de la
+// agenda nativa o el del googleEvent (en piloto). Eventos prospect/tarea usan
+// el id del prospect/tarea (no del evento), para que se mantenga aunque se
+// regenere el evento.
+function buildEventKey(e) {
+  if (!e) return null;
+  if (e.googleEvent?.id) return 'gcal:' + e.googleEvent.id;
+  if (e.kind === 'prospecto' && e.prospectoId) return 'prospecto:' + e.prospectoId;
+  if (e.kind === 'tarea' && (e.tareaData?.id || e.tareaId)) return 'tarea:' + (e.tareaData?.id || e.tareaId);
+  if (e.kind === 'agenda' && e.agendaData?.id) return 'agenda:' + e.agendaData.id;
+  return null;
+}
+
+const EventColorContext = createContext({ colors: {}, setColor: async () => {} });
+
+function formatActorTimestamp(ts) {
+  if (!ts) return null;
+  try {
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return null;
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm} ${hh}:${mi}`;
+  } catch { return null; }
+}
 
 const PREFS_CONTACTO = ['Llamada', 'WhatsApp', 'Email', 'Presencial', 'Otro'];
 
@@ -3620,9 +3824,44 @@ function NotificacionesDropdown({ items, onClose, onClickItem }) {
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
+  // Modo asistente: el user logueado es asistente de otro agente. Carga datos
+  // del principal y banner sutil arriba que indica de quién está siendo
+  // asistente. La marca visual (★) en cards/listas se basa en actor_id.
+  const isAssistant = !!agente?.assistant_of_id;
+  const [principalProfile, setPrincipalProfile] = useState(null);
+  useEffect(() => {
+    if (!isAssistant) { setPrincipalProfile(null); return; }
+    sb.from('profiles')
+      .select('id, email, display_name, gcal_enabled, shares_calendar_with_assistant')
+      .eq('id', agente.assistant_of_id).maybeSingle()
+      .then(({ data }) => setPrincipalProfile(data || null));
+  }, [isAssistant, agente?.assistant_of_id]);
+
+  // Cache de actor_id → { display_name, email } para mostrar nombres en el
+  // tooltip de la estrella. RLS limita las filas visibles: el principal ve
+  // todos sus asistentes, el asistente ve a su principal y a sí mismo. Para
+  // admins, ve todos los profiles.
+  const [actorMap, setActorMap] = useState({});
+  useEffect(() => {
+    if (!agente?.id) return;
+    sb.from('profiles').select('id, display_name, email').then(({ data }) => {
+      if (!data) return;
+      const map = {};
+      for (const p of data) map[p.id] = { display_name: p.display_name, email: p.email };
+      setActorMap(map);
+    });
+  }, [agente?.id]);
   // Calendar usa Google como fuente cuando el agente lo activó desde Ajustes y
   // su email es del dominio Workspace. En viewAs admin no aplica.
-  const isPilot = isGoogleCalendarUser(agente) && !viewAs;
+  //
+  // Para asistentes: si el principal compartió su calendar y lo tiene activo,
+  // el asistente también opera contra Google Calendar (el del principal,
+  // resuelto en la edge function via assistant_of_id).
+  const isPilot = !viewAs && (
+    isAssistant
+      ? !!(principalProfile?.shares_calendar_with_assistant && principalProfile?.gcal_enabled)
+      : isGoogleCalendarUser(agente)
+  );
   // Bumpea para forzar re-fetch de eventos de Google tras crear/editar/borrar.
   const [gcalReloadKey, setGcalReloadKey] = useState(0);
   const bumpGcal = () => setGcalReloadKey(k => k + 1);
@@ -3659,13 +3898,29 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     showToast('Google Calendar desvinculado');
   };
 
+  // El principal puede dar/retirar consentimiento para que su asistente vea
+  // su Google Calendar personal (no solo lo agendado en Abordaje). Se persiste
+  // en profiles.shares_calendar_with_assistant; el backend (gcal-events) lo
+  // chequea cuando un asistente hace requests sobre el calendario del principal.
+  const handleToggleShareCalWithAssistant = async (enabled) => {
+    if (!agente?.id) return;
+    const { error } = await sb.from('profiles')
+      .update({ shares_calendar_with_assistant: enabled })
+      .eq('id', agente.id);
+    if (error) throw error;
+    setAgente(a => a ? { ...a, shares_calendar_with_assistant: enabled } : a);
+    showToast(enabled
+      ? 'Tu asistente ahora puede ver tu Google Calendar'
+      : 'Tu asistente ya no ve tu Google Calendar');
+  };
+
   // Detecta el retorno del flujo OAuth (querystring) y refresca el agente.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -3681,6 +3936,23 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [user?.id]);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
+
+  // Override de colores para eventos del calendar (click derecho sobre tarjeta).
+  // Si setColor recibe null/'' borra el override (vuelve al color automático).
+  const handleSetEventColor = useCallback(async (eventKey, color) => {
+    if (!eventKey) return;
+    try {
+      await storage.setEventColor(eventKey, color || null);
+      setState(s => {
+        const next = { ...(s.eventColors || {}) };
+        if (!color) delete next[eventKey];
+        else next[eventKey] = color;
+        return { ...s, eventColors: next };
+      });
+    } catch (e) {
+      showToast('No se pudo cambiar el color: ' + (e?.message || e), { duration: 4000 });
+    }
+  }, []);
 
   // Guard común para handlers de escritura: bloquea si estamos viendo como otro
   const guardReadOnly = () => {
@@ -3715,6 +3987,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showInstrucciones, setShowInstrucciones] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   // Click en una celda libre del calendario: muestra mini-modal Agenda/Tarea.
@@ -3758,6 +4031,29 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     })();
     return () => { cancel = true; };
   }, [viewAs?.id]);
+
+  // Refresh silencioso al cambiar de tab (Lista / Tareas / Calendario).
+  // Útil cuando un asistente y el principal trabajan en paralelo: al alternar
+  // pestañas se ve el estado actualizado sin necesidad de recargar la página.
+  // No corre en el primer mount (skip via ref) para no duplicar el load inicial.
+  const firstTabSwitchSkipRef = useRef(true);
+  useEffect(() => {
+    if (firstTabSwitchSkipRef.current) {
+      firstTabSwitchSkipRef.current = false;
+      return;
+    }
+    let cancel = false;
+    (async () => {
+      try {
+        const s = await storage.loadState(viewAs?.id);
+        if (!cancel) setState(s);
+        if (isPilot) bumpGcal();
+      } catch (e) {
+        console.warn('refresh on tab switch:', e?.message || e);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [view]);
 
   const handleErr = (e, ctx) => {
     console.error(ctx, e);
@@ -4487,7 +4783,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }
 
   return (
-    <>
+    <ActorContext.Provider value={{ actors: actorMap, agenteId: agente?.id }}>
+    <EventColorContext.Provider value={{ colors: state.eventColors || {}, setColor: handleSetEventColor }}>
       <HeaderActions
         user={user}
         agente={agente}
@@ -4505,9 +4802,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onClose={() => setShowPassModal(false)}
         />
       )}
+      <MountInSlot slotId="headerInstrucciones">
+        <button className="header-btn" onClick={() => setShowInstrucciones(true)}
+          title="Cómo usar Abordaje">Instrucciones</button>
+      </MountInSlot>
       <MountInSlot slotId="headerSearch">
         <BuscadorGlobal state={state} onClickItem={handleNavToItem} />
       </MountInSlot>
+      {showInstrucciones && (
+        <InstruccionesModal onClose={() => setShowInstrucciones(false)} />
+      )}
       {bellOpen && (
         <NotificacionesDropdown
           items={notificaciones}
@@ -4522,6 +4826,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             <span className="view-as-readonly"> · solo lectura</span>
           </div>
           <button className="view-as-exit-btn" onClick={onExitViewAs}>← Volver a tu vista</button>
+        </div>
+      )}
+      {isAssistant && !viewAs && (
+        <div className="assistant-banner">
+          ★ Estás trabajando como asistente de{' '}
+          <strong>{principalProfile?.display_name || principalProfile?.email || '…'}</strong>
+          <span className="assistant-banner-note"> · todo lo que hagas queda registrado con tu nombre</span>
         </div>
       )}
 
@@ -4662,6 +4973,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onToggleGcal={handleToggleGcal}
           onLinkOAuth={handleLinkOAuth}
           onUnlinkOAuth={handleUnlinkOAuth}
+          onToggleShareCalWithAssistant={handleToggleShareCalWithAssistant}
         />
       )}
 
@@ -4702,7 +5014,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
         />
       )}
-    </>
+    </EventColorContext.Provider>
+    </ActorContext.Provider>
   );
 }
 
@@ -4876,6 +5189,7 @@ function FilaProspecto({ prospecto, onClick }) {
   return (
     <tr className={`fila-clickeable ${meta.tint}`} onClick={onClick}>
       <td className="col-nombre">
+        <ActorStar item={prospecto} />
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
       </td>
       <td className="col-telefono">{prospecto.telefono || '—'}</td>
@@ -4933,6 +5247,7 @@ function TimelineCell({ contactos }) {
             <span className="chip" style={{color: cfg?.color, background: cfg?.bg}}>
               {cfg?.label || c.tipo}
             </span>
+            <ActorStar item={c} />
             {c.agendadoPara && (
               <span className="timeline-fecha-obj" title={tooltipObj}>{formatFechaHora(c.agendadoPara)}</span>
             )}
@@ -5286,6 +5601,7 @@ function HistorialItem({ contacto, settings, readOnly, onSave, onDelete }) {
         }}>
           {cfg?.label || contacto.tipo}
         </span>
+        <ActorStar item={contacto} />
         {contacto.agendadoPara && (
           <span className="hist-fecha-obj" title={tooltipObj}>
             {formatFechaHora(contacto.agendadoPara)}
@@ -5569,7 +5885,10 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
       fecha: p.proximoContacto,
       tipo: 'agendado',
       observacion: ultimoAgendado?.observacion || '',
-      duracionMin: ultimoAgendado?.duracionMin || null
+      duracionMin: ultimoAgendado?.duracionMin || null,
+      actorId: ultimoAgendado?.actorId || p.actorId || null,
+      agenteId: ultimoAgendado?.agenteId || p.agenteId || null,
+      updatedAt: p.updatedAt || null
     });
   }
   // Agendados standalone (sin prospect): los creados desde "Nueva agenda"
@@ -5585,7 +5904,10 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
       fecha: a.fecha,
       tipo: 'agendado',
       observacion: lines.slice(1).join('\n') || '',
-      duracionMin: null
+      duracionMin: null,
+      actorId: a.actorId || null,
+      agenteId: a.agenteId || null,
+      updatedAt: a.createdAt || null
     });
   }
   // Eventos de tareas (con fechaRecordatorio).
@@ -5613,6 +5935,9 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
         fecha: fechaIso,
         observacion: t.observacion || '',
         duracionMin: null,
+        actorId: t.actorId || null,
+        agenteId: t.agenteId || null,
+        updatedAt: t.updatedAt || null,
       });
     }
   }
@@ -5685,6 +6010,10 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos) {
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,
       isExternalGcal: !prospectoId && !tareaId,
+      // Actor/agente inyectados al crear/editar desde Abordaje (extendedProperties.private)
+      actorId: ext.abordaje_actor_id || null,
+      agenteId: ext.abordaje_agente_id || null,
+      updatedAt: ev.updated || null,
     });
   }
   return events.sort((a, b) => a.fecha.localeCompare(b.fecha));
@@ -5716,7 +6045,17 @@ function deriveColorsFromGcalHex(hex) {
   return { color, bg, border: hex };
 }
 
-function colorCalendarEvento(e) {
+function colorCalendarEvento(e, colorsMap) {
+  // Override custom seteado por el usuario via click derecho. Tiene prioridad
+  // sobre cualquier regla automática.
+  let overrideId = null;
+  if (colorsMap) {
+    const k = buildEventKey(e);
+    if (k) overrideId = colorsMap[k];
+  }
+  if (overrideId && EVENT_COLOR_PALETTE[overrideId]) {
+    return EVENT_COLOR_PALETTE[overrideId];
+  }
   // Eventos externos de Google (no creados desde Abordaje): usar el color del
   // calendario de origen para que match con lo que el user ve en Google Calendar.
   if (e?.isExternalGcal && e.gcalColor) {
@@ -6024,6 +6363,84 @@ function MonthCalendar({ cursor, events, eventsByKey, selectedDay, setSelectedDa
 }
 
 // ── VISTA SEMANA / HOY (grid de horas) ────────────────────────
+// Marca visual (estrella) cuando la última modificación la hizo alguien
+// distinto al agente dueño del workspace. Item necesita actorId y agenteId.
+// Tooltip "Modificado por NOMBRE · DD/MM HH:MM" usando el cache de actors.
+function ActorStar({ item }) {
+  const { actors } = useContext(ActorContext);
+  if (!item?.actorId || !item?.agenteId) return null;
+  if (item.actorId === item.agenteId) return null;
+  const info = actors[item.actorId];
+  const name = info?.display_name || info?.email || 'asistente';
+  const ts = item.updatedAt || item.createdAt;
+  const tsStr = formatActorTimestamp(ts);
+  const title = tsStr ? `Modificado por ${name} · ${tsStr}` : `Modificado por ${name}`;
+  return <span className="actor-star" title={title}>★</span>;
+}
+
+// Popover de paleta para cambiar el color de un evento del calendar.
+// Se posiciona usando coordenadas del click derecho (clientX/clientY) ajustadas
+// para no salirse de viewport. Cierra al perder foco / Escape / click fuera.
+function EventColorPicker({ x, y, eventKey, currentColor, onClose }) {
+  const { setColor } = useContext(EventColorContext);
+  const ref = useRef(null);
+  useEffect(() => {
+    const onKey = (ev) => { if (ev.key === 'Escape') onClose(); };
+    const onClick = (ev) => {
+      if (ref.current && !ref.current.contains(ev.target)) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('mousedown', onClick);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('mousedown', onClick);
+    };
+  }, [onClose]);
+
+  const W = 260, H = 108;
+  const left = Math.max(8, Math.min((x ?? 0), window.innerWidth - W - 8));
+  const top  = Math.max(8, Math.min((y ?? 0), window.innerHeight - H - 8));
+
+  const pick = async (colorId) => {
+    await setColor(eventKey, colorId);
+    onClose();
+  };
+
+  return (
+    <div ref={ref} style={{
+      position: 'fixed', left, top, zIndex: 9999,
+      background: '#fff', border: '1px solid #d1d5db',
+      borderRadius: 10, boxShadow: '0 8px 24px rgba(15,23,42,0.18)',
+      padding: 12, width: W, fontFamily: 'inherit', boxSizing: 'border-box'
+    }}>
+      <div style={{
+        fontSize: 10, color: '#6b7280', textTransform: 'uppercase',
+        letterSpacing: '0.06em', fontWeight: 700, marginBottom: 8,
+      }}>Color de la tarjeta</div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 6 }}>
+        {EVENT_COLOR_ORDER.map(id => {
+          const pal = EVENT_COLOR_PALETTE[id];
+          const selected = currentColor === id;
+          return (
+            <button key={id} onClick={() => pick(id)} title={pal.label} style={{
+              width: 22, height: 22, padding: 0, borderRadius: 6,
+              background: pal.bg, border: `2px solid ${selected ? pal.border : 'transparent'}`,
+              boxShadow: `inset 0 0 0 1px ${pal.border}`,
+              cursor: 'pointer',
+            }} />
+          );
+        })}
+      </div>
+      <button onClick={() => pick(null)} style={{
+        marginTop: 10, width: '100%', padding: '6px 8px',
+        background: '#f9fafb', border: '1px solid #e5e7eb',
+        borderRadius: 6, fontSize: 11, fontWeight: 600,
+        color: '#374151', cursor: 'pointer', fontFamily: 'inherit',
+      }}>Quitar color (volver al default)</button>
+    </div>
+  );
+}
+
 // Distribuye eventos solapados en columnas horizontales estilo Google Calendar.
 // Devuelve cada evento con su `col` (0..N) y `totalCols` (cuántas columnas hay
 // en su cluster de overlaps), para que el caller calcule left/width.
@@ -6068,6 +6485,8 @@ function layoutEventsInDay(eventsDayRaw, defaultDurMin) {
 }
 
 function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick, onMoveEvent, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
+  const { colors: eventColors } = useContext(EventColorContext);
+  const [picker, setPicker] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const bodyRef = useRef(null);
   const HOUR_HEIGHT = 56;
@@ -6308,6 +6727,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
   };
 
   return (
+    <>
     <div className="cal-wrap">
       <div className="cal-header">
         <div style={{display:'flex', alignItems:'center', gap:14}}>
@@ -6407,9 +6827,14 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                 const dur = endMin - startMin;
                 const top = (offsetMin / 60) * HOUR_HEIGHT;
                 const height = Math.max(28, (dur / 60) * HOUR_HEIGHT - 2);
-                const cfg = colorCalendarEvento(e);
+                const cfg = colorCalendarEvento(e, eventColors);
                 const evDate = new Date(e.fecha);
                 const vencido = evDate < now && !isToday(evDate);
+                const evKey = buildEventKey(e);
+                const onCtxMenu = evKey ? ((ev) => {
+                  ev.preventDefault(); ev.stopPropagation();
+                  setPicker({ x: ev.clientX, y: ev.clientY, eventKey: evKey, currentColor: eventColors[evKey] || null });
+                }) : undefined;
                 // Layout horizontal: divide el ancho según overlapping.
                 // Cada evento toma 1/totalCols del ancho y se posiciona en col.
                 const widthPct = 100 / totalCols;
@@ -6429,6 +6854,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                       color: cfg.color
                     }}
                     onPointerDown={(pe) => onEventPointerDown(pe, e)}
+                    onContextMenu={onCtxMenu}
                     onClick={() => {
                       // Si el tap touch ya disparó onSelectEvent vía el listener
                       // del long-press, el click sintético del browser no debe
@@ -6442,7 +6868,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                   >
                     <div className="cal-event-inner">
                       <div className="event-time">{formatHHMM(e.fecha)} · {dur}min</div>
-                      <div className="event-name">{e.label}</div>
+                      <div className="event-name">{e.label} <ActorStar item={e} /></div>
                       {height > 50 && !isCrowded && e.observacion && (
                         <div className="event-obs">{e.observacion}</div>
                       )}
@@ -6466,10 +6892,21 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
         </div>
       </div>
     </div>
+    {picker && (
+      <EventColorPicker
+        x={picker.x} y={picker.y}
+        eventKey={picker.eventKey}
+        currentColor={picker.currentColor}
+        onClose={() => setPicker(null)}
+      />
+    )}
+    </>
   );
 }
 
 function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEvent }) {
+  const { colors: eventColors } = useContext(EventColorContext);
+  const [picker, setPicker] = useState(null);
   const today = isToday(date);
   const cls = [
     'cal-day',
@@ -6483,12 +6920,18 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
   const now = new Date();
 
   return (
+    <>
     <div className={cls} onClick={onClick}>
       <span className="cal-day-num">{date.getDate()}</span>
       {visibles.map(e => {
-        const cfg = colorCalendarEvento(e);
+        const cfg = colorCalendarEvento(e, eventColors);
         const fechaEv = new Date(e.fecha);
         const vencido = fechaEv < now && !isToday(fechaEv);
+        const evKey = buildEventKey(e);
+        const onCtxMenu = evKey ? ((ev) => {
+          ev.preventDefault(); ev.stopPropagation();
+          setPicker({ x: ev.clientX, y: ev.clientY, eventKey: evKey, currentColor: eventColors[evKey] || null });
+        }) : undefined;
         return (
           <div
             key={e.id}
@@ -6500,9 +6943,11 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
             }}
             title={`${e.label}${e.observacion ? ' — ' + e.observacion : ''}`}
             onClick={(ev) => { ev.stopPropagation(); onSelectEvent(e); }}
+            onContextMenu={onCtxMenu}
           >
             <span className="cal-event-time">{formatHHMM(e.fecha)}</span>
             {e.label}
+            <ActorStar item={e} />
           </div>
         );
       })}
@@ -6510,10 +6955,21 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
         <div className="cal-more">+{restantes} más</div>
       )}
     </div>
+    {picker && (
+      <EventColorPicker
+        x={picker.x} y={picker.y}
+        eventKey={picker.eventKey}
+        currentColor={picker.currentColor}
+        onClose={() => setPicker(null)}
+      />
+    )}
+    </>
   );
 }
 
 function DayDetails({ date, events, onClose, onSelectEvent }) {
+  const { colors: eventColors } = useContext(EventColorContext);
+  const [picker, setPicker] = useState(null);
   return (
     <div className="day-details">
       <div className="day-details-header">
@@ -6529,25 +6985,40 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
       ) : (
         <div className="day-details-list">
           {events.map(e => {
-            const cfg = colorCalendarEvento(e);
+            const cfg = colorCalendarEvento(e, eventColors);
             const tipoLabel = e.tipo ? (tipoConfig(e.tipo)?.label || e.tipo) : 'Tarea';
+            const evKey = buildEventKey(e);
+            const onCtxMenu = evKey ? ((ev) => {
+              ev.preventDefault(); ev.stopPropagation();
+              setPicker({ x: ev.clientX, y: ev.clientY, eventKey: evKey, currentColor: eventColors[evKey] || null });
+            }) : undefined;
             return (
               <div
                 key={e.id}
                 className="day-event"
                 style={{ borderLeftColor: cfg.border }}
                 onClick={() => onSelectEvent(e)}
+                onContextMenu={onCtxMenu}
               >
                 <span className="day-event-time">{formatHHMM(e.fecha)}</span>
                 <span className="chip" style={{ color: cfg.color, background: cfg.bg }}>
                   {tipoLabel}
                 </span>
                 <span className="day-event-name">{e.label}</span>
+                <ActorStar item={e} />
                 {e.observacion && <span className="day-event-obs">{e.observacion}</span>}
               </div>
             );
           })}
         </div>
+      )}
+      {picker && (
+        <EventColorPicker
+          x={picker.x} y={picker.y}
+          eventKey={picker.eventKey}
+          currentColor={picker.currentColor}
+          onClose={() => setPicker(null)}
+        />
       )}
     </div>
   );
@@ -6557,7 +7028,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 // ── PROFILES API (compartido entre apps IFS) ──────────────────
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
-    .select('id, email, display_name, role, advisor_name_ole, created_at')
+    .select('id, email, display_name, role, advisor_name_ole, assistant_of_id, shares_calendar_with_assistant, created_at')
     .order('role', { ascending: false })
     .order('display_name', { ascending: true });
   if (error) { console.error('loadAllProfiles:', error); return []; }
@@ -6691,12 +7162,27 @@ function AdminTh({ children, right }) {
 // Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
 const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
-function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth }) {
+function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
   const enabled = !!agente?.gcal_enabled;
   const workspace = isWorkspaceUser(agente);
   const canLink = canLinkGoogleCalendar(agente);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [shareBusy, setShareBusy] = useState(false);
+
+  // Si este agente tiene asistente(s) asignado(s) (alguien con
+  // assistant_of_id = agente.id), mostramos el checkbox de consentimiento para
+  // compartir el Google Calendar personal con su asistente.
+  const [assistants, setAssistants] = useState([]);
+  useEffect(() => {
+    if (!agente?.id) { setAssistants([]); return; }
+    sb.from('profiles')
+      .select('id, email, display_name')
+      .eq('assistant_of_id', agente.id)
+      .then(({ data }) => setAssistants(data || []));
+  }, [agente?.id]);
+  const hasAssistant = assistants.length > 0;
+  const shareEnabled = !!agente?.shares_calendar_with_assistant;
 
   const toggleWorkspace = async () => {
     if (busy) return;
@@ -6719,6 +7205,15 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
     try { await onUnlinkOAuth(); }
     catch (e) { setErr(e?.message || String(e)); }
     finally { setBusy(false); }
+  };
+  const toggleShare = async () => {
+    if (shareBusy || !onToggleShareCalWithAssistant) return;
+    const next = !shareEnabled;
+    if (next && !confirm('Al activar esta opción, tu asistente va a poder ver y modificar TODOS los eventos de tu Google Calendar personal (no solo lo agendado desde Abordaje). ¿Confirmás?')) return;
+    setErr(null); setShareBusy(true);
+    try { await onToggleShareCalWithAssistant(next); }
+    catch (e) { setErr(e?.message || String(e)); }
+    finally { setShareBusy(false); }
   };
 
   return (
@@ -6804,6 +7299,48 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
         </div>
       )}
 
+      {hasAssistant && enabled && (
+        <div style={{
+          marginTop: 18, padding: '12px 14px',
+          background: '#fafafa', border: '1px solid #e5e7eb',
+          borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div
+              className={`toggle-switch ${shareEnabled ? 'on' : ''}`}
+              onClick={toggleShare}
+              role="switch"
+              aria-checked={shareEnabled}
+              aria-disabled={shareBusy}
+              style={shareBusy ? { opacity: 0.5, pointerEvents: 'none', flexShrink: 0 } : { flexShrink: 0 }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+                Compartir mi Google Calendar con mi asistente
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4, lineHeight: 1.5 }}>
+                {shareEnabled ? (
+                  <>
+                    <strong style={{ color: '#15803d' }}>Activado.</strong>{' '}
+                    {assistants.length === 1
+                      ? <><strong>{assistants[0].display_name || assistants[0].email}</strong> puede ver y modificar tu Google Calendar personal cuando trabaja como tu asistente.</>
+                      : <>Tus asistentes pueden ver y modificar tu Google Calendar personal cuando trabajan como tu asistente.</>
+                    }
+                  </>
+                ) : (
+                  <>
+                    Por defecto tu asistente solo ve lo que se carga desde Abordaje. Si activás
+                    esta opción, tu asistente va a ver <strong>todos los eventos</strong> de tu
+                    Google Calendar personal (no solo lo de Abordaje) y va a poder crear,
+                    editar y borrar eventos en tu nombre.
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {err && (
         <div style={{ marginTop: 10, background:'#fef2f2', border:'1px solid #fecaca',
           color:'#b91c1c', borderRadius:8, padding:'8px 12px', fontSize:12 }}>
@@ -6820,11 +7357,11 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent' });
+  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
-  const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent' });
+  const [newUser, setNewUser] = useState({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
   const [createBusy, setCreateBusy] = useState(false);
   const [passEditingId, setPassEditingId] = useState(null);
   const [passDraft, setPassDraft] = useState('');
@@ -6846,6 +7383,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
       display_name: p.display_name || '',
       advisor_name_ole: p.advisor_name_ole || '',
       role: p.role || 'agent',
+      assistant_of_id: p.assistant_of_id || '',
     });
     setError(null);
   };
@@ -6858,8 +7396,9 @@ function UsuariosSection({ currentUser, onViewAs }) {
         display_name: draft.display_name || null,
         advisor_name_ole: draft.advisor_name_ole || null,
         role: draft.role,
+        assistant_of_id: draft.assistant_of_id || null,
       });
-      setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft } : p));
+      setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft, assistant_of_id: draft.assistant_of_id || null } : p));
       setEditingId(null);
     } catch (err) { setError(err.message); }
     setSaving(false);
@@ -6870,8 +7409,17 @@ function UsuariosSection({ currentUser, onViewAs }) {
     setError(null); setCreateBusy(true);
     try {
       const created = await createUser(newUser);
+      // Si se eligió un agente principal, marcar al user nuevo como su asistente.
+      // La edge function create-user no soporta este campo, lo hacemos en una
+      // segunda llamada con update (admin tiene permisos vía RLS).
+      if (newUser.assistant_of_id) {
+        await sb.from('profiles')
+          .update({ assistant_of_id: newUser.assistant_of_id })
+          .eq('id', created.id);
+        created.assistant_of_id = newUser.assistant_of_id;
+      }
       setProfiles(ps => [created, ...ps]);
-      setNewUser({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent' });
+      setNewUser({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
       setCreating(false);
     } catch (err) { setError(err.message); }
     setCreateBusy(false);
@@ -6979,6 +7527,20 @@ function UsuariosSection({ currentUser, onViewAs }) {
                 <option value="admin">admin</option>
               </select>
             </AdminField>
+            <AdminField label="Es asistente de (opcional)">
+              <select value={newUser.assistant_of_id}
+                onChange={e => setNewUser(u => ({ ...u, assistant_of_id: e.target.value }))}
+                style={{ ...adminInpStyle, cursor: 'pointer' }}>
+                <option value="">— No es asistente —</option>
+                {profiles
+                  .filter(p => !p.assistant_of_id) // un asistente no puede ser asistente de otro asistente
+                  .map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.display_name || p.email}
+                    </option>
+                  ))}
+              </select>
+            </AdminField>
           </div>
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 12 }}>
             <button type="button" onClick={() => { setCreating(false); setError(null); }} style={adminBtnGhost}>
@@ -7040,13 +7602,29 @@ function UsuariosSection({ currentUser, onViewAs }) {
                     </td>
                     <td style={adminTdStyle}>
                       {isEditing ? (
-                        <select value={draft.role}
-                          onChange={e => setDraft(d => ({ ...d, role: e.target.value }))}
-                          style={{ ...adminInpStyle, cursor: 'pointer' }}>
-                          <option value="agent">agent</option>
-                          <option value="admin">admin</option>
-                        </select>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <select value={draft.role}
+                            onChange={e => setDraft(d => ({ ...d, role: e.target.value }))}
+                            style={{ ...adminInpStyle, cursor: 'pointer' }}>
+                            <option value="agent">agent</option>
+                            <option value="admin">admin</option>
+                          </select>
+                          <select value={draft.assistant_of_id}
+                            onChange={e => setDraft(d => ({ ...d, assistant_of_id: e.target.value }))}
+                            title="Marcar como asistente de otro agente"
+                            style={{ ...adminInpStyle, cursor: 'pointer', fontSize: 11 }}>
+                            <option value="">— No es asistente —</option>
+                            {profiles
+                              .filter(otro => otro.id !== p.id && !otro.assistant_of_id)
+                              .map(otro => (
+                                <option key={otro.id} value={otro.id}>
+                                  Asistente de {otro.display_name || otro.email}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
                       ) : (
+                        <div>
                         <span style={{
                           display: 'inline-block', fontSize: 10, fontWeight: 800,
                           textTransform: 'uppercase', letterSpacing: '0.06em',
@@ -7056,6 +7634,18 @@ function UsuariosSection({ currentUser, onViewAs }) {
                         }}>
                           {p.role}
                         </span>
+                        {p.assistant_of_id && (() => {
+                          const principal = profiles.find(x => x.id === p.assistant_of_id);
+                          return (
+                            <div style={{
+                              display: 'inline-block', marginLeft: 6,
+                              fontSize: 10, color: '#f59e0b', fontWeight: 600,
+                            }} title="Es asistente de otro agente">
+                              ★ asist. de {principal?.display_name || principal?.email || '…'}
+                            </div>
+                          );
+                        })()}
+                        </div>
                       )}
                     </td>
                     <td style={{ ...adminTdStyle, textAlign: 'right', whiteSpace: 'nowrap' }}>
@@ -7146,7 +7736,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -7260,6 +7850,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onToggleGcal={onToggleGcal}
             onLinkOAuth={onLinkOAuth}
             onUnlinkOAuth={onUnlinkOAuth}
+            onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
           />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
@@ -7534,6 +8125,7 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
       <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'}`}>
+        <ActorStar item={tarea} />
         {tarea.titulo || '(sin título)'}
       </div>
       {fechaTxt && (
@@ -7728,6 +8320,183 @@ function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={confirmar}>Convertir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: INSTRUCCIONES DE USO ───────────────────────────────
+// Tour rápido de las funciones del Planificador de Abordaje. Secciones
+// colapsables tipo acordeón, agrupadas por tópico. La primera sección queda
+// abierta por defecto para que el primer impacto sea informativo.
+function InstruccionesModal({ onClose }) {
+  const [openId, setOpenId] = useState('arranque');
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const toggle = (id) => setOpenId(cur => cur === id ? null : id);
+
+  const Section = ({ id, title, children }) => {
+    const open = openId === id;
+    return (
+      <div style={{
+        border: '1px solid #e5e7eb', borderRadius: 10, marginBottom: 10,
+        background: open ? '#fafbff' : '#fff', overflow: 'hidden'
+      }}>
+        <button onClick={() => toggle(id)} style={{
+          width: '100%', textAlign: 'left', padding: '12px 16px',
+          background: 'transparent', border: 'none', cursor: 'pointer',
+          fontSize: 14, fontWeight: 700, color: '#1e1b4b',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontFamily: 'inherit',
+        }}>
+          <span>{title}</span>
+          <span style={{ fontSize: 11, color: '#6b7280', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s' }}>▼</span>
+        </button>
+        {open && (
+          <div style={{
+            padding: '0 16px 14px 16px', fontSize: 13, lineHeight: 1.55,
+            color: '#374151',
+          }}>
+            {children}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const Li = ({ children }) => (
+    <li style={{ marginBottom: 4 }}>{children}</li>
+  );
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9000,
+      background: 'rgba(15,23,42,0.55)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20,
+    }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 14, maxWidth: 720, width: '100%',
+        maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+        boxShadow: '0 20px 60px rgba(15,23,42,0.35)', fontFamily: 'inherit',
+      }}>
+        <header style={{
+          padding: '16px 22px', borderBottom: '1px solid #e5e7eb',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          background: '#1e1b4b', color: 'white', borderRadius: '14px 14px 0 0',
+        }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
+              Cómo usar el Planificador de Abordaje
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
+              Tour rápido. Tocá cada sección para abrir el detalle.
+            </div>
+          </div>
+          <button onClick={onClose} style={{
+            background: 'rgba(255,255,255,0.12)', border: 'none', color: 'white',
+            padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
+            fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+          }}>Cerrar</button>
+        </header>
+
+        <div style={{ padding: '18px 22px', overflowY: 'auto', flex: 1 }}>
+
+          <Section id="arranque" title="1. Primer arranque · Vistas principales">
+            <p>La app tiene tres pestañas centrales en la barra de pestañas:</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li><strong>Lista de abordaje:</strong> tu pool de prospectos. Acá ves nombre, teléfono, referente, detalle, próximas gestiones y el estado actual.</Li>
+              <Li><strong>Tareas:</strong> tablero Kanban con columnas (Abordar / Pendiente / etc.) para organizar pendientes que no son una llamada formal pero querés tener anotados.</Li>
+              <Li><strong>Calendario:</strong> vista Mes / Semana / Hoy con todos los eventos (citas, tareas con fecha, agendas standalone).</Li>
+            </ul>
+            <p>La búsqueda global del header encuentra prospectos, tareas y agendas por nombre, teléfono o título.</p>
+          </Section>
+
+          <Section id="prospects" title="2. Crear y gestionar prospectos">
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Botón <strong>+ Nuevo prospect</strong> arriba a la derecha de la Lista: cargás nombre y datos de contacto. Solo el nombre es obligatorio.</Li>
+              <Li>Al hacer click en un prospect se abre un <strong>panel lateral</strong> con sus datos completos, historial de gestiones, observaciones y el botón para registrar una nueva gestión.</Li>
+              <Li>El campo <strong>Detalle</strong> es la descripción corta. El campo <strong>Observaciones</strong> es libre y largo: usalo para contexto de la conversación, recordatorios, etc.</Li>
+              <Li>Filtrá la lista por estado (chip de arriba) o por fecha de próximo contacto.</Li>
+            </ul>
+          </Section>
+
+          <Section id="etiquetas" title="3. Etiquetas de abordaje (gestiones)">
+            <p>Cada vez que tenés contacto con un prospect, le ponés una <strong>etiqueta</strong> que registra el resultado y mueve el prospect al estado correcto:</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li><strong>Agendado</strong> → genera una cita formal con fecha y hora. Aparece en el calendario en verde.</Li>
+              <Li><strong>Contestador / Mensaje sin respuesta</strong> → quedó pendiente, sin fecha específica.</Li>
+              <Li><strong>Llamar en 15 min / por la tarde / mañana</strong> → tarea auto-generada con fecha cercana. Aparece en el calendario en amarillo.</Li>
+              <Li><strong>Llamar semana próxima / Llamar dentro de…</strong> → programa una tarea más adelante en el tiempo.</Li>
+              <Li><strong>Fecha exacta</strong> → próximo intento con día concreto.</Li>
+              <Li><strong>Rechazado</strong> → cierra el prospect.</Li>
+            </ul>
+            <p>El historial completo de etiquetas se ve en el panel lateral del prospect.</p>
+          </Section>
+
+          <Section id="tareas" title="4. Tareas y columnas (Kanban)">
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Crear una tarea desde el botón <strong>+ Nueva tarea</strong> en cualquier columna.</Li>
+              <Li>Tareas pueden tener fecha y hora de recordatorio: si tienen, aparecen en el calendario.</Li>
+              <Li><strong>Mover entre columnas</strong> con drag &amp; drop. En mobile, mantené presionado el card por medio segundo y arrastrá.</Li>
+              <Li>Las etiquetas de prospect que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em>.</Li>
+              <Li>Las columnas se pueden crear, renombrar y reordenar. Las que tienen distintivo (Abordar) no se pueden borrar.</Li>
+            </ul>
+          </Section>
+
+          <Section id="calendario" title="5. Calendario y Google Calendar">
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Tres vistas: <strong>Mes</strong>, <strong>Semana</strong> y <strong>Hoy</strong>. El último elegido queda guardado al refrescar.</Li>
+              <Li><strong>Click sobre un slot vacío</strong> abre el chooser "Nueva agenda / Nueva tarea".</Li>
+              <Li><strong>Drag &amp; drop sobre eventos</strong> cambia la fecha/hora (en mobile, long-press para activar).</Li>
+              <Li>Eventos vencidos aparecen tenues. La línea horizontal roja marca la hora actual en vista Semana/Hoy.</Li>
+              <Li><strong>Click derecho sobre cualquier tarjeta del calendar</strong> abre la paleta para asignarle un color custom (8 colores). El color queda guardado y no toca tu Google Calendar.</Li>
+              <Li>Si activás Google Calendar en Ajustes, los eventos viajan en ambos sentidos: lo que cargás acá aparece en tu Google y viceversa.</Li>
+            </ul>
+          </Section>
+
+          <Section id="notificaciones" title="6. Notificaciones">
+            <p>La campanita del header lista los contactos y agendas vencidas o de hoy. Click sobre un ítem te lleva directo al prospect o tarea correspondiente.</p>
+            <p>El contador rojo marca cuántos items urgentes hay (vencidos + de hoy).</p>
+          </Section>
+
+          <Section id="asistente" title="7. Gestión con asistente">
+            <p>Si compartís tu cuenta con una asistente, podés asignarla en <strong>Ajustes → Usuarios → Es asistente de</strong>. Cuando ella entra al sistema, opera <strong>sobre tu workspace</strong>: ve tu lista de prospectos, tu Kanban y tu calendario, y todo lo que carga queda con tu agente_id.</p>
+            <p>Para que veas qué tocó ella:</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Cada vez que la asistente crea o edita algo, aparece una <strong>estrella ★ amarilla</strong> al lado de la tarjeta/evento.</Li>
+              <Li>Al hacer <strong>hover sobre la estrella</strong>, tooltip dice "Modificado por NOMBRE · DD/MM HH:MM".</Li>
+              <Li>Cuando vos editás esa misma cosa, la estrella desaparece (significa: ya lo tomaste).</Li>
+            </ul>
+            <p><strong>Google Calendar compartido:</strong> en <strong>Ajustes → Google Calendar</strong>, si tenés asistente asignada, aparece un toggle "Compartir mi Google Calendar con mi asistente". Si lo activás, ella ve y puede modificar todos los eventos de tu Google Calendar personal (no solo lo de Abordaje) cuando trabaja como tu asistente. Si lo apagás, solo ve lo que se carga desde Abordaje.</p>
+          </Section>
+
+          <Section id="ajustes" title="8. Ajustes personales">
+            <p>En <strong>Ajustes</strong> (engranaje del header) configurás:</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li><strong>Horario laboral:</strong> rango horario por defecto del calendario.</Li>
+              <Li><strong>Duración default de reunión:</strong> minutos que se usan al crear una cita sin especificar duración.</Li>
+              <Li><strong>Incluir fin de semana:</strong> en vista Semana, ON = 7 días, OFF = solo Lun–Vie.</Li>
+              <Li><strong>Google Calendar:</strong> activar/desvincular la sincronización con tu calendar.</Li>
+              <Li><strong>Cambiar contraseña</strong> y <strong>Cerrar sesión</strong> desde la barra superior.</Li>
+            </ul>
+          </Section>
+
+          <Section id="atajos" title="9. Atajos y recomendaciones">
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li><strong>Escape:</strong> cierra cualquier modal abierto.</Li>
+              <Li>La vista actual de cada panel queda guardada localmente. Si refrescás, volvés a donde estabas.</Li>
+              <Li>Buscador global: escribí ≥2 caracteres y filtra prospectos, tareas y agendas a la vez.</Li>
+              <Li>Cambiar de pestaña entre Lista / Tareas / Calendario refresca los datos automáticamente (útil si tu asistente cargó algo en paralelo).</Li>
+              <Li>En el calendar, click derecho cambia el color de la tarjeta; mover una agenda con drag actualiza la fecha y hora.</Li>
+            </ul>
+          </Section>
+
         </div>
       </div>
     </div>
@@ -8230,7 +8999,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) { setAgente(data); return; }
