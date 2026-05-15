@@ -2792,6 +2792,17 @@ const gcalApi = {
     });
     if (error) throw error;
     return data;
+  },
+  // Borra el refresh_token del caller y baja gcal_enabled en su profile.
+  // El delete directo a `user_google_tokens` desde el cliente falla silencioso
+  // porque la tabla tiene RLS sin policies (los tokens viven solo en
+  // service_role); por eso pasamos por la edge function.
+  async unlink() {
+    const { data, error } = await sb.functions.invoke('gcal-events', {
+      body: { op: 'unlink' }
+    });
+    if (error) throw error;
+    return data;
   }
 };
 
@@ -3579,7 +3590,7 @@ function MountInSlot({ slotId, children }) {
 // y handlers de click que llevan al lugar de acción correspondiente.
 const CATEGORIA_LABEL = { lista: 'Lista', tarea: 'Tarea', calendario: 'Calendario' };
 
-function buscarGlobal(state, query, max = 12) {
+function buscarGlobal(state, query, gcalSearchEvents = null, max = 12) {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
   const resultados = [];
@@ -3614,7 +3625,8 @@ function buscarGlobal(state, query, max = 12) {
       });
     }
   }
-  // Agendados (calendario)
+  // Agendados (calendario) — solo para users non-piloto. Los pilot users tienen
+  // sus eventos en Google y se buscan más abajo.
   for (const a of state.agendados || []) {
     const prospect = (state.prospectos || []).find(p => p.id === a.prospectoId);
     const haystack = [a.nota, prospect?.nombre].filter(Boolean).join(' ').toLowerCase();
@@ -3632,15 +3644,69 @@ function buscarGlobal(state, query, max = 12) {
     }
   }
 
+  // Eventos de Google Calendar (modo piloto) — buscamos en summary y
+  // description. Los gcalSearchEvents se cargan lazy desde BuscadorGlobal en un
+  // rango amplio (-3 a +12 meses).
+  if (Array.isArray(gcalSearchEvents)) {
+    const seenIds = new Set();
+    for (const ev of gcalSearchEvents) {
+      if (!ev || ev.status === 'cancelled' || seenIds.has(ev.id)) continue;
+      seenIds.add(ev.id);
+      const summary = ev.summary || '';
+      const description = ev.description || '';
+      const haystack = (summary + ' ' + description).toLowerCase();
+      if (!haystack.includes(q)) continue;
+      const startIso = ev.start?.dateTime || ev.start?.date;
+      if (!startIso) continue;
+      const fecha = new Date(startIso);
+      const fechaTxt = `${String(fecha.getDate()).padStart(2,'0')}/${String(fecha.getMonth()+1).padStart(2,'0')} ${String(fecha.getHours()).padStart(2,'0')}:${String(fecha.getMinutes()).padStart(2,'0')}`;
+      const ext = ev.extendedProperties?.private || {};
+      resultados.push({
+        key: 'g_' + ev.id,
+        categoria: 'calendario',
+        titulo: summary || '(sin título)',
+        sub: fechaTxt + (description ? ' · ' + description.slice(0, 60) : ''),
+        prospectoId: ext.abordaje_prospect_id || null,
+        tareaId: ext.abordaje_tarea_id || null,
+        googleEvent: ev,
+        sortScore: summary.toLowerCase().startsWith(q) ? 0 : 1,
+      });
+    }
+  }
+
   resultados.sort((x, y) => x.sortScore - y.sortScore || x.titulo.localeCompare(y.titulo));
   return resultados.slice(0, max);
 }
 
-function BuscadorGlobal({ state, onClickItem }) {
+function BuscadorGlobal({ state, isPilot, onClickItem }) {
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  // Cache de eventos de Google para búsqueda (rango amplio, lazy load).
+  // Se carga cuando el user escribe ≥2 chars; se mantiene hasta cerrar el
+  // dropdown o pasados 5 min. Solo aplica en modo piloto.
+  const [gcalSearchEvents, setGcalSearchEvents] = useState(null);
+  const gcalFetchAtRef = useRef(0);
   const wrapRef = useRef(null);
-  const items = useMemo(() => buscarGlobal(state, query), [state, query]);
+  const items = useMemo(
+    () => buscarGlobal(state, query, gcalSearchEvents),
+    [state, query, gcalSearchEvents]
+  );
+
+  // Cuando el user escribe ≥2 chars Y estamos en piloto, cargamos eventos de
+  // Google con rango amplio (-3 a +12 meses) una sola vez. Cache 5 min.
+  useEffect(() => {
+    if (!isPilot) return;
+    if (query.trim().length < 2) return;
+    const now = Date.now();
+    if (now - gcalFetchAtRef.current < 5 * 60 * 1000 && gcalSearchEvents) return;
+    let cancelled = false;
+    const timeMin = new Date(now - 90 * 24 * 3600 * 1000).toISOString();
+    const timeMax = new Date(now + 365 * 24 * 3600 * 1000).toISOString();
+    gcalApi.list(timeMin, timeMax)
+      .then(evts => { if (!cancelled) { setGcalSearchEvents(evts || []); gcalFetchAtRef.current = Date.now(); } })
+      .catch(err => console.warn('buscador gcal:', err?.message || err));
+    return () => { cancelled = true; };
+  }, [isPilot, query]);
 
   useEffect(() => {
     const onClick = (e) => {
@@ -3831,10 +3897,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [principalProfile, setPrincipalProfile] = useState(null);
   useEffect(() => {
     if (!isAssistant) { setPrincipalProfile(null); return; }
+    let cancelled = false;
     sb.from('profiles')
       .select('id, email, display_name, gcal_enabled, shares_calendar_with_assistant')
       .eq('id', agente.assistant_of_id).maybeSingle()
-      .then(({ data }) => setPrincipalProfile(data || null));
+      .then(({ data }) => { if (!cancelled) setPrincipalProfile(data || null); });
+    return () => { cancelled = true; };
   }, [isAssistant, agente?.assistant_of_id]);
 
   // Cache de actor_id → { display_name, email } para mostrar nombres en el
@@ -3844,12 +3912,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [actorMap, setActorMap] = useState({});
   useEffect(() => {
     if (!agente?.id) return;
+    let cancelled = false;
     sb.from('profiles').select('id, display_name, email').then(({ data }) => {
-      if (!data) return;
+      if (cancelled || !data) return;
       const map = {};
       for (const p of data) map[p.id] = { display_name: p.display_name, email: p.email };
       setActorMap(map);
     });
+    return () => { cancelled = true; };
   }, [agente?.id]);
   // Calendar usa Google como fuente cuando el agente lo activó desde Ajustes y
   // su email es del dominio Workspace. En viewAs admin no aplica.
@@ -3891,8 +3961,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   };
   const handleUnlinkOAuth = async () => {
     if (!agente?.id) return;
-    await sb.from('user_google_tokens').delete().eq('user_id', agente.id);
-    await sb.from('profiles').update({ gcal_enabled: false }).eq('id', agente.id);
+    // Pasamos por la edge function (service_role) porque user_google_tokens
+    // tiene RLS sin policies y un delete directo desde el cliente fallaba
+    // silencioso, dejando el refresh_token zombi.
+    await gcalApi.unlink();
     setAgente(a => a ? { ...a, gcal_enabled: false } : a);
     bumpGcal();
     showToast('Google Calendar desvinculado');
@@ -3917,11 +3989,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Detecta el retorno del flujo OAuth (querystring) y refresca el agente.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    let cancelled = false;
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
         sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
-          .then(({ data }) => { if (data) setAgente(data); bumpGcal(); });
+          .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
       url.searchParams.delete('gcal_linked');
@@ -3933,6 +4006,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       url.searchParams.delete('gcal_error');
       window.history.replaceState({}, '', url.toString());
     }
+    return () => { cancelled = true; };
   }, [user?.id]);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
@@ -4763,9 +4837,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Rules of Hooks (un useCallback debe llamarse siempre en el mismo orden).
   const handleNavToItem = useCallback((it) => {
     if (it.categoria === 'tarea' || it.tipo === 'tarea') {
-      const t = state.tareas.items.find(x => x.id === it.tareaId);
-      if (t) setTareaEditando(t);
+      // Si la tarea viene de Google search puede no estar en state local todavía
+      // (ej. dentro de rango por cargar); intentamos por id local primero.
+      if (it.tareaId) {
+        const t = state.tareas.items.find(x => x.id === it.tareaId);
+        if (t) { setTareaEditando(t); return; }
+      }
+      // Fallback: si es un resultado de Google con tareaId pero la tarea no
+      // está en cache, saltamos al calendario para que el user la ubique.
+      setView('calendario');
     } else if (it.categoria === 'calendario' || it.tipo === 'agendado') {
+      // Prioridad: si el resultado trae googleEvent (búsqueda en Google),
+      // abrir directamente el modal de edición de agenda con ese evento.
+      if (it.googleEvent) { setAgendaEditando({ googleEvent: it.googleEvent }); return; }
       if (it.prospectoId) setSelectedId(it.prospectoId);
       else setView('calendario');
     } else if (it.categoria === 'lista' && it.prospectoId) {
@@ -4807,7 +4891,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           title="Cómo usar Abordaje">Instrucciones</button>
       </MountInSlot>
       <MountInSlot slotId="headerSearch">
-        <BuscadorGlobal state={state} onClickItem={handleNavToItem} />
+        <BuscadorGlobal state={state} isPilot={isPilot} onClickItem={handleNavToItem} />
       </MountInSlot>
       {showInstrucciones && (
         <InstruccionesModal onClose={() => setShowInstrucciones(false)} />
@@ -7176,10 +7260,12 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
   const [assistants, setAssistants] = useState([]);
   useEffect(() => {
     if (!agente?.id) { setAssistants([]); return; }
+    let cancelled = false;
     sb.from('profiles')
       .select('id, email, display_name')
       .eq('assistant_of_id', agente.id)
-      .then(({ data }) => setAssistants(data || []));
+      .then(({ data }) => { if (!cancelled) setAssistants(data || []); });
+    return () => { cancelled = true; };
   }, [agente?.id]);
   const hasAssistant = assistants.length > 0;
   const shareEnabled = !!agente?.shares_calendar_with_assistant;
