@@ -20,6 +20,7 @@
     --texto-suave: #5a5a7a;
     --borde: #e2e4ef;
     --header-h: 78px;
+    --app-max-w: 1520px;
 
     /* Estados de prospecto (paleta para Parte 2) */
     --estado-nuevo: #9ca3af;
@@ -45,8 +46,8 @@
     /* El padding lateral matchea el max-width 1520 + padding 22 del .main,
        así los botones (Salir a la derecha) nunca pasan el borde del
        "+ Nuevo prospect" del contenido. Background sigue edge-to-edge. */
-    padding-left: max(24px, calc((100vw - 1520px) / 2 + 22px));
-    padding-right: max(24px, calc((100vw - 1520px) / 2 + 22px));
+    padding-left: max(24px, calc((100vw - var(--app-max-w)) / 2 + 22px));
+    padding-right: max(24px, calc((100vw - var(--app-max-w)) / 2 + 22px));
     z-index: 100;
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
   }
@@ -83,7 +84,7 @@
   .main {
     margin-top: var(--header-h);
     padding: 10px 22px 0;
-    max-width: 1520px;
+    max-width: var(--app-max-w);
     margin-left: auto;
     margin-right: auto;
   }
@@ -2471,12 +2472,21 @@ const storage = {
     const agenteId = targetAgenteId || effective || user.id;
     const viendoAOtro = !!targetAgenteId && targetAgenteId !== user.id;
 
+    // Columnas explícitas (no select('*')): consumimos menos ancho de banda y
+    // documentamos qué necesita cada mapper. Si se agrega una columna nueva al
+    // schema y se quiere visible en el frontend, actualizar el select aquí.
+    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, created_at, updated_at';
+    const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
+    const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, created_at, updated_at';
+    const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
+
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
-      sb.from('abordaje_prospectos').select('*').eq('agente_id', agenteId).order('created_at', { ascending: false }),
-      sb.from('abordaje_prospecto_contactos').select('*').eq('agente_id', agenteId).order('created_at'),
-      sb.from('abordaje_tareas_columnas').select('*').eq('agente_id', agenteId).order('orden'),
-      sb.from('abordaje_tareas').select('*').eq('agente_id', agenteId).order('created_at'),
-      sb.from('abordaje_agendados').select('*').eq('agente_id', agenteId).order('fecha'),
+      sb.from('abordaje_prospectos').select(PROSPECTO_COLS).eq('agente_id', agenteId).order('created_at', { ascending: false }),
+      sb.from('abordaje_prospecto_contactos').select(CONTACTO_COLS).eq('agente_id', agenteId).order('created_at'),
+      sb.from('abordaje_tareas_columnas').select(COLUMNA_COLS).eq('agente_id', agenteId).order('orden'),
+      sb.from('abordaje_tareas').select(TAREA_COLS).eq('agente_id', agenteId).order('created_at'),
+      sb.from('abordaje_agendados').select(AGENDADO_COLS).eq('agente_id', agenteId).order('fecha'),
       sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId)
     ]);
 
@@ -3730,6 +3740,7 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
       <input
         className="buscador-input"
         type="search"
+        aria-label="Buscar prospectos, tareas y eventos"
         placeholder="Buscar prospecto, tarea, cita…"
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true); }}
@@ -3908,21 +3919,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [isAssistant, agente?.assistant_of_id]);
 
   // Cache de actor_id → { display_name, email } para mostrar nombres en el
-  // tooltip de la estrella. RLS limita las filas visibles: el principal ve
-  // todos sus asistentes, el asistente ve a su principal y a sí mismo. Para
-  // admins, ve todos los profiles.
+  // tooltip de la estrella. Carga lazy: solo fetch los profiles que aparecen
+  // como actor_id en el state actual y no están ya en el map. Evita traer
+  // todos los profiles (que para admin pueden ser muchos) cuando solo
+  // necesitamos los que efectivamente actuaron sobre las entidades visibles.
   const [actorMap, setActorMap] = useState({});
-  useEffect(() => {
-    if (!agente?.id) return;
-    let cancelled = false;
-    sb.from('profiles').select('id, display_name, email').then(({ data }) => {
-      if (cancelled || !data) return;
-      const map = {};
-      for (const p of data) map[p.id] = { display_name: p.display_name, email: p.email };
-      setActorMap(map);
-    });
-    return () => { cancelled = true; };
-  }, [agente?.id]);
   // `isPilot` = true cuando el calendar usa Google como fuente de verdad.
   // Originalmente era flag exclusivo de nortiz@ifs-broker.com durante el
   // piloto de Fase 1; hoy es simplemente "user con gcal_enabled=true". El
@@ -4015,6 +4016,35 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [user?.id]);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
+
+  // Carga lazy del actorMap: trae solo los profiles cuyo id aparece como
+  // actor_id en alguna entidad del state cargado y todavía no está en el
+  // cache. Reduce el fetch original "trae todos los profiles" a "trae solo
+  // los que realmente vamos a mostrar".
+  useEffect(() => {
+    if (!agente?.id) return;
+    const ids = new Set();
+    ids.add(agente.id);
+    if (agente.assistant_of_id) ids.add(agente.assistant_of_id);
+    for (const p of state.prospectos || []) {
+      if (p.actorId) ids.add(p.actorId);
+      for (const c of p.contactos || []) if (c.actorId) ids.add(c.actorId);
+    }
+    for (const t of state.tareas?.items || []) if (t.actorId) ids.add(t.actorId);
+    for (const a of state.agendados || []) if (a.actorId) ids.add(a.actorId);
+    const missing = [...ids].filter(id => id && !actorMap[id]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    sb.from('profiles').select('id, display_name, email').in('id', missing).then(({ data }) => {
+      if (cancelled || !data) return;
+      setActorMap(m => {
+        const next = { ...m };
+        for (const p of data) next[p.id] = { display_name: p.display_name, email: p.email };
+        return next;
+      });
+    });
+    return () => { cancelled = true; };
+  }, [agente?.id, agente?.assistant_of_id, state.prospectos, state.tareas, state.agendados, actorMap]);
 
   // Override de colores para eventos del calendar (click derecho sobre tarjeta).
   // Si setColor recibe null/'' borra el override (vuelve al color automático).
@@ -5839,10 +5869,10 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <form className="modal" role="dialog" aria-modal="true"
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="nuevo-prospect-title"
         onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <div className="modal-header">
-          <h3>Nuevo prospecto</h3>
+          <h3 id="nuevo-prospect-title">Nuevo prospecto</h3>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -7866,10 +7896,11 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
   const esAdmin = agente?.role === 'admin';
   return (
     <div style={adminOverlayStyle} onClick={onCancel}>
-      <div style={adminModalStyle} onClick={e => e.stopPropagation()}>
+      <div style={adminModalStyle} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <header style={adminHeaderStyle}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
+            <div id="settings-title" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
               Ajustes
             </div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>
@@ -8284,10 +8315,10 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <form className="modal" role="dialog" aria-modal="true"
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="tarea-modal-title"
         onSubmit={(e) => { e.preventDefault(); if (!readOnly) guardar(); }}>
         <div className="modal-header">
-          <h3>{readOnly ? 'Detalle de tarea' : 'Editar tarea'}</h3>
+          <h3 id="tarea-modal-title">{readOnly ? 'Detalle de tarea' : 'Editar tarea'}</h3>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -8376,9 +8407,9 @@ function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true">
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="convertir-tarea-title">
         <div className="modal-header">
-          <h3>Convertir tarea a prospect</h3>
+          <h3 id="convertir-tarea-title">Convertir tarea a prospect</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -8471,7 +8502,9 @@ function InstruccionesModal({ onClose }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       padding: 20,
     }} onClick={onClose}>
-      <div onClick={e => e.stopPropagation()} style={{
+      <div onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby="instrucciones-title"
+        style={{
         background: '#fff', borderRadius: 14, maxWidth: 720, width: '100%',
         maxHeight: '85vh', display: 'flex', flexDirection: 'column',
         boxShadow: '0 20px 60px rgba(15,23,42,0.35)', fontFamily: 'inherit',
@@ -8482,7 +8515,7 @@ function InstruccionesModal({ onClose }) {
           background: '#1e1b4b', color: 'white', borderRadius: '14px 14px 0 0',
         }}>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
+            <div id="instrucciones-title" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
               Cómo usar el Planificador de Abordaje
             </div>
             <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.7)', marginTop: 2 }}>
@@ -8627,9 +8660,9 @@ function ChangePasswordModal({ displayName, onClose }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="change-password-title" onSubmit={submit}>
         <div className="modal-header">
-          <h3>Cambiar contraseña</h3>
+          <h3 id="change-password-title">Cambiar contraseña</h3>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -8683,9 +8716,9 @@ function SlotChooserModal({ slot, onCancel, onAgenda, onTarea }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 420 }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="slot-chooser-title" style={{ maxWidth: 420 }}>
         <div className="modal-header">
-          <h3>Crear evento</h3>
+          <h3 id="slot-chooser-title">Crear evento</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -8758,9 +8791,9 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit} style={{ maxWidth: 460 }}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="edit-agenda-title" onSubmit={submit} style={{ maxWidth: 460 }}>
         <div className="modal-header">
-          <h3>{readOnly ? 'Detalle de agenda' : 'Editar agenda'}</h3>
+          <h3 id="edit-agenda-title">{readOnly ? 'Detalle de agenda' : 'Editar agenda'}</h3>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -8840,9 +8873,9 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <form className="modal" role="dialog" aria-modal="true" onSubmit={submit} style={{ maxWidth: 460 }}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="nueva-agenda-title" onSubmit={submit} style={{ maxWidth: 460 }}>
         <div className="modal-header">
-          <h3>Nueva agenda</h3>
+          <h3 id="nueva-agenda-title">Nueva agenda</h3>
           <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
