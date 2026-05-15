@@ -74,16 +74,28 @@ Todas (excepto `user_google_tokens`) tienen RLS con policies
 agente/admin/asistente.
 
 ## Pendientes (auditoría — backlog)
-**BAJA prioridad**:
-- Accesibilidad: modales sin `role="dialog"`, inputs sin labels asociados.
-- Constantes mágicas duplicadas (`max-width: 1520px` en CSS, `MEGAADMIN_EMAIL`
-  en frontend y edge function).
-- `loadState` trae `select('*')` en cada cambio de tab.
-- `actorMap` carga todos los profiles en cada login.
-- `App` component con 1197 líneas, candidato a partir en custom hooks.
-- `UsuariosSection` con 385 líneas.
+**Resuelto en sesión 2026-05-15** (ver CHANGELOG.md):
+- ✓ 5 críticos (escalada `assistant_of_id`, unlink gcal vía edge, useEffect
+  guards, índices + FKs, admin-auth compartido en edge functions).
+- ✓ Media de seguridad: `admin_full_access` sin DELETE.
+- ✓ 4 bajas: constantes mágicas (`--app-max-w`), accesibilidad en modales
+  (role/aria-modal/aria-labelledby), `loadState` con select explícito,
+  `actorMap` lazy load.
 
-**No urgente**:
+**Backlog BAJA prioridad** (refactors sin cambio funcional, no urgentes):
+- `App` component con ~1200 líneas: split candidato en custom hooks
+  `useGcalSync`, `useAssistantContext`, `useAbordajeHandlers`. Abordar
+  cuando al modificar `App` se sienta incómodo el tamaño.
+- `UsuariosSection` ~385 líneas: split candidato en `UsuariosTable` +
+  `NuevoUsuarioForm` + `UsuarioRow`. Idem.
+- Labels en inputs de forms (40 inputs con `<label>Texto</label><input/>`
+  adyacente; cambiar a label envolvente o agregar htmlFor+id).
+- `MEGAADMIN_EMAIL` duplicado entre frontend (`index.html`) y edge function
+  (`delete-user`). Mover a variable de entorno o tabla `app_settings`.
+- `GCAL_TZ` hardcodeado a Buenos Aires (cuando IFS opere internacional,
+  extraer a setting por user).
+
+**No urgente / descartado**:
 - Comentarios de autoría dentro de observaciones (texto plano → tabla de
   comentarios con autor/timestamp). Fase 3D conceptual.
 - Managers/niveles jerárquicos. Descartado por riesgo de filtración RLS.

@@ -577,3 +577,49 @@ críticos + el de seguridad MEDIA. Resto en backlog (ver `STATE.md`).
   dificultaba leer "qué está vigente" para alguien nuevo.
 - `supabase/README.md` con overview del schema, edge functions y
   policies clave.
+
+---
+
+# Auditoría — Bajas resueltas (2026-05-15, misma sesión)
+
+Continuación de la auditoría con los pendientes de BAJA prioridad que
+agregaban deuda menor pero acumulable. Se resolvieron 4 de 6; las 2
+restantes (splits de `App` y `UsuariosSection`) se dejan en backlog
+como refactors sin cambio funcional.
+
+## Frontend
+- **Constantes mágicas**: `max-width: 1520px` se repetía en 3 lugares
+  del CSS (`.main` y los dos paddings dinámicos del `.header`). Extraído
+  a la variable CSS `--app-max-w` en `:root`.
+- **Accesibilidad de modales**: agregados `role="dialog"` +
+  `aria-modal="true"` + `aria-labelledby` apuntando al título a los 9
+  modales del proyecto: `InstruccionesModal`, `SettingsModal`,
+  `TareaModal`, `NuevoProspectoModal`, `ConvertirTareaModal`,
+  `ChangePasswordModal`, `SlotChooserModal`, `EditAgendaModal`,
+  `NuevaAgendaModal`. El input del buscador también recibió `aria-label`.
+- **`loadState` con select explícito**: reemplazado `select('*')` en las
+  5 tablas (`abordaje_prospectos`, `_prospecto_contactos`,
+  `_tareas_columnas`, `_tareas`, `_agendados`) por listas explícitas de
+  columnas declaradas en constantes locales (`PROSPECTO_COLS`,
+  `CONTACTO_COLS`, etc.). Ahorra ancho de banda y documenta qué consume
+  cada mapper.
+- **`actorMap` lazy**: antes traía todos los profiles visibles via RLS
+  en cada login. Ahora trae solo los profiles cuyo id aparece como
+  `actor_id` en alguna entidad del state cargado y no está todavía en
+  el cache. Refetch incremental cuando aparece un actor nuevo (ej. la
+  asistente carga algo mientras vos navegás).
+
+## Backlog explícito (no abordado)
+- Split del `App` component (1197 líneas) en custom hooks
+  `useGcalSync`, `useAssistantContext`, `useAbordajeHandlers`.
+  Refactor sin cambio funcional, riesgo de romper cosas sutiles
+  (closures, deps de useEffect). Mejor abordar en sesión dedicada
+  cuando al modificar `App` se sienta incómodo el tamaño.
+- Split de `UsuariosSection` (385 líneas) en `UsuariosTable` +
+  `NuevoUsuarioForm` + `UsuarioRow`. Idem.
+
+## Cierre de auditoría
+Resueltos los 5 críticos + 1 media de seguridad + 4 bajas. Quedan 2 bajas
+estructurales en backlog (splits sin cambio funcional) y 2 pendientes
+históricos sin urgencia (comentarios de autoría dentro de observaciones,
+managers/jerarquías). El proyecto está estable, seguro y documentado.
