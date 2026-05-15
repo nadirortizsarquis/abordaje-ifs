@@ -2095,6 +2095,24 @@
     flex-shrink: 0;
     margin-top: 1px;
   }
+  .bell-item-dismiss {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s, color 0.15s;
+    flex-shrink: 0;
+    margin-top: -2px;
+  }
+  .bell-item:hover .bell-item-dismiss { opacity: 1; }
+  .bell-item-dismiss:hover { background: #fef2f2; color: #dc2626; }
+  .bell-item-dismiss svg { width: 14px; height: 14px; }
   /* Scroll interno cuando muchos items */
   .bell-group:not(:first-of-type) { overflow-y: visible; }
   .bell-dropdown { overflow-y: auto; }
@@ -3782,15 +3800,23 @@ function clasificarUrgenciaNotif(fecha, now, en24h) {
   return 'semana';
 }
 
-function calcularNotificaciones(state) {
+// `dismissed` es un map { itemKey: 'YYYY-MM-DD' } con notificaciones dismisseadas
+// hoy. Al cambiar de día, los dismisses caducan y la notificación reaparece si
+// el evento sigue pendiente.
+function calcularNotificaciones(state, isPilot = false, dismissed = {}) {
   const now = new Date();
   const en24h = new Date(now.getTime() + 24 * 3600 * 1000);
   const en7d = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
+  const todayKey = `${now.getFullYear()}-${pad2(now.getMonth()+1)}-${pad2(now.getDate())}`;
 
   const items = [];
 
-  // Agendados (citas formales — eventos azules en calendario)
-  for (const a of state.agendados || []) {
+  // Agendados (citas formales — eventos azules en calendario).
+  // En piloto la fuente canónica son los eventos de Google Calendar; los rows
+  // que sobrevivan en abordaje_agendados son stale/huérfanos y no deben leakear
+  // a notificaciones (el calendar tampoco los muestra en piloto).
+  const skipAgendadosDB = isPilot;
+  for (const a of (skipAgendadosDB ? [] : (state.agendados || []))) {
     const fecha = new Date(a.fecha);
     if (fecha > en7d) continue;
     const prospect = state.prospectos.find(p => p.id === a.prospectoId);
@@ -3825,7 +3851,7 @@ function calcularNotificaciones(state) {
   }
 
   items.sort((a, b) => a.fecha - b.fecha);
-  return items;
+  return items.filter(it => dismissed[it.key] !== todayKey);
 }
 
 const URGENCIA_META = {
@@ -3835,7 +3861,7 @@ const URGENCIA_META = {
   semana:  { label: 'Esta semana',      color: '#1e40af', bg: '#eff6ff', emoji: '🔵' },
 };
 
-function NotificacionesDropdown({ items, onClose, onClickItem }) {
+function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
   // Agrupar por urgencia
   const grupos = ['vencido', 'hoy', '24h', 'semana']
     .map(u => ({ urgencia: u, items: items.filter(i => i.urgencia === u) }))
@@ -3890,6 +3916,22 @@ function NotificacionesDropdown({ items, onClose, onClickItem }) {
                     {it.detalle && <div className="bell-item-detalle">{it.detalle}</div>}
                   </div>
                   <div className="bell-item-fecha">{fechaStr}</div>
+                  {onDismiss && (
+                    <button
+                      type="button"
+                      className="bell-item-dismiss"
+                      title="Marcar como vista (reaparece mañana si sigue pendiente)"
+                      aria-label="Marcar notificación como vista"
+                      onClick={(e) => { e.stopPropagation(); onDismiss(it.key); }}
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path>
+                        <path d="M10 11v6M14 11v6"></path>
+                        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"></path>
+                      </svg>
+                    </button>
+                  )}
                 </div>
               );
             })}
@@ -4091,7 +4133,35 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     return () => clearInterval(id);
   }, []);
 
-  const notificaciones = useMemo(() => calcularNotificaciones(state), [state, tick]);
+  // Notificaciones dismisseadas hoy — persistido en localStorage por user.
+  // Map { itemKey: 'YYYY-MM-DD' }. Al cambiar de día, los dismisses caducan y
+  // la notificación reaparece si el evento sigue pendiente.
+  const NOTIF_DISMISS_KEY = `abordaje_notif_dismissed_${user?.id || 'anon'}`;
+  const [notifDismissed, setNotifDismissed] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(NOTIF_DISMISS_KEY) || '{}');
+      const d = new Date();
+      const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+      // Housekeeping: descartar entries de días anteriores.
+      const cleaned = {};
+      for (const k in raw) if (raw[k] === today) cleaned[k] = raw[k];
+      return cleaned;
+    } catch { return {}; }
+  });
+  const dismissNotif = useCallback((itemKey) => {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    setNotifDismissed(prev => {
+      const next = { ...prev, [itemKey]: today };
+      try { localStorage.setItem(NOTIF_DISMISS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [NOTIF_DISMISS_KEY]);
+
+  const notificaciones = useMemo(
+    () => calcularNotificaciones(state, isPilot, notifDismissed),
+    [state, tick, isPilot, notifDismissed]
+  );
   const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
@@ -4200,10 +4270,37 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const handleDelete = async (id) => {
     if (guardReadOnly()) return;
     if (!confirm('¿Eliminar este prospecto? No se puede deshacer.')) return;
+
+    // En piloto, limpiar el calendar de Google antes de borrar el prospect
+    // para que no queden eventos huérfanos con abordaje_prospect_id stale
+    // (el cascade de Supabase no toca Google).
+    if (isPilot) {
+      try {
+        const past = new Date(); past.setFullYear(past.getFullYear() - 2);
+        const future = new Date(); future.setFullYear(future.getFullYear() + 5);
+        const evts = await gcalApi.list(past.toISOString(), future.toISOString());
+        for (const ev of (evts || [])) {
+          if (ev.extendedProperties?.private?.abordaje_prospect_id === id) {
+            try { await gcalApi.delete(ev.id); }
+            catch (e) { console.warn('gcal del prospect orphan:', e); }
+          }
+        }
+      } catch (e) { console.warn('gcal list al borrar prospect:', e); }
+
+      const tareasAuto = (state.tareas?.items || []).filter(t => t.prospectoId === id);
+      for (const t of tareasAuto) {
+        if (t.googleEventId) {
+          try { await gcalApi.delete(t.googleEventId); }
+          catch (e) { console.warn('gcal del tarea auto:', e); }
+        }
+      }
+    }
+
     const prev = state.prospectos;
     setState(s => ({ ...s, prospectos: s.prospectos.filter(p => p.id !== id) }));
     try {
       await storage.deleteProspecto(id);
+      if (isPilot) bumpGcal();
       setSelectedId(null);
       showToast('Prospecto eliminado');
     } catch (e) {
@@ -4936,6 +5033,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           items={notificaciones}
           onClose={() => setBellOpen(false)}
           onClickItem={(it) => { setBellOpen(false); handleNavToItem(it); }}
+          onDismiss={dismissNotif}
         />
       )}
       {viewAs && (
