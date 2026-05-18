@@ -2309,12 +2309,65 @@
     .header-admin-badge { font-size: 0.58rem; padding: 1px 5px; }
 
     .main { padding: 20px 16px; }
-    table.prospectos { font-size: 0.8rem; }
-    table.prospectos td, table.prospectos th { padding: 10px 8px; }
-    /* Tabla de prospectos con scroll horizontal — preserva todas las columnas
-       y deja al user deslizar para ver lo que no entra. */
-    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    table.prospectos { min-width: 720px; }
+    /* En mobile, la tabla de prospectos se convierte en lista de cards
+       verticales: cada fila ocupa el ancho completo, sin scroll horizontal,
+       y los datos se apilan dentro de la card. Esto reemplaza el approach
+       anterior de "scroll horizontal con min-width: 720px" que dejaba
+       cortadas las columnas y desorientaba al user. */
+    .table-wrap { overflow-x: visible; }
+    table.prospectos,
+    table.prospectos thead,
+    table.prospectos tbody,
+    table.prospectos tr,
+    table.prospectos td {
+      display: block;
+      width: 100%;
+    }
+    table.prospectos {
+      table-layout: auto;
+      min-width: 0;
+      font-size: 0.85rem;
+      background: transparent;
+      box-shadow: none;
+      border: none;
+    }
+    table.prospectos colgroup { display: none; }
+    table.prospectos thead { display: none; }
+    table.prospectos tbody tr {
+      background: var(--bg-card);
+      border: 1px solid var(--borde);
+      border-radius: 12px;
+      margin-bottom: 10px;
+      padding: 12px 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+    }
+    /* Tints en mobile mantienen el color pero con borde lateral grueso */
+    table.prospectos tbody tr.tint-pendiente   { border-left: 4px solid #f59e0b; }
+    table.prospectos tbody tr.tint-programado  { border-left: 4px solid #fb923c; }
+    table.prospectos tbody tr.tint-agendado    { border-left: 4px solid #10b981; }
+    table.prospectos tbody tr.tint-rechazado   { border-left: 4px solid #ef4444; opacity: 0.82; }
+    table.prospectos tbody tr.tint-futuro-lejos { border-left: 4px solid #94a3b8; }
+    table.prospectos td {
+      padding: 3px 0;
+      border: none;
+      max-width: 100%;
+    }
+    table.prospectos td.col-nombre { font-size: 0.95rem; margin-bottom: 4px; }
+    table.prospectos td.col-telefono { color: var(--texto-suave); font-size: 0.78rem; }
+    table.prospectos td.col-detalle {
+      max-width: 100%;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      color: var(--texto-suave);
+      font-size: 0.78rem;
+    }
+    table.prospectos td.col-referente,
+    table.prospectos td.col-pref { display: none; }
+    /* La timeline-cell en mobile aprovecha todo el ancho de la card. */
+    .timeline-cell { min-width: 0; }
+    .timeline-row { flex-wrap: wrap; row-gap: 2px; }
+    .timeline-obs { white-space: normal; }
     .field-row, .field-inline-row { grid-template-columns: 1fr; }
     .tipos-grid { grid-template-columns: 1fr 1fr; }
     .panel-side { max-width: 100%; }
@@ -3164,7 +3217,10 @@ function formatFechaCorta(iso) {
   if (diff === 0) return 'hoy';
   if (diff === -1) return 'ayer';
   if (diff === 1) return 'mañana';
-  return `${d.getDate()}/${MESES_CORTOS[d.getMonth()]}`;
+  // DD/MM/AA — formato consistente en toda la app (lista de abordaje, timeline,
+  // bitácora, notifs, buscador). Es 1 char más largo que "DD/mes" pero no
+  // depende de localización ni tiene ambigüedad de mes.
+  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
 }
 
 function formatFechaHora(iso) {
@@ -3218,12 +3274,12 @@ function parseHoraFlex(input) {
   return { h, m };
 }
 
-function dateToDDMMYYYY(d) {
-  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+function dateToDDMMYY(d) {
+  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
 }
-function isoToDDMMYYYY(iso) {
+function isoToDDMMYY(iso) {
   if (!iso) return '';
-  return dateToDDMMYYYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
+  return dateToDDMMYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
 }
 function dateToYMD(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
@@ -3337,11 +3393,11 @@ function showToast(msg, opts = {}) {
 // ── INPUTS DE TEXTO TOLERANTES ─────────────────────────────────
 function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aa' }) {
   // valueIso es "yyyy-mm-dd" (date input) o ISO completo o ''
-  const [text, setText] = useState(() => valueIso ? isoToDDMMYYYY(valueIso) : '');
+  const [text, setText] = useState(() => valueIso ? isoToDDMMYY(valueIso) : '');
   const [valido, setValido] = useState(true);
 
   useEffect(() => {
-    setText(valueIso ? isoToDDMMYYYY(valueIso) : '');
+    setText(valueIso ? isoToDDMMYY(valueIso) : '');
     setValido(true);
   }, [valueIso]);
 
@@ -3349,7 +3405,7 @@ function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aa' }) {
     if (!text.trim()) { onChange(''); setValido(true); return; }
     const d = parseFechaFlex(text);
     if (d) {
-      setText(dateToDDMMYYYY(d));
+      setText(dateToDDMMYY(d));
       onChange(dateToYMD(d));
       setValido(true);
     } else {
@@ -3832,8 +3888,7 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
     const prospect = (state.prospectos || []).find(p => p.id === a.prospectoId);
     const haystack = [a.nota, prospect?.nombre].filter(Boolean).join(' ').toLowerCase();
     if (haystack.includes(q)) {
-      const fecha = new Date(a.fecha);
-      const fechaTxt = `${String(fecha.getDate()).padStart(2,'0')}/${String(fecha.getMonth()+1).padStart(2,'0')} ${String(fecha.getHours()).padStart(2,'0')}:${String(fecha.getMinutes()).padStart(2,'0')}`;
+      const fechaTxt = formatFechaHora(a.fecha);
       resultados.push({
         key: 'a_' + a.id,
         categoria: 'calendario',
@@ -3859,8 +3914,7 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
       if (!haystack.includes(q)) continue;
       const startIso = ev.start?.dateTime || ev.start?.date;
       if (!startIso) continue;
-      const fecha = new Date(startIso);
-      const fechaTxt = `${String(fecha.getDate()).padStart(2,'0')}/${String(fecha.getMonth()+1).padStart(2,'0')} ${String(fecha.getHours()).padStart(2,'0')}:${String(fecha.getMinutes()).padStart(2,'0')}`;
+      const fechaTxt = formatFechaHora(startIso);
       const ext = ev.extendedProperties?.private || {};
       resultados.push({
         key: 'g_' + ev.id,
@@ -4111,7 +4165,7 @@ function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
               const hoy = isToday(dt);
               const fechaStr = hoy
                 ? `${hh}:${mm}`
-                : `${String(dt.getDate()).padStart(2,'0')}/${String(dt.getMonth()+1).padStart(2,'0')} ${hh}:${mm}`;
+                : `${dateToDDMMYY(dt)} ${hh}:${mm}`;
               const catLabel = it.tipo === 'agendado' ? 'Calendario' : 'Tarea';
               return (
                 <div key={it.key} className="bell-item" onClick={() => onClickItem(it)}>
@@ -4756,6 +4810,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // En piloto: además crea evento en Google con abordaje_tarea_id en extendedProps.
   const handleCreateTareaEnSlot = async (slot) => {
     if (guardReadOnly()) return;
+    // Cerramos el chooser ANTES de la llamada async para evitar que un
+    // segundo tap (involuntario, sobre todo en mobile) dispare una segunda
+    // creación → tarea+evento duplicado en el calendario.
+    setSlotPicker(null);
     const cols = state.tareas?.columnas || [];
     const colDest = cols.find(c => c.slug === 'abordar') || cols[0];
     if (!colDest) { showToast('No hay columnas de tareas'); return; }
@@ -4787,7 +4845,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         ...s,
         tareas: { ...s.tareas, items: [...s.tareas.items, tarea] }
       }));
-      setSlotPicker(null);
       setTareaEditando(tarea);
       if (isPilot) bumpGcal();
     } catch (e) { handleErr(e, 'createTarea'); }
@@ -8723,7 +8780,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     const txt = nuevaEntrada.trim();
     if (!txt) return form.observacion;
     const d = new Date();
-    const stamp = `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    const stamp = `${dateToDDMMYY(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
     const entrada = `[${stamp}] ${txt}`;
     return form.observacion ? `${entrada}\n\n${form.observacion}` : entrada;
   };
