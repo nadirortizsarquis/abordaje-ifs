@@ -190,6 +190,10 @@
     width: 100%;
     border-collapse: collapse;
     font-size: 0.8rem;
+    /* table-layout: fixed hace que las columnas respeten los <col> widths del
+       colgroup y que el contenido largo (ej: observaciones de timeline) no
+       expanda la celda hacia afuera, dejando sin pantalla las últimas cols. */
+    table-layout: fixed;
   }
   table.prospectos thead {
     background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul) 100%);
@@ -329,6 +333,47 @@
     padding: 16px 28px;
     border-top: 1px solid var(--borde);
     display: flex; justify-content: flex-end; gap: 10px;
+    flex-wrap: wrap;
+  }
+  .modal-footer > div { flex-wrap: wrap; }
+
+  /* ── BOTONES RÁPIDOS DE FECHA (TareaModal) ── */
+  .quick-date-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: var(--texto-suave);
+    margin: 0 0 6px;
+  }
+  .quick-date-row {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 14px;
+  }
+  .btn-quick-date {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 9px 6px;
+    border: 1px solid var(--azul);
+    background: rgba(0,152,218,0.06);
+    color: var(--azul-oscuro);
+    border-radius: 8px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    text-align: center;
+    line-height: 1.2;
+  }
+  .btn-quick-date:hover { background: rgba(0,152,218,0.16); }
+  .btn-quick-date:active { transform: translateY(1px); }
+  .btn-quick-date small {
+    display: block;
+    font-weight: 400;
+    font-size: 0.66rem;
+    color: var(--texto-suave);
+    margin-top: 3px;
   }
 
   /* ── CALLOUT (info contextual en modales) ── */
@@ -718,7 +763,7 @@
   /* ── TIMELINE CELL (col Último contacto / Observación) ── */
   .timeline-cell {
     display: flex; flex-direction: column; gap: 0;
-    min-width: 260px;
+    min-width: 0;
   }
   .timeline-row {
     display: flex; align-items: center; gap: 7px;
@@ -790,6 +835,9 @@
   table.prospectos tbody tr.tint-agendado:hover { background: rgba(16, 185, 129, 0.12); }
   table.prospectos tbody tr.tint-rechazado   { background: rgba(239, 68, 68, 0.05); opacity: 0.82; }
   table.prospectos tbody tr.tint-rechazado:hover { background: rgba(239, 68, 68, 0.10); }
+  /* Etiqueta con próximo contacto > 3 meses: no es urgente, pintamos gris. */
+  table.prospectos tbody tr.tint-futuro-lejos      { background: rgba(148, 163, 184, 0.10); }
+  table.prospectos tbody tr.tint-futuro-lejos:hover { background: rgba(148, 163, 184, 0.18); }
 
   /* ── PANEL LATERAL ── */
   .panel-backdrop {
@@ -1068,7 +1116,7 @@
   table.prospectos col.col-w-nombre    { width: 180px; }
   table.prospectos col.col-w-tel       { width: 120px; }
   table.prospectos col.col-w-detalle   { width: 220px; }
-  table.prospectos col.col-w-estado    { width: 140px; }
+  table.prospectos col.col-w-estado    { width: 115px; }
   table.prospectos col.col-w-referente { width: 90px; }
   table.prospectos col.col-w-pref      { width: 70px; }
   /* Telefono más pegado al nombre */
@@ -1944,6 +1992,19 @@
     color: var(--texto-suave);
     font-size: 0.82rem;
   }
+  .buscador-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid #f3f4f6;
+    background: #fafbfc;
+    font-size: 0.78rem;
+    color: var(--texto);
+    cursor: pointer;
+    user-select: none;
+  }
+  .buscador-toggle input { cursor: pointer; }
   .buscador-item {
     padding: 10px 14px;
     cursor: pointer;
@@ -1952,6 +2013,9 @@
   }
   .buscador-item:last-child { border-bottom: none; }
   .buscador-item:hover { background: #f9fafb; }
+  .buscador-item.es-archivada { background: rgba(148, 163, 184, 0.08); }
+  .buscador-item.es-archivada:hover { background: rgba(148, 163, 184, 0.16); }
+  .buscador-item.es-archivada .buscador-item-titulo { color: var(--texto-suave); }
   .buscador-item-titulo {
     font-size: 0.86rem;
     font-weight: 600;
@@ -2271,6 +2335,18 @@
     /* Nav del calendar más compacto */
     .cal-header { padding: 10px 14px; flex-wrap: wrap; gap: 8px; }
     .cal-nav-btn { padding: 4px 8px; font-size: 0.75rem; }
+
+    /* Modales en mobile: padding más ajustado y botones del footer en wrap.
+       Sin esto, Eliminar + Convertir + Cancelar + Guardar no entran en una
+       sola fila y el botón Guardar queda fuera de pantalla. */
+    .modal-backdrop { padding: 12px; }
+    .modal-body { padding: 18px 18px; }
+    .modal-footer { padding: 12px 18px; gap: 8px; }
+    .modal-footer > div { gap: 8px; }
+    .modal-footer button { font-size: 0.8rem; padding: 8px 12px; }
+    .quick-date-row { gap: 6px; margin-bottom: 12px; }
+    .btn-quick-date { padding: 8px 4px; font-size: 0.74rem; }
+    .btn-quick-date small { font-size: 0.62rem; }
   }
   @media (max-width: 560px) {
     .col-telefono { display: none; }
@@ -2404,6 +2480,7 @@ function mapTareaFromDB(t) {
     googleEventId: t.google_event_id || null,
     actorId: t.actor_id || null,
     agenteId: t.agente_id,
+    archivada: !!t.archivada,
     createdAt: t.created_at,
     updatedAt: t.updated_at
   };
@@ -2496,14 +2573,16 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
       sb.from('abordaje_prospectos').select(PROSPECTO_COLS).eq('agente_id', agenteId).order('created_at', { ascending: false }),
       sb.from('abordaje_prospecto_contactos').select(CONTACTO_COLS).eq('agente_id', agenteId).order('created_at'),
       sb.from('abordaje_tareas_columnas').select(COLUMNA_COLS).eq('agente_id', agenteId).order('orden'),
-      sb.from('abordaje_tareas').select(TAREA_COLS).eq('agente_id', agenteId).order('created_at'),
+      // Excluimos archivadas del state principal — el buscador con "Incluir
+      // archivadas" hace un fetch separado on-demand cuando el user lo activa.
+      sb.from('abordaje_tareas').select(TAREA_COLS).eq('agente_id', agenteId).eq('archivada', false).order('created_at'),
       sb.from('abordaje_agendados').select(AGENDADO_COLS).eq('agente_id', agenteId).order('fecha'),
       sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId)
     ]);
@@ -2717,6 +2796,7 @@ const storage = {
     if ('fechaRecordatorio' in patch) dbPatch.fecha_recordatorio = patch.fechaRecordatorio;
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
+    if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
     if (Object.keys(dbPatch).length === 0) return;
     // Solo marcamos actor cuando el cambio incluye campos user-visible. Si el
     // patch es exclusivamente `googleEventId` (sync interno tras crear el evento
@@ -2733,6 +2813,21 @@ const storage = {
   async deleteTarea(id) {
     const { error } = await sb.from('abordaje_tareas').delete().eq('id', id);
     if (error) throw error;
+  },
+
+  // Lista tareas archivadas del agente efectivo. Se usa on-demand cuando el
+  // user tilda "Incluir archivadas" en el buscador global.
+  async listTareasArchivadas() {
+    const agenteId = await auth.getEffectiveAgenteId();
+    if (!agenteId) return [];
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, archivada, created_at, updated_at';
+    const { data, error } = await sb.from('abordaje_tareas')
+      .select(TAREA_COLS)
+      .eq('agente_id', agenteId)
+      .eq('archivada', true)
+      .order('updated_at', { ascending: false });
+    if (error) { console.error('listTareasArchivadas:', error.message); return []; }
+    return (data || []).map(mapTareaFromDB);
   },
 
   // ── Agendados ──
@@ -3036,9 +3131,19 @@ function diasEntre(a, b) {
 }
 function pad2(n) { return String(n).padStart(2,'0'); }
 
+// Parsea YYYY-MM-DD como fecha local (no UTC). new Date('2026-05-18') interpreta
+// como UTC midnight, que en TZ negativa (UTC-3) cae en el día anterior local.
+function parseFechaLocal(iso) {
+  if (!iso) return null;
+  if (typeof iso === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(iso)) {
+    return new Date(parseInt(iso.slice(0,4), 10), parseInt(iso.slice(5,7), 10) - 1, parseInt(iso.slice(8,10), 10));
+  }
+  return new Date(iso);
+}
+
 function formatFechaCorta(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
+  const d = parseFechaLocal(iso);
   const hoy = new Date();
   const diff = diasEntre(d, hoy);
   if (diff === 0) return 'hoy';
@@ -3049,13 +3154,13 @@ function formatFechaCorta(iso) {
 
 function formatFechaHora(iso) {
   if (!iso) return '';
-  const d = new Date(iso);
+  const d = parseFechaLocal(iso);
   return `${formatFechaCorta(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function describeProximo(iso) {
   if (!iso) return { texto: '', urgencia: null };
-  const d = new Date(iso);
+  const d = parseFechaLocal(iso);
   const hoy = new Date();
   const diffMs = d - hoy;
   const diffDias = diasEntre(d, hoy);
@@ -3276,22 +3381,55 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
 }
 
 // ── FILTROS ────────────────────────────────────────────────────
-function aplicarFiltros(prospectos, filterEstado, filterFecha) {
+// Devuelve el tipo (id) del último contacto registrado, o null si no hay.
+function ultimoContactoTipo(p) {
+  if (!p.contactos || p.contactos.length === 0) return null;
+  let last = null;
+  for (const c of p.contactos) {
+    if (!last || (c.createdAt || '') > (last.createdAt || '')) last = c;
+  }
+  return last?.tipo || null;
+}
+
+function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = 'todos', ordenFecha = 'ninguno') {
   const hoy = new Date();
-  return prospectos.filter(p => {
+  let r = prospectos.filter(p => {
     const estado = deriveEstado(p);
     if (filterEstado !== 'todos' && estado !== filterEstado) return false;
-    if (filterFecha === 'todos') return true;
-    const proxIso = p.proximoContacto;
-    if (filterFecha === 'sin_fecha') return !proxIso;
-    if (!proxIso) return false;
-    const prox = new Date(proxIso);
-    const diff = diasEntre(prox, hoy);
-    if (filterFecha === 'vencidos') return prox < hoy;
-    if (filterFecha === 'hoy') return diff === 0;
-    if (filterFecha === 'semana') return diff >= 0 && diff <= 7;
+    if (filterEtiqueta !== 'todos') {
+      const tipo = ultimoContactoTipo(p);
+      if (filterEtiqueta === 'sin_etiqueta') {
+        if (tipo) return false;
+      } else if (tipo !== filterEtiqueta) {
+        return false;
+      }
+    }
+    if (filterFecha !== 'todos') {
+      const proxIso = p.proximoContacto;
+      if (filterFecha === 'sin_fecha') { if (proxIso) return false; }
+      else {
+        if (!proxIso) return false;
+        const prox = new Date(proxIso);
+        const diff = diasEntre(prox, hoy);
+        if (filterFecha === 'vencidos' && !(prox < hoy)) return false;
+        if (filterFecha === 'hoy' && diff !== 0) return false;
+        if (filterFecha === 'semana' && !(diff >= 0 && diff <= 7)) return false;
+      }
+    }
     return true;
   });
+  if (ordenFecha === 'asc' || ordenFecha === 'desc') {
+    r = [...r].sort((a, b) => {
+      const ax = a.proximoContacto || '';
+      const bx = b.proximoContacto || '';
+      // Sin fecha al final en ambos órdenes.
+      if (!ax && !bx) return 0;
+      if (!ax) return 1;
+      if (!bx) return -1;
+      return ordenFecha === 'asc' ? ax.localeCompare(bx) : bx.localeCompare(ax);
+    });
+  }
+  return r;
 }
 
 // ── TAREAS HELPERS ──────────────────────────────────────────────
@@ -3618,9 +3756,9 @@ function MountInSlot({ slotId, children }) {
 // ── BUSCADOR GLOBAL ────────────────────────────────────────────
 // Busca en prospectos, tareas y agendados. Resultados unificados con categoría
 // y handlers de click que llevan al lugar de acción correspondiente.
-const CATEGORIA_LABEL = { lista: 'Lista', tarea: 'Tarea', calendario: 'Calendario' };
+const CATEGORIA_LABEL = { lista: 'Lista', tarea: 'Tarea', tarea_archivada: 'Tarea archivada', calendario: 'Calendario' };
 
-function buscarGlobal(state, query, gcalSearchEvents = null, max = 12) {
+function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = null, max = 12) {
   const q = query.trim().toLowerCase();
   if (q.length < 2) return [];
   const resultados = [];
@@ -3653,6 +3791,24 @@ function buscarGlobal(state, query, gcalSearchEvents = null, max = 12) {
         prospectoId: t.prospectoId || null,
         sortScore: (t.titulo || '').toLowerCase().startsWith(q) ? 0 : 1,
       });
+    }
+  }
+  // Tareas archivadas (solo si el user tildó "Incluir archivadas").
+  if (Array.isArray(tareasArchivadas)) {
+    for (const t of tareasArchivadas) {
+      const haystack = [t.titulo, t.observacion].filter(Boolean).join(' ').toLowerCase();
+      if (haystack.includes(q)) {
+        resultados.push({
+          key: 'ta_' + t.id,
+          categoria: 'tarea_archivada',
+          titulo: t.titulo || '(sin título)',
+          sub: t.observacion || '',
+          tareaId: t.id,
+          tareaObj: t,
+          prospectoId: t.prospectoId || null,
+          sortScore: (t.titulo || '').toLowerCase().startsWith(q) ? 0 : 1,
+        });
+      }
     }
   }
   // Agendados (calendario) — solo para users non-piloto. Los pilot users tienen
@@ -3716,10 +3872,18 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
   // dropdown o pasados 5 min. Solo aplica en modo piloto.
   const [gcalSearchEvents, setGcalSearchEvents] = useState(null);
   const gcalFetchAtRef = useRef(0);
+  // Tareas archivadas — fetch on-demand cuando el user tilda el check.
+  // Persistido por sesión: si el user lo dejó tildado, se mantiene.
+  const [incluirArchivadas, setIncluirArchivadas] = useState(() => {
+    try { return localStorage.getItem('abordaje_buscar_archivadas') === '1'; } catch { return false; }
+  });
+  const [tareasArchivadas, setTareasArchivadas] = useState(null);
+  const [loadingArchivadas, setLoadingArchivadas] = useState(false);
+  const archivadasFetchAtRef = useRef(0);
   const wrapRef = useRef(null);
   const items = useMemo(
-    () => buscarGlobal(state, query, gcalSearchEvents),
-    [state, query, gcalSearchEvents]
+    () => buscarGlobal(state, query, gcalSearchEvents, incluirArchivadas ? tareasArchivadas : null),
+    [state, query, gcalSearchEvents, incluirArchivadas, tareasArchivadas]
   );
 
   // Cuando el user escribe ≥2 chars Y estamos en piloto, cargamos eventos de
@@ -3738,6 +3902,22 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
     return () => { cancelled = true; };
   }, [isPilot, query]);
 
+  // Fetch on-demand de tareas archivadas: solo si el check está tildado y hay
+  // query ≥ 2 chars. Cache 5 min para no machacar Supabase.
+  useEffect(() => {
+    if (!incluirArchivadas) return;
+    if (query.trim().length < 2) return;
+    const now = Date.now();
+    if (now - archivadasFetchAtRef.current < 5 * 60 * 1000 && tareasArchivadas) return;
+    let cancelled = false;
+    setLoadingArchivadas(true);
+    storage.listTareasArchivadas()
+      .then(items => { if (!cancelled) { setTareasArchivadas(items || []); archivadasFetchAtRef.current = Date.now(); } })
+      .catch(err => console.warn('buscador archivadas:', err?.message || err))
+      .finally(() => { if (!cancelled) setLoadingArchivadas(false); });
+    return () => { cancelled = true; };
+  }, [incluirArchivadas, query]);
+
   useEffect(() => {
     const onClick = (e) => {
       if (!wrapRef.current) return;
@@ -3751,6 +3931,12 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
     onClickItem(it);
     setQuery('');
     setOpen(false);
+  };
+
+  const toggleIncluirArchivadas = (val) => {
+    setIncluirArchivadas(val);
+    try { localStorage.setItem('abordaje_buscar_archivadas', val ? '1' : '0'); } catch {}
+    if (!val) setTareasArchivadas(null);
   };
 
   return (
@@ -3770,10 +3956,15 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
       />
       {open && query.trim().length >= 2 && (
         <div className="buscador-dropdown">
+          <label className="buscador-toggle">
+            <input type="checkbox" checked={incluirArchivadas}
+              onChange={e => toggleIncluirArchivadas(e.target.checked)} />
+            <span>Incluir archivadas{loadingArchivadas ? ' (cargando…)' : ''}</span>
+          </label>
           {items.length === 0 ? (
             <div className="buscador-empty">Sin resultados para "{query}"</div>
           ) : items.map(it => (
-            <div key={it.key} className="buscador-item" onClick={() => seleccionar(it)}>
+            <div key={it.key} className={`buscador-item${it.categoria === 'tarea_archivada' ? ' es-archivada' : ''}`} onClick={() => seleccionar(it)}>
               <div className="buscador-item-body">
                 <div className="buscador-item-titulo">
                   {it.titulo}
@@ -4192,6 +4383,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [view]);
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
+  const [filterEtiqueta, setFilterEtiqueta] = useState('todos');
+  const [ordenFecha, setOrdenFecha] = useState('ninguno'); // 'asc' | 'desc' | 'ninguno'
 
   // Carga inicial desde Supabase. Si hay viewAs, filtra por su id.
   useEffect(() => {
@@ -4828,6 +5021,74 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
+  // Archivar/Desarchivar tarea. Al archivar:
+  //   - Se quita del state principal (no aparece en el kanban ni en notifs).
+  //   - Si tiene evento en Google Calendar, se borra el evento (la tarea
+  //     queda persistida en Supabase con archivada=true, pero deja de
+  //     ocupar lugar en el calendario).
+  // Al desarchivar:
+  //   - Vuelve al state principal.
+  //   - Si tenía fecha y no tiene evento Google, se recrea (solo piloto).
+  const handleArchiveTarea = async (tareaObjOrId, archivar) => {
+    if (guardReadOnly()) return;
+    // Aceptamos tanto un objeto tarea (caso desarchivar desde buscador) como
+    // un id (uso histórico). Resolvemos la tarea desde state si es posible.
+    const id = typeof tareaObjOrId === 'object' ? tareaObjOrId.id : tareaObjOrId;
+    const prev = state.tareas.items;
+    const tarea = prev.find(t => t.id === id) || (typeof tareaObjOrId === 'object' ? tareaObjOrId : null);
+    if (archivar) {
+      // Optimistic: la sacamos del kanban.
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
+      try {
+        if (isPilot && tarea?.googleEventId) {
+          try { await gcalApi.delete(tarea.googleEventId); }
+          catch (e) { console.warn('gcal sync (archivar tarea):', e?.message || e); }
+          await storage.updateTarea(id, { googleEventId: null });
+        }
+        await storage.updateTarea(id, { archivada: true });
+        setTareaEditando(null);
+        if (isPilot) bumpGcal();
+        showToast('Tarea archivada');
+      } catch (e) {
+        handleErr(e, 'archivarTarea');
+        setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
+      }
+    } else {
+      // Desarchivar: la tarea no está en state (vino del buscador). La
+      // insertamos al desarchivar y recreamos el evento Google si corresponde.
+      try {
+        await storage.updateTarea(id, { archivada: false });
+        const tareaActualizada = { ...(tarea || {}), archivada: false, updatedAt: new Date().toISOString() };
+        setState(s => ({
+          ...s,
+          tareas: {
+            ...s.tareas,
+            items: s.tareas.items.some(t => t.id === id)
+              ? s.tareas.items.map(t => t.id === id ? tareaActualizada : t)
+              : [...s.tareas.items, tareaActualizada]
+          }
+        }));
+        if (isPilot && tareaActualizada.fechaRecordatorio && !tareaActualizada.googleEventId) {
+          try {
+            const fechaIso = new Date(`${tareaActualizada.fechaRecordatorio}T${(tareaActualizada.horaRecordatorio || '09:00')}:00`).toISOString();
+            const evt = await gcalApi.create(buildGoogleEventBody({
+              startIso: fechaIso,
+              summary: tareaActualizada.titulo?.trim() || 'Tarea',
+              description: tareaActualizada.observacion || '',
+              tareaId: id,
+            }));
+            if (evt?.id) await storage.updateTarea(id, { googleEventId: evt.id });
+          } catch (e) { console.warn('gcal sync (desarchivar tarea):', e?.message || e); }
+        }
+        setTareaEditando(null);
+        if (isPilot) bumpGcal();
+        showToast('Tarea desarchivada');
+      } catch (e) {
+        handleErr(e, 'desarchivarTarea');
+      }
+    }
+  };
+
   const handleAddColumna = async () => {
     if (guardReadOnly()) return;
     const titulo = prompt('Nombre de la nueva columna:');
@@ -4959,15 +5220,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
 
   const filtrados = useMemo(
-    () => aplicarFiltros(state.prospectos, filterEstado, filterFecha),
-    [state.prospectos, filterEstado, filterFecha]
+    () => aplicarFiltros(state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
+    [state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha]
   );
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos';
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || filterEtiqueta !== 'todos' || ordenFecha !== 'ninguno';
 
   // Handler común para click en notifs y en buscador.
   // IMPORTANTE: declarado ANTES del early return de loading para no violar
   // Rules of Hooks (un useCallback debe llamarse siempre en el mismo orden).
   const handleNavToItem = useCallback((it) => {
+    if (it.categoria === 'tarea_archivada' && it.tareaObj) {
+      // Tarea archivada: no está en state.items, viene completa en tareaObj.
+      setTareaEditando(it.tareaObj);
+      return;
+    }
     if (it.categoria === 'tarea' || it.tipo === 'tarea') {
       // Si la tarea viene de Google search puede no estar en state local todavía
       // (ej. dentro de rango por cargar); intentamos por id local primero.
@@ -5082,6 +5348,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               setFilterEstado={setFilterEstado}
               filterFecha={filterFecha}
               setFilterFecha={setFilterFecha}
+              filterEtiqueta={filterEtiqueta}
+              setFilterEtiqueta={setFilterEtiqueta}
+              ordenFecha={ordenFecha}
+              setOrdenFecha={setOrdenFecha}
               mostrandoCount={filtrados.length}
               totalCount={state.prospectos.length}
             />
@@ -5090,7 +5360,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                 <div className="empty-title">Ningún prospecto coincide con los filtros</div>
                 <div className="empty-text">Ajustá los filtros o limpiálos para ver toda la lista.</div>
                 <button className="btn-secondary"
-                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); }}>
+                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); setFilterEtiqueta('todos'); setOrdenFecha('ninguno'); }}>
                   Limpiar filtros
                 </button>
               </div>
@@ -5122,6 +5392,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             setFilterEstado={setFilterEstado}
             filterFecha={filterFecha}
             setFilterFecha={setFilterFecha}
+            filterEtiqueta={filterEtiqueta}
+            setFilterEtiqueta={setFilterEtiqueta}
+            ordenFecha={ordenFecha}
+            setOrdenFecha={setOrdenFecha}
             mostrandoCount={filtrados.length}
             totalCount={state.prospectos.length}
           />
@@ -5202,6 +5476,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onClose={() => setTareaEditando(null)}
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
           onDelete={() => handleDeleteTarea(tareaEditando.id)}
+          onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
           onConvertir={() => setConvertirTareaId(tareaEditando.id)}
         />
       )}
@@ -5327,8 +5602,8 @@ function EmptyState({ onAdd }) {
 }
 
 // ── FILTER BAR ─────────────────────────────────────────────────
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, mostrandoCount, totalCount }) {
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos';
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = 'todos', setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount }) {
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || filterEtiqueta !== 'todos' || ordenFecha !== 'ninguno';
   return (
     <div className="filter-bar">
       <div className="filter-group">
@@ -5342,6 +5617,18 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
           <option value="rechazado">Rechazados</option>
         </select>
       </div>
+      {setFilterEtiqueta && (
+        <div className="filter-group">
+          <label>Etiqueta</label>
+          <select value={filterEtiqueta} onChange={e => setFilterEtiqueta(e.target.value)}>
+            <option value="todos">Todas</option>
+            <option value="sin_etiqueta">Sin etiqueta</option>
+            {TIPOS_CONTACTO.map(t => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="filter-group">
         <label>Próximo contacto</label>
         <select value={filterFecha} onChange={e => setFilterFecha(e.target.value)}>
@@ -5352,9 +5639,24 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
           <option value="sin_fecha">Sin fecha</option>
         </select>
       </div>
+      {setOrdenFecha && (
+        <div className="filter-group">
+          <label>Ordenar</label>
+          <select value={ordenFecha} onChange={e => setOrdenFecha(e.target.value)}>
+            <option value="ninguno">Sin orden</option>
+            <option value="asc">Más próximas primero</option>
+            <option value="desc">Más lejanas primero</option>
+          </select>
+        </div>
+      )}
       {hayFiltros && (
         <button className="btn-mini"
-          onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); }}>
+          onClick={() => {
+            setFilterEstado('todos');
+            setFilterFecha('todos');
+            if (setFilterEtiqueta) setFilterEtiqueta('todos');
+            if (setOrdenFecha) setOrdenFecha('ninguno');
+          }}>
           Limpiar
         </button>
       )}
@@ -5403,8 +5705,18 @@ function ProspectosTable({ prospectos, onSelect }) {
 function FilaProspecto({ prospecto, onClick }) {
   const estado = deriveEstado(prospecto);
   const meta = ESTADO_META[estado];
+  // Si el próximo contacto está agendado a más de 3 meses, el row no es urgente:
+  // tint gris (sobreescribe pendiente/programado/agendado/nuevo). Rechazado mantiene su gris-rojo.
+  let tint = meta.tint;
+  if (estado !== 'rechazado' && prospecto.proximoContacto) {
+    const prox = parseFechaLocal(prospecto.proximoContacto);
+    const ahora = new Date();
+    const enTresMeses = new Date();
+    enTresMeses.setMonth(enTresMeses.getMonth() + 3);
+    if (prox > enTresMeses) tint = 'tint-futuro-lejos';
+  }
   return (
-    <tr className={`fila-clickeable ${meta.tint}`} onClick={onClick}>
+    <tr className={`fila-clickeable ${tint}`} onClick={onClick}>
       <td className="col-nombre">
         <ActorStar item={prospecto} />
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
@@ -8371,7 +8683,7 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onConvertir }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onConvertir }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -8411,6 +8723,49 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
     });
   };
 
+  // Quick-date: setea fecha/hora y guarda en un solo tap.
+  const aplicarQuickDate = (fecha, hora) => {
+    onSave({
+      titulo: form.titulo.trim(),
+      columnaId: form.columnaId,
+      fechaRecordatorio: fecha,
+      horaRecordatorio: hora,
+      observacion: buildObsConBitacora().trim(),
+    });
+  };
+  const quickHoy = () => {
+    const now = new Date();
+    const t = new Date(now.getTime() + 3 * 60 * 60 * 1000);
+    // Si +3h cae mañana, cap a hoy 23:30
+    if (t.toDateString() !== now.toDateString()) {
+      t.setTime(now.getTime());
+      t.setHours(23, 30, 0, 0);
+    }
+    aplicarQuickDate(
+      `${t.getFullYear()}-${pad2(t.getMonth()+1)}-${pad2(t.getDate())}`,
+      `${pad2(t.getHours())}:${pad2(t.getMinutes())}`
+    );
+  };
+  const quickManana = () => {
+    const t = new Date();
+    t.setDate(t.getDate() + 1);
+    aplicarQuickDate(
+      `${t.getFullYear()}-${pad2(t.getMonth()+1)}-${pad2(t.getDate())}`,
+      '09:00'
+    );
+  };
+  const quickProxSemana = () => {
+    const t = new Date();
+    const dow = t.getDay(); // 0=domingo, 1=lunes…
+    // Días hasta el próximo lunes (si hoy es lunes, va al lunes siguiente).
+    const diff = ((8 - dow) % 7) || 7;
+    t.setDate(t.getDate() + diff);
+    aplicarQuickDate(
+      `${t.getFullYear()}-${pad2(t.getMonth()+1)}-${pad2(t.getDate())}`,
+      '09:00'
+    );
+  };
+
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className="modal" role="dialog" aria-modal="true" aria-labelledby="tarea-modal-title"
@@ -8420,6 +8775,25 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
+          {!readOnly && (
+            <>
+              <div className="quick-date-title">Recordatorio rápido</div>
+              <div className="quick-date-row" aria-label="Recordatorio rápido">
+                <button type="button" className="btn-quick-date" onClick={quickHoy}
+                  title="Recordatorio hoy en ~3 horas">
+                  Hoy<small>en 3 hs</small>
+                </button>
+                <button type="button" className="btn-quick-date" onClick={quickManana}
+                  title="Recordatorio mañana 9:00">
+                  Mañana<small>9:00</small>
+                </button>
+                <button type="button" className="btn-quick-date" onClick={quickProxSemana}
+                  title="Recordatorio próximo lunes 9:00">
+                  Próx semana<small>lun 9:00</small>
+                </button>
+              </div>
+            </>
+          )}
           <div className="field">
             <label>Título</label>
             <input type="text" value={form.titulo} autoFocus={!readOnly} readOnly={readOnly}
@@ -8471,8 +8845,17 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onCo
           )}
         </div>
         <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
-          {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
-          <div style={{ display: 'flex', gap: 10 }}>
+          {!readOnly && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>
+              {onArchive && (
+                <button type="button" className="btn-secondary" onClick={onArchive}>
+                  {tarea.archivada ? 'Desarchivar' : 'Archivar'}
+                </button>
+              )}
+            </div>
+          )}
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {!readOnly && <button type="button" className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>}
             <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
             {!readOnly && <button type="submit" className="btn-primary">Guardar</button>}
