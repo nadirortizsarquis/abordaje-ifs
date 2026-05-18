@@ -4,7 +4,7 @@
   "private": true,
   "description": "Planificador de Abordaje IFS — Gestión de prospectos y agenda comercial (Supabase)",
   "scripts": {
-    "build": "mkdir -p public && cp index.html public/index.html",
+    "build": "mkdir -p public && cp index.html public/index.html && cp -R static/. public/",
     "start": "serve public -l ${PORT:-3000} --no-clipboard"
   },
   "dependencies": {
