@@ -5189,7 +5189,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const handleSaveAgenda = async (slot, form) => {
     if (guardReadOnly()) return;
     try {
-      const local = new Date(slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(), slot.hour, slot.minute, 0);
+      // El modal puede haber modificado fecha/hora respecto al slot inicial.
+      // Si vienen en el form usamos esos valores; si no, caemos al slot.
+      let local;
+      if (form.fecha && form.hora) {
+        const [yy, mm, dd] = form.fecha.split('-').map(Number);
+        const [hh, mi] = form.hora.split(':').map(Number);
+        local = new Date(yy, mm - 1, dd, hh, mi, 0);
+      } else {
+        local = new Date(slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(), slot.hour, slot.minute, 0);
+      }
       const agendadoParaIso = local.toISOString();
       const nota = (form.titulo || '').trim() + (form.observacion ? `\n\n${form.observacion.trim()}` : '');
 
@@ -9734,6 +9743,11 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
   const [crearProspect, setCrearProspect] = useState(false);
   const [prospectoNombre, setProspectoNombre] = useState('');
   const [err, setErr] = useState('');
+  // Fecha + hora editables; arrancan con los valores del slot clickeado.
+  const [fecha, setFecha] = useState(
+    `${slot.date.getFullYear()}-${pad2(slot.date.getMonth()+1)}-${pad2(slot.date.getDate())}`
+  );
+  const [hora, setHora] = useState(`${pad2(slot.hour)}:${pad2(slot.minute)}`);
   // Guard contra doble submit (Enter + click rápido) que generaba eventos duplicados.
   const [submitting, setSubmitting] = useState(false);
 
@@ -9743,18 +9757,17 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  const dow = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][slot.date.getDay()];
-  const cuando = `${dow} ${slot.date.getDate()} de ${NOMBRES_MES[slot.date.getMonth()]} · ${pad2(slot.hour)}:${pad2(slot.minute)}`;
-
   const submit = async (e) => {
     if (e) e.preventDefault();
     if (submitting) return;
     setErr('');
     if (!titulo.trim()) { setErr('Poné un título / asunto para la agenda.'); return; }
+    if (!fecha) { setErr('Elegí una fecha.'); return; }
+    if (!hora) { setErr('Elegí una hora.'); return; }
     if (crearProspect && !prospectoNombre.trim()) { setErr('Falta el nombre del prospecto.'); return; }
     setSubmitting(true);
     try {
-      await onSave({ titulo, observacion, crearProspect, prospectoNombre });
+      await onSave({ titulo, observacion, crearProspect, prospectoNombre, fecha, hora });
     } finally {
       setSubmitting(false);
     }
@@ -9768,13 +9781,15 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
           <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
-          <div style={{
-            background: '#eff6ff', border: '1px solid #bfdbfe',
-            color: 'var(--azul-oscuro)', borderRadius: 8,
-            padding: '10px 12px', fontSize: '0.82rem', marginBottom: 14,
-            textTransform: 'capitalize',
-          }}>
-            {cuando}
+          <div className="field-row">
+            <div className="field">
+              <label>Fecha <span className="req">*</span></label>
+              <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
+            </div>
+            <div className="field">
+              <label>Hora <span className="req">*</span></label>
+              <input type="time" value={hora} onChange={e => setHora(e.target.value)} />
+            </div>
           </div>
           <div className="field">
             <label>Título / Asunto <span className="req">*</span></label>
