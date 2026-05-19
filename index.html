@@ -255,7 +255,8 @@
     font-size: 0.76rem;
     color: var(--texto-suave);
   }
-  /* td col-detalle: gris suave + ellipsis */
+  /* td col-detalle: gris suave + ellipsis + texto centrado para que la
+     columna se distinga claramente de la timeline a su derecha. */
   table.prospectos td.col-detalle {
     font-size: 0.78rem;
     color: var(--texto);
@@ -263,10 +264,12 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: center;
   }
   /* th col-detalle: el color blanco del header lo hereda de thead th */
   table.prospectos thead th.col-detalle {
     max-width: 220px;
+    text-align: center;
   }
   /* td col-referente / col-pref: gris suave alineado a la derecha */
   table.prospectos td.col-referente,
@@ -767,7 +770,7 @@
 
   /* ── ESTADO BADGE (col Estado) ── */
   .estado-cell { white-space: nowrap; text-align: left; vertical-align: middle; }
-  .estado-badge-wrap { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+  .estado-badge-wrap { display: flex; flex-direction: column; gap: 3px; align-items: center; }
   .estado-badge {
     display: inline-block;
     padding: 4px 11px;
@@ -1282,13 +1285,14 @@
   /* Telefono más pegado al nombre */
   table.prospectos td.col-telefono,
   table.prospectos thead th.col-telefono { padding-left: 4px; }
-  /* Estado va entre teléfono y detalle. Lo pegamos al teléfono y dejamos
-     un padding-right generoso que lo separa de Detalle/Observación
-     visualmente, sin usar una línea divisoria. */
+  /* Estado va entre teléfono y detalle. Centramos el contenido (badge +
+     subtítulo de fecha) para que la columna se separe visualmente de las
+     vecinas sin necesitar una línea divisoria. */
   table.prospectos td.estado-cell,
   table.prospectos thead th.col-estado-h {
     padding-left: 4px;
     padding-right: 14px;
+    text-align: center;
   }
   table.prospectos td.col-detalle,
   table.prospectos thead th.col-detalle { padding-left: 14px; }
