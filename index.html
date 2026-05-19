@@ -1282,14 +1282,13 @@
   /* Telefono más pegado al nombre */
   table.prospectos td.col-telefono,
   table.prospectos thead th.col-telefono { padding-left: 4px; }
-  /* Estado va entre teléfono y detalle. Lo pegamos al teléfono (padding-left
-     mínimo) y le metemos un padding-right + borde punteado a la derecha que
-     lo separa visualmente de Detalle/Observación. */
+  /* Estado va entre teléfono y detalle. Lo pegamos al teléfono y dejamos
+     un padding-right generoso que lo separa de Detalle/Observación
+     visualmente, sin usar una línea divisoria. */
   table.prospectos td.estado-cell,
   table.prospectos thead th.col-estado-h {
     padding-left: 4px;
     padding-right: 14px;
-    border-right: 1px dashed var(--borde);
   }
   table.prospectos td.col-detalle,
   table.prospectos thead th.col-detalle { padding-left: 14px; }
@@ -3390,15 +3389,12 @@ function parseFechaLocal(iso) {
 function formatFechaCorta(iso) {
   if (!iso) return '';
   const d = parseFechaLocal(iso);
-  const hoy = new Date();
-  const diff = diasEntre(d, hoy);
-  if (diff === 0) return 'hoy';
-  if (diff === -1) return 'ayer';
-  if (diff === 1) return 'mañana';
   // DD/MM/AA — formato consistente en toda la app (lista de abordaje, timeline,
-  // bitácora, notifs, buscador). Es 1 char más largo que "DD/mes" pero no
-  // depende de localización ni tiene ambigüedad de mes.
-  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
+  // bitácora, notifs, buscador). Si la fecha es hoy se agrega "(hoy)" para
+  // resaltarla; ayer/mañana se muestran como cualquier otra fecha.
+  const fecha = `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
+  const diff = diasEntre(d, new Date());
+  return diff === 0 ? `${fecha} (hoy)` : fecha;
 }
 
 // Detecta si el iso original incluye componente de hora. Si solo trae fecha
@@ -3417,18 +3413,18 @@ function formatFechaHora(iso) {
 
 function describeProximo(iso) {
   if (!iso) return { texto: '', urgencia: null };
-  const tieneHora = isoTieneHora(iso);
   const d = parseFechaLocal(iso);
   const hoy = new Date();
   const diffMs = d - hoy;
   const diffDias = diasEntre(d, hoy);
-  if (diffMs < 0) return { texto: `vencido ${formatFechaCorta(iso)}`, urgencia: 'pasado' };
-  if (diffDias === 0) {
-    return tieneHora
-      ? { texto: `hoy ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, urgencia: 'hoy' }
-      : { texto: 'hoy', urgencia: 'hoy' };
-  }
-  return { texto: `para ${formatFechaHora(iso)}`, urgencia: 'futuro' };
+  // Vencido: prefijo "vencido" para que se distinga rápido en la lista.
+  // En cualquier otro caso mostramos la fecha directamente — el "(hoy)" del
+  // formato ya marca el caso especial.
+  if (diffMs < 0) return { texto: `vencido ${formatFechaHora(iso)}`, urgencia: 'pasado' };
+  return {
+    texto: formatFechaHora(iso),
+    urgencia: diffDias === 0 ? 'hoy' : 'futuro'
+  };
 }
 
 // ── PARSERS FLEXIBLES ──────────────────────────────────────────
