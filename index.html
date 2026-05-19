@@ -1116,6 +1116,63 @@
     outline: none;
   }
   .filter-group select:focus { border-color: var(--azul); }
+
+  /* ── MULTI-SELECT (filtro por varias etiquetas a la vez) ── */
+  .multi-select-wrap { position: relative; }
+  .multi-select-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 11px;
+    border: 1px solid var(--borde);
+    border-radius: 7px;
+    font-size: 0.83rem;
+    font-family: inherit;
+    color: var(--texto);
+    background: white;
+    cursor: pointer;
+    min-width: 150px;
+    outline: none;
+  }
+  .multi-select-btn:hover, .multi-select-btn[aria-expanded="true"] { border-color: var(--azul); }
+  .multi-select-label { flex: 1; text-align: left; }
+  .multi-select-caret { color: var(--texto-suave); font-size: 0.7rem; }
+  .multi-select-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    min-width: 220px;
+    max-height: 320px;
+    overflow-y: auto;
+    background: white;
+    border: 1px solid var(--borde);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(15,17,41,0.18);
+    z-index: 50;
+    padding: 4px 0;
+  }
+  .multi-select-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .multi-select-item:hover { background: #f7f9fd; }
+  .multi-select-item input { cursor: pointer; }
+  .multi-select-clear {
+    width: calc(100% - 16px);
+    margin: 4px 8px 4px;
+    padding: 6px 10px;
+    border: 1px solid var(--borde);
+    border-radius: 6px;
+    background: white;
+    color: var(--texto-suave);
+    font-size: 0.76rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .multi-select-clear:hover { border-color: var(--azul); color: var(--azul); }
+
   .filter-count {
     margin-left: auto;
     font-size: 0.78rem;
@@ -1124,10 +1181,10 @@
   }
 
   /* ── COLUMN WIDTHS ──
-     Nombre + Telefono compactos a la izquierda;
-     Detalle ancho medio; Estado compacto pegado al detalle;
-     Timeline (Último contacto/Observación) sin width: toma todo el ancho que sobra;
-     Referente y Pref compactos a la derecha. */
+     Orden: Nombre, Tel, Estado, Detalle, Timeline, Referente, Pref.
+     Estado va pegado al Teléfono y separado del Detalle con un borde
+     punteado (ver regla más arriba) para que no se amontone con la
+     observación. Timeline sin width: toma todo el ancho que sobra. */
   table.prospectos col.col-w-nombre    { width: 180px; }
   table.prospectos col.col-w-tel       { width: 120px; }
   table.prospectos col.col-w-detalle   { width: 220px; }
@@ -1137,9 +1194,17 @@
   /* Telefono más pegado al nombre */
   table.prospectos td.col-telefono,
   table.prospectos thead th.col-telefono { padding-left: 4px; }
-  /* Estado más pegado al detalle */
+  /* Estado va entre teléfono y detalle. Lo pegamos al teléfono (padding-left
+     mínimo) y le metemos un padding-right + borde punteado a la derecha que
+     lo separa visualmente de Detalle/Observación. */
   table.prospectos td.estado-cell,
-  table.prospectos thead th.col-estado-h { padding-left: 4px; }
+  table.prospectos thead th.col-estado-h {
+    padding-left: 4px;
+    padding-right: 14px;
+    border-right: 1px dashed var(--borde);
+  }
+  table.prospectos td.col-detalle,
+  table.prospectos thead th.col-detalle { padding-left: 14px; }
 
   /* ── EDIT BUTTON en historial ── */
   .btn-edit-mini {
@@ -3462,18 +3527,22 @@ function ultimoContactoTipo(p) {
   return last?.tipo || null;
 }
 
-function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = 'todos', ordenFecha = 'ninguno') {
+function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = [], ordenFecha = 'ninguno') {
   const hoy = new Date();
+  // filterEtiqueta es array (vacío = todas). Aceptamos también el formato
+  // legacy de string ('todos' o un único id) por compatibilidad.
+  const etiquetasSeleccionadas = Array.isArray(filterEtiqueta)
+    ? filterEtiqueta
+    : (filterEtiqueta === 'todos' || !filterEtiqueta ? [] : [filterEtiqueta]);
   let r = prospectos.filter(p => {
     const estado = deriveEstado(p);
     if (filterEstado !== 'todos' && estado !== filterEstado) return false;
-    if (filterEtiqueta !== 'todos') {
+    if (etiquetasSeleccionadas.length > 0) {
       const tipo = ultimoContactoTipo(p);
-      if (filterEtiqueta === 'sin_etiqueta') {
-        if (tipo) return false;
-      } else if (tipo !== filterEtiqueta) {
-        return false;
-      }
+      const matches = etiquetasSeleccionadas.some(et =>
+        et === 'sin_etiqueta' ? !tipo : tipo === et
+      );
+      if (!matches) return false;
     }
     if (filterFecha !== 'todos') {
       const proxIso = p.proximoContacto;
@@ -4452,7 +4521,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [view]);
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
-  const [filterEtiqueta, setFilterEtiqueta] = useState('todos');
+  const [filterEtiqueta, setFilterEtiqueta] = useState([]); // array de tipo.id ó 'sin_etiqueta'
   const [ordenFecha, setOrdenFecha] = useState('ninguno'); // 'asc' | 'desc' | 'ninguno'
 
   // Carga inicial desde Supabase. Si hay viewAs, filtra por su id.
@@ -4576,11 +4645,31 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // sólo limpia (no crea nada).
   const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
     // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
-    const tareasAuto = (prevState.tareas?.items || []).filter(t => t.prospectoId === prospectoId);
+    //    Consultamos directamente a Supabase en lugar de filtrar prevState.tareas.items
+    //    para evitar duplicados cuando se encadenan gestiones rápidas (el closure
+    //    puede tener un state stale y dejar tareas viejas sin borrar).
+    const agenteEffectiveId = await auth.getEffectiveAgenteId();
+    let tareasAuto = [];
+    if (agenteEffectiveId) {
+      const { data: tareasDB, error: tareasErr } = await sb.from('abordaje_tareas')
+        .select('id, google_event_id')
+        .eq('agente_id', agenteEffectiveId)
+        .eq('prospecto_id', prospectoId)
+        .eq('archivada', false);
+      if (tareasErr) {
+        console.warn('listado tareas auto:', tareasErr.message);
+        // Fallback al state local si la query falla.
+        tareasAuto = (prevState.tareas?.items || [])
+          .filter(t => t.prospectoId === prospectoId)
+          .map(t => ({ id: t.id, google_event_id: t.googleEventId }));
+      } else {
+        tareasAuto = tareasDB || [];
+      }
+    }
     for (const t of tareasAuto) {
       try {
-        if (isPilot && t.googleEventId) {
-          try { await gcalApi.delete(t.googleEventId); } catch (e) { console.warn('gcal del tarea auto:', e); }
+        if (isPilot && t.google_event_id) {
+          try { await gcalApi.delete(t.google_event_id); } catch (e) { console.warn('gcal del tarea auto:', e); }
         }
         await storage.deleteTarea(t.id);
       } catch (e) { console.error('limpieza tarea auto:', e); }
@@ -5295,7 +5384,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     () => aplicarFiltros(state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
     [state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha]
   );
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || filterEtiqueta !== 'todos' || ordenFecha !== 'ninguno';
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || (filterEtiqueta?.length || 0) > 0 || ordenFecha !== 'ninguno';
 
   // Handler común para click en notifs y en buscador.
   // IMPORTANTE: declarado ANTES del early return de loading para no violar
@@ -5432,7 +5521,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                 <div className="empty-title">Ningún prospecto coincide con los filtros</div>
                 <div className="empty-text">Ajustá los filtros o limpiálos para ver toda la lista.</div>
                 <button className="btn-secondary"
-                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); setFilterEtiqueta('todos'); setOrdenFecha('ninguno'); }}>
+                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); setFilterEtiqueta([]); setOrdenFecha('ninguno'); }}>
                   Limpiar filtros
                 </button>
               </div>
@@ -5674,8 +5763,9 @@ function EmptyState({ onAdd }) {
 }
 
 // ── FILTER BAR ─────────────────────────────────────────────────
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = 'todos', setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount }) {
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || filterEtiqueta !== 'todos' || ordenFecha !== 'ninguno';
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount }) {
+  const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || etiquetasArr.length > 0 || ordenFecha !== 'ninguno';
   return (
     <div className="filter-bar">
       <div className="filter-group">
@@ -5692,13 +5782,7 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
       {setFilterEtiqueta && (
         <div className="filter-group">
           <label>Etiqueta</label>
-          <select value={filterEtiqueta} onChange={e => setFilterEtiqueta(e.target.value)}>
-            <option value="todos">Todas</option>
-            <option value="sin_etiqueta">Sin etiqueta</option>
-            {TIPOS_CONTACTO.map(t => (
-              <option key={t.id} value={t.id}>{t.label}</option>
-            ))}
-          </select>
+          <MultiSelectEtiqueta value={etiquetasArr} onChange={setFilterEtiqueta} />
         </div>
       )}
       <div className="filter-group">
@@ -5726,7 +5810,7 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
           onClick={() => {
             setFilterEstado('todos');
             setFilterFecha('todos');
-            if (setFilterEtiqueta) setFilterEtiqueta('todos');
+            if (setFilterEtiqueta) setFilterEtiqueta([]);
             if (setOrdenFecha) setOrdenFecha('ninguno');
           }}>
           Limpiar
@@ -5739,6 +5823,60 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
   );
 }
 
+// Dropdown con checkboxes para seleccionar varias etiquetas a la vez. value
+// es array (vacío = todas). Acepta 'sin_etiqueta' como pseudo-etiqueta para
+// prospectos que aún no tienen ninguna gestión registrada.
+function MultiSelectEtiqueta({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+  useEffect(() => {
+    const onClick = (e) => {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onClick);
+    return () => document.removeEventListener('mousedown', onClick);
+  }, []);
+  const toggle = (id) => {
+    if (value.includes(id)) onChange(value.filter(x => x !== id));
+    else onChange([...value, id]);
+  };
+  const label = value.length === 0
+    ? 'Todas'
+    : value.length === 1
+      ? (value[0] === 'sin_etiqueta' ? 'Sin etiqueta' : (TIPOS_CONTACTO.find(t => t.id === value[0])?.label || value[0]))
+      : `${value.length} seleccionadas`;
+  return (
+    <div className="multi-select-wrap" ref={wrapRef}>
+      <button type="button" className="multi-select-btn" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <span className="multi-select-label">{label}</span>
+        <span className="multi-select-caret" aria-hidden="true">▾</span>
+      </button>
+      {open && (
+        <div className="multi-select-dropdown" role="menu">
+          <label className="multi-select-item">
+            <input type="checkbox" checked={value.includes('sin_etiqueta')}
+              onChange={() => toggle('sin_etiqueta')} />
+            <span>Sin etiqueta</span>
+          </label>
+          {TIPOS_CONTACTO.map(t => (
+            <label key={t.id} className="multi-select-item">
+              <input type="checkbox" checked={value.includes(t.id)}
+                onChange={() => toggle(t.id)} />
+              <span>{t.label}</span>
+            </label>
+          ))}
+          {value.length > 0 && (
+            <button type="button" className="multi-select-clear" onClick={() => onChange([])}>
+              Limpiar selección
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── TABLA ──────────────────────────────────────────────────────
 function ProspectosTable({ prospectos, onSelect }) {
   return (
@@ -5747,8 +5885,8 @@ function ProspectosTable({ prospectos, onSelect }) {
         <colgroup>
           <col className="col-w-nombre" />
           <col className="col-w-tel" />
-          <col className="col-w-detalle" />
           <col className="col-w-estado" />
+          <col className="col-w-detalle" />
           <col /> {/* timeline — toma el resto */}
           <col className="col-w-referente" />
           <col className="col-w-pref" />
@@ -5757,8 +5895,8 @@ function ProspectosTable({ prospectos, onSelect }) {
           <tr>
             <th>Nombre</th>
             <th className="col-telefono">Teléfono</th>
-            <th className="col-detalle">Detalle</th>
             <th className="col-estado-h">Estado</th>
+            <th className="col-detalle">Detalle</th>
             <th>Último contacto / Observación</th>
             <th className="col-referente">Referente</th>
             <th className="col-pref">Pref.</th>
@@ -5794,10 +5932,10 @@ function FilaProspecto({ prospecto, onClick }) {
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
       </td>
       <td className="col-telefono">{prospecto.telefono || '—'}</td>
+      <td className="estado-cell"><BadgeEstado prospecto={prospecto} /></td>
       <td className="col-detalle">
         {prospecto.detalle || <span style={{color:'var(--texto-suave)'}}>—</span>}
       </td>
-      <td className="estado-cell"><BadgeEstado prospecto={prospecto} /></td>
       <td><TimelineCell contactos={prospecto.contactos || []} /></td>
       <td className="col-referente">{prospecto.referente || <span style={{color:'var(--texto-suave)'}}>—</span>}</td>
       <td className="col-pref">
