@@ -65,16 +65,21 @@
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
   }
   .header-logo {
-    height: 52px;
+    height: 60px;
     width: auto;
-    max-width: 260px;
+    max-width: 280px;
     display: block;
     flex-shrink: 0;
+    align-self: flex-end;
   }
   .header-title {
-    color: white; font-size: 1.1rem; font-weight: 600;
+    color: white; font-size: 1.15rem; font-weight: 600;
     border-left: 2px solid rgba(255,255,255,0.3); padding-left: 16px;
     letter-spacing: 0.3px;
+    /* Alinea la base del título con la base del logo, en lugar del centro
+       vertical del header. Da una sensación más "asentada". */
+    align-self: flex-end;
+    padding-bottom: 4px;
   }
   .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
   .header-actions { display: flex; gap: 10px; align-items: center; }
@@ -119,6 +124,14 @@
   .main-head-actions {
     display: flex; gap: 8px; align-items: center;
   }
+  /* Fila combinada: pestañas + acciones en la misma línea, reemplazo del
+     viejo h1 + actions. La fila wrappea en mobile si no entra. */
+  .main-head-combined {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .main-head-combined .view-tabs { margin-bottom: 0; }
 
   .btn-primary {
     background: linear-gradient(135deg, var(--azul) 0%, var(--azul-oscuro) 100%);
@@ -1115,6 +1128,39 @@
   .btn-mini.primary:hover { background: var(--azul); border-color: var(--azul); }
 
   /* ── FILTER BAR ── */
+  .filter-bar-wrap {
+    margin-bottom: 14px;
+  }
+  .filter-bar-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border: 1px solid var(--borde);
+    border-radius: 8px;
+    background: var(--bg-card);
+    color: var(--texto);
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .filter-bar-toggle:hover { border-color: var(--azul); color: var(--azul); }
+  .filter-bar-toggle.has-filters { border-color: var(--azul); background: rgba(0,152,218,0.05); color: var(--azul-oscuro); }
+  .filter-bar-toggle-badge {
+    background: var(--azul-oscuro); color: white;
+    font-size: 0.68rem; font-weight: 700;
+    padding: 1px 7px; border-radius: 10px;
+    min-width: 18px; text-align: center;
+  }
+  .filter-bar-toggle-caret { font-size: 0.7rem; color: var(--texto-suave); transition: transform 0.15s; }
+  .filter-bar-toggle.is-open .filter-bar-toggle-caret { transform: rotate(180deg); }
+  .filter-bar-header {
+    display: flex; align-items: center; gap: 12px;
+    flex-wrap: wrap;
+  }
+  .filter-bar-header .filter-count { margin-left: auto; }
   .filter-bar {
     display: flex;
     gap: 14px;
@@ -1123,7 +1169,7 @@
     background: var(--bg-card);
     border-radius: 12px;
     padding: 10px 14px;
-    margin-bottom: 14px;
+    margin-top: 8px;
     border: 1px solid var(--borde);
     box-shadow: 0 1px 3px rgba(0,0,0,0.03);
   }
@@ -2396,13 +2442,15 @@
     .main {
       margin-top: calc(var(--header-h) + max(env(safe-area-inset-top, 0px), 32px));
     }
-    .header-logo { height: 44px; max-width: 180px; }
+    .header-logo { height: 54px; max-width: 200px; align-self: flex-end; }
     .header-title {
-      font-size: 0.98rem;
+      font-size: 1rem;
       padding-left: 12px;
       border-left-width: 1px;
       flex: 1 1 auto;
       line-height: 1.2;
+      align-self: flex-end;
+      padding-bottom: 3px;
     }
     .header-subtitle { display: none; }
     /* En mobile combinamos buscador + botón Instrucciones en la última
@@ -5547,8 +5595,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         </div>
       )}
 
-      <div className="main-head">
-        <h1>{viewAs ? `Lista de ${viewAs.display_name || viewAs.email}` : 'Mi lista de abordaje'}</h1>
+      {/* Header de página unificado: pestañas Lista/Tareas/Calendario a la
+          izquierda y acciones (Excel, PDF, + Nuevo) a la derecha en la misma
+          fila. El título "Mi lista de abordaje" se eliminó porque era
+          redundante con las pestañas y consumía espacio vertical. */}
+      <div className="main-head-combined">
+        <ViewTabs view={view} setView={setView} />
         <div className="main-head-actions">
           <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">
             Excel
@@ -5563,8 +5615,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           )}
         </div>
       </div>
-
-      <ViewTabs view={view} setView={setView} />
 
       {view === 'lista' && (
         state.prospectos.length === 0 ? (
@@ -5830,62 +5880,85 @@ function EmptyState({ onAdd }) {
 }
 
 // ── FILTER BAR ─────────────────────────────────────────────────
+// Por default los filtros van plegados — ocupan menos espacio en pantalla.
+// Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
+// toggle muestra un badge con la cantidad activos y queda destacado.
 function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || etiquetasArr.length > 0 || ordenFecha !== 'ninguno';
+  const filtrosCount =
+    (filterEstado !== 'todos' ? 1 : 0)
+    + (filterFecha !== 'todos' ? 1 : 0)
+    + (etiquetasArr.length > 0 ? 1 : 0)
+    + (ordenFecha !== 'ninguno' ? 1 : 0);
+  const hayFiltros = filtrosCount > 0;
+  const [open, setOpen] = useState(false);
   return (
-    <div className="filter-bar">
-      <div className="filter-group">
-        <label>Estado</label>
-        <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
-          <option value="todos">Todos</option>
-          <option value="nuevo">Nuevos</option>
-          <option value="pendiente">En gestión</option>
-          <option value="programado">Programados</option>
-          <option value="agendado">Agendados</option>
-          <option value="rechazado">Rechazados</option>
-        </select>
-      </div>
-      {setFilterEtiqueta && (
-        <div className="filter-group">
-          <label>Etiqueta</label>
-          <MultiSelectEtiqueta value={etiquetasArr} onChange={setFilterEtiqueta} />
-        </div>
-      )}
-      <div className="filter-group">
-        <label>Próximo contacto</label>
-        <select value={filterFecha} onChange={e => setFilterFecha(e.target.value)}>
-          <option value="todos">Cualquier momento</option>
-          <option value="vencidos">Vencidos</option>
-          <option value="hoy">Hoy</option>
-          <option value="semana">Próximos 7 días</option>
-          <option value="sin_fecha">Sin fecha</option>
-        </select>
-      </div>
-      {setOrdenFecha && (
-        <div className="filter-group">
-          <label>Ordenar</label>
-          <select value={ordenFecha} onChange={e => setOrdenFecha(e.target.value)}>
-            <option value="ninguno">Sin orden</option>
-            <option value="asc">Más próximas primero</option>
-            <option value="desc">Más lejanas primero</option>
-          </select>
-        </div>
-      )}
-      {hayFiltros && (
-        <button className="btn-mini"
-          onClick={() => {
-            setFilterEstado('todos');
-            setFilterFecha('todos');
-            if (setFilterEtiqueta) setFilterEtiqueta([]);
-            if (setOrdenFecha) setOrdenFecha('ninguno');
-          }}>
-          Limpiar
+    <div className="filter-bar-wrap">
+      <div className="filter-bar-header">
+        <button type="button"
+          className={`filter-bar-toggle${hayFiltros ? ' has-filters' : ''}${open ? ' is-open' : ''}`}
+          onClick={() => setOpen(o => !o)}
+          aria-expanded={open}>
+          <span>Filtros</span>
+          {hayFiltros && <span className="filter-bar-toggle-badge">{filtrosCount}</span>}
+          <span className="filter-bar-toggle-caret" aria-hidden="true">▾</span>
         </button>
-      )}
-      <div className="filter-count">
-        {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
+        {hayFiltros && (
+          <button className="btn-mini"
+            onClick={() => {
+              setFilterEstado('todos');
+              setFilterFecha('todos');
+              if (setFilterEtiqueta) setFilterEtiqueta([]);
+              if (setOrdenFecha) setOrdenFecha('ninguno');
+            }}>
+            Limpiar
+          </button>
+        )}
+        <div className="filter-count">
+          {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
+        </div>
       </div>
+      {open && (
+        <div className="filter-bar">
+          <div className="filter-group">
+            <label>Estado</label>
+            <select value={filterEstado} onChange={e => setFilterEstado(e.target.value)}>
+              <option value="todos">Todos</option>
+              <option value="nuevo">Nuevos</option>
+              <option value="pendiente">En gestión</option>
+              <option value="programado">Programados</option>
+              <option value="agendado">Agendados</option>
+              <option value="rechazado">Rechazados</option>
+            </select>
+          </div>
+          {setFilterEtiqueta && (
+            <div className="filter-group">
+              <label>Etiqueta</label>
+              <MultiSelectEtiqueta value={etiquetasArr} onChange={setFilterEtiqueta} />
+            </div>
+          )}
+          <div className="filter-group">
+            <label>Próximo contacto</label>
+            <select value={filterFecha} onChange={e => setFilterFecha(e.target.value)}>
+              <option value="todos">Cualquier momento</option>
+              <option value="vencidos">Vencidos</option>
+              <option value="hoy">Hoy</option>
+              <option value="semana">Próximos 7 días</option>
+              <option value="sin_fecha">Sin fecha</option>
+            </select>
+          </div>
+          {setOrdenFecha && (
+            <div className="filter-group">
+              <label>Ordenar</label>
+              <select value={ordenFecha} onChange={e => setOrdenFecha(e.target.value)}>
+                <option value="ninguno">Sin orden</option>
+                <option value="asc">Más próximas primero</option>
+                <option value="desc">Más lejanas primero</option>
+              </select>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
