@@ -714,7 +714,7 @@
     margin-bottom: 6px;
   }
   .field label .req { color: var(--estado-rechazado); margin-left: 2px; }
-  .field input[type=text], .field input[type=tel], .field select, .field textarea {
+  .field input[type=text], .field input[type=tel], .field input[type=date], .field input[type=time], .field select, .field textarea {
     width: 100%;
     padding: 10px 13px;
     border: 1.5px solid var(--borde);
@@ -732,6 +732,25 @@
   }
   .field textarea { resize: vertical; min-height: 80px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  /* Variante "grande" para los inputs de fecha/hora del modal Nueva Agenda
+     y similares — el dato más importante del modal merece más prominencia. */
+  .field-row.field-row-prominente { gap: 12px; margin-bottom: 18px; }
+  .field-row-prominente .field { margin-bottom: 0; }
+  .field-row-prominente .field label {
+    font-size: 0.74rem;
+    color: var(--azul-oscuro);
+  }
+  .field-row-prominente .field input[type=date],
+  .field-row-prominente .field input[type=time] {
+    padding: 14px 14px;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--azul-oscuro);
+    background: #f8fafc;
+    border-color: #cbd5e1;
+    text-align: center;
+    letter-spacing: 0.5px;
+  }
   .field-error {
     color: var(--estado-rechazado);
     font-size: 0.78rem;
@@ -9781,7 +9800,7 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
           <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
-          <div className="field-row">
+          <div className="field-row field-row-prominente">
             <div className="field">
               <label>Fecha <span className="req">*</span></label>
               <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} />
