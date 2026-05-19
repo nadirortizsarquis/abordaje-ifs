@@ -2377,7 +2377,7 @@
        Fila 3: buscador (full width).
        La altura sube para que el contenido principal no quede tapado
        (--header-h se override y el margin-top de .main respeta el cambio). */
-    :root { --header-h: 168px; }
+    :root { --header-h: 140px; }
     .header {
       height: auto;
       min-height: var(--header-h);
@@ -2386,7 +2386,7 @@
          valor utilizable en env(safe-area-inset-top). Forzamos un mínimo
          de 32px para que el logo/título no queden tapados por el reloj o
          la barra de status del celular. */
-      padding: max(env(safe-area-inset-top, 0px), 32px) 16px 14px;
+      padding: max(env(safe-area-inset-top, 0px), 32px) 16px 12px;
       gap: 10px;
       row-gap: 10px;
       align-items: center;
@@ -2405,13 +2405,19 @@
       line-height: 1.2;
     }
     .header-subtitle { display: none; }
+    /* En mobile combinamos buscador + botón Instrucciones en la última
+       fila para ahorrar una línea. El buscador toma el espacio que sobra
+       y el botón Instrucciones queda pegado a la derecha. */
     .header-search-slot {
-      order: 10; flex: 1 100%;
+      order: 10; flex: 1 1 auto;
       margin-left: 0; margin-right: 0;
     }
+    .header-search-slot .buscador-input { width: 100%; max-width: 100%; }
+    .header-search-slot .buscador-input:focus { width: 100%; }
     .header-instr-slot {
-      order: 4; margin-left: auto; margin-right: 0;
+      order: 11; margin-left: 6px; margin-right: 0; flex: 0 0 auto;
     }
+    .header-instr-slot .header-btn { padding: 7px 10px; font-size: 0.74rem; }
     .header-actions {
       order: 5; flex: 1 100%;
       gap: 8px; flex-wrap: wrap; justify-content: flex-end;
