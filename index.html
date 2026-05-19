@@ -76,12 +76,25 @@
   }
   .header-title {
     color: white; font-size: 1.15rem; font-weight: 600;
-    border-left: 2px solid rgba(255,255,255,0.3); padding-left: 16px;
+    padding-left: 16px;
     letter-spacing: 0.3px;
-    /* Title + subtitle se anclan al bottom del header, de manera que la
-       base del subtítulo queda alineada con la base del logo. */
+    /* Title + subtitle anclados al bottom; subido un poco respecto al
+       borde inferior para que respire. */
     align-self: flex-end;
-    padding-bottom: 4px;
+    padding-bottom: 10px;
+    position: relative;
+  }
+  /* Línea divisoria entre logo y título. Implementada como ::before en
+     lugar de border-left para poder despegarla del borde inferior. */
+  .header-title::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 4px;
+    bottom: 14px;
+    width: 2px;
+    background: rgba(255,255,255,0.3);
+    border-radius: 1px;
   }
   .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
   .header-actions { display: flex; gap: 10px; align-items: center; }
@@ -2460,11 +2473,15 @@
     .header-title {
       font-size: 1rem;
       padding-left: 12px;
-      border-left-width: 1px;
       flex: 1 1 auto;
       line-height: 1.2;
       align-self: flex-end;
-      padding-bottom: 3px;
+      padding-bottom: 8px;
+    }
+    .header-title::before {
+      top: 2px;
+      bottom: 10px;
+      width: 1px;
     }
     .header-subtitle { display: none; }
     /* En mobile combinamos buscador + botón Instrucciones en la última
