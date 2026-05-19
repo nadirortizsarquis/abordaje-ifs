@@ -70,14 +70,16 @@
     max-width: 280px;
     display: block;
     flex-shrink: 0;
-    align-self: flex-end;
+    /* En desktop el logo va arriba del header. La base del logo termina
+       a la altura del subtítulo "Gestión de prospectos · IFS". */
+    align-self: flex-start;
   }
   .header-title {
     color: white; font-size: 1.15rem; font-weight: 600;
     border-left: 2px solid rgba(255,255,255,0.3); padding-left: 16px;
     letter-spacing: 0.3px;
-    /* Alinea la base del título con la base del logo, en lugar del centro
-       vertical del header. Da una sensación más "asentada". */
+    /* Title + subtitle se anclan al bottom del header, de manera que la
+       base del subtítulo queda alineada con la base del logo. */
     align-self: flex-end;
     padding-bottom: 4px;
   }
@@ -1160,7 +1162,16 @@
     display: flex; align-items: center; gap: 12px;
     flex-wrap: wrap;
   }
-  .filter-bar-header .filter-count { margin-left: auto; }
+  /* extras (Excel/PDF/+Nuevo) van a la derecha del filter-bar-header */
+  .filter-bar-extras {
+    margin-left: auto;
+    display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap;
+  }
+  /* En el filter-bar-header el count va pegado al toggle "Filtros", no
+     empujado a la derecha — los extras (Excel/PDF/+Nuevo) son los que se
+     llevan el margin-left auto. */
+  .filter-bar-header .filter-count { margin-left: 0; }
   .filter-bar {
     display: flex;
     gap: 14px;
@@ -5595,25 +5606,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         </div>
       )}
 
-      {/* Header de página unificado: pestañas Lista/Tareas/Calendario a la
-          izquierda y acciones (Excel, PDF, + Nuevo) a la derecha en la misma
-          fila. El título "Mi lista de abordaje" se eliminó porque era
-          redundante con las pestañas y consumía espacio vertical. */}
+      {/* Header de página: solo las pestañas Lista/Tareas/Calendario.
+          Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
+          FilterBar para ahorrar una línea. */}
       <div className="main-head-combined">
         <ViewTabs view={view} setView={setView} />
-        <div className="main-head-actions">
-          <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">
-            Excel
-          </button>
-          <button className="btn-export" onClick={() => exportarProspectosPDF(state.prospectos, user)} title="Descargar lista en PDF">
-            PDF
-          </button>
-          {!readOnly && (
-            <button className="btn-primary" onClick={() => setShowAddModal(true)}>
-              + Nuevo prospecto
-            </button>
-          )}
-        </div>
       </div>
 
       {view === 'lista' && (
@@ -5632,6 +5629,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               setOrdenFecha={setOrdenFecha}
               mostrandoCount={filtrados.length}
               totalCount={state.prospectos.length}
+              extraActions={
+                <>
+                  <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">Excel</button>
+                  <button className="btn-export" onClick={() => exportarProspectosPDF(state.prospectos, user)} title="Descargar lista en PDF">PDF</button>
+                  {!readOnly && (
+                    <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Nuevo prospecto</button>
+                  )}
+                </>
+              }
             />
             {filtrados.length === 0 ? (
               <div className="empty">
@@ -5883,7 +5889,7 @@ function EmptyState({ onAdd }) {
 // Por default los filtros van plegados — ocupan menos espacio en pantalla.
 // Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
 // toggle muestra un badge con la cantidad activos y queda destacado.
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount }) {
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
   const filtrosCount =
     (filterEstado !== 'todos' ? 1 : 0)
@@ -5917,6 +5923,7 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
         <div className="filter-count">
           {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
         </div>
+        {extraActions && <div className="filter-bar-extras">{extraActions}</div>}
       </div>
       {open && (
         <div className="filter-bar">
