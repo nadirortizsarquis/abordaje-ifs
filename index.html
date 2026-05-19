@@ -2340,23 +2340,29 @@
     .header-btn { padding: 6px 10px; font-size: 0.74rem; }
   }
   @media (max-width: 720px) {
-    /* Header: 2 filas en mobile. La altura sube para que el contenido principal
-       no quede tapado (el `--header-h` se override y el margin-top de .main lo
-       respeta automáticamente). */
-    :root { --header-h: 130px; }
+    /* Header en mobile: 3 filas con respiración generosa.
+       Fila 1: logo + título + botón Instrucciones.
+       Fila 2: acciones (campanita, Ajustes, ADMIN, nombre, Salir).
+       Fila 3: buscador (full width).
+       La altura sube para que el contenido principal no quede tapado
+       (--header-h se override y el margin-top de .main respeta el cambio). */
+    :root { --header-h: 168px; }
     .header {
       height: auto;
       min-height: var(--header-h);
       flex-wrap: wrap;
-      padding: 8px 14px;
-      gap: 6px;
+      padding: 12px 16px;
+      gap: 10px;
+      row-gap: 10px;
+      align-items: center;
     }
-    .header-logo { height: 38px; max-width: 160px; }
+    .header-logo { height: 44px; max-width: 180px; }
     .header-title {
-      font-size: 0.88rem;
-      padding-left: 10px;
+      font-size: 0.98rem;
+      padding-left: 12px;
       border-left-width: 1px;
       flex: 1 1 auto;
+      line-height: 1.2;
     }
     .header-subtitle { display: none; }
     .header-search-slot {
@@ -2364,14 +2370,17 @@
       margin-left: 0; margin-right: 0;
     }
     .header-instr-slot {
-      order: 4; margin-left: auto; margin-right: 6px;
+      order: 4; margin-left: auto; margin-right: 0;
     }
     .header-actions {
-      order: 5; gap: 5px; flex-wrap: wrap; justify-content: flex-end;
+      order: 5; flex: 1 100%;
+      gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+      align-items: center;
     }
-    .header-btn { padding: 5px 9px; font-size: 0.72rem; }
-    .header-user { font-size: 0.72rem; padding: 3px 6px; }
-    .header-admin-badge { font-size: 0.58rem; padding: 1px 5px; }
+    .header-btn { padding: 7px 12px; font-size: 0.78rem; }
+    .header-user { font-size: 0.78rem; padding: 4px 9px; }
+    .header-admin-badge { font-size: 0.64rem; padding: 2px 6px; }
+    .bell-btn { width: 36px; height: 36px; }
 
     .main { padding: 20px 16px; }
     /* En mobile, la tabla de prospectos se convierte en lista de cards
@@ -3288,20 +3297,33 @@ function formatFechaCorta(iso) {
   return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
 }
 
+// Detecta si el iso original incluye componente de hora. Si solo trae fecha
+// (YYYY-MM-DD), no hay sentido en imprimir "00:00" porque ese cero es ruido
+// del parseo, no una hora real elegida por el user.
+function isoTieneHora(iso) {
+  return typeof iso === 'string' && iso.includes('T');
+}
+
 function formatFechaHora(iso) {
   if (!iso) return '';
+  if (!isoTieneHora(iso)) return formatFechaCorta(iso);
   const d = parseFechaLocal(iso);
   return `${formatFechaCorta(iso)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 function describeProximo(iso) {
   if (!iso) return { texto: '', urgencia: null };
+  const tieneHora = isoTieneHora(iso);
   const d = parseFechaLocal(iso);
   const hoy = new Date();
   const diffMs = d - hoy;
   const diffDias = diasEntre(d, hoy);
   if (diffMs < 0) return { texto: `vencido ${formatFechaCorta(iso)}`, urgencia: 'pasado' };
-  if (diffDias === 0) return { texto: `hoy ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, urgencia: 'hoy' };
+  if (diffDias === 0) {
+    return tieneHora
+      ? { texto: `hoy ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, urgencia: 'hoy' }
+      : { texto: 'hoy', urgencia: 'hoy' };
+  }
   return { texto: `para ${formatFechaHora(iso)}`, urgencia: 'futuro' };
 }
 
