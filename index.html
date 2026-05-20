@@ -1065,54 +1065,67 @@
     border-radius: 8px;
     padding: 8px 12px;
   }
+  /* Row 1: slots de ancho fijo para que fecha/chip/estrella/fechaObj/acciones
+     queden alineados verticalmente entre todas las gestiones del historial. */
   .historial-row {
-    display: flex; align-items: center; gap: 10px;
+    display: flex; align-items: center; gap: 6px;
     min-width: 0;
-    /* Si la fila no entra (chip ancho + ActorStar + observación + acciones),
-       wrappea a la siguiente línea en lugar de empujar la "×" fuera del
-       borde derecho del item. */
-    flex-wrap: wrap;
-    row-gap: 6px;
   }
-  /* Editar + × van agrupados a la derecha. Si el row wrappea, ambos botones
-     bajan juntos a la nueva línea — la "×" deja de quedar cortada. */
   .hist-row-actions {
     display: flex; align-items: center; gap: 4px;
-    flex-shrink: 0;
+    flex: 0 0 auto;
     margin-left: auto;
   }
   .hist-fecha-reg {
-    font-size: 0.74rem;
+    font-size: 0.72rem;
     color: var(--texto-suave);
     font-weight: 600;
     white-space: nowrap;
-    flex-shrink: 0;
-    min-width: 78px;
+    flex: 0 0 78px;
+  }
+  .hist-chip-slot {
+    flex: 0 0 150px;
+    display: inline-flex;
+    align-items: center;
+    overflow: hidden;
   }
   .historial-row .chip {
-    flex-shrink: 0;
+    padding: 2px 8px !important;
+    font-size: 0.65rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    display: inline-block;
   }
+  .hist-star-slot {
+    flex: 0 0 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .hist-star-slot .actor-star { margin-right: 0; }
   .hist-fecha-obj {
-    font-size: 0.78rem;
+    font-size: 0.74rem;
     color: var(--azul-oscuro);
     font-weight: 600;
     white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .hist-fecha-obj::before {
-    content: '→';
-    margin-right: 4px;
-    color: var(--texto-suave);
-    font-weight: 400;
-  }
-  .hist-obs {
-    font-size: 0.82rem;
-    color: var(--texto);
     flex: 1 1 auto;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .hist-arrow {
+    color: var(--texto-suave);
+    font-weight: 400;
+    margin-right: 2px;
+  }
+  /* Observación: bloque independiente debajo del row, hereda ancho del item. */
+  .hist-obs {
+    font-size: 0.8rem;
+    color: var(--texto);
+    margin-top: 4px;
+    overflow-wrap: anywhere;
   }
   .historial-row .btn-edit-mini,
   .historial-row .btn-hist-del {
@@ -1346,9 +1359,9 @@
     background: transparent;
     border: 1px solid var(--borde);
     color: var(--texto-suave);
-    padding: 3px 9px;
+    padding: 2px 7px;
     border-radius: 6px;
-    font-size: 0.72rem;
+    font-size: 0.68rem;
     cursor: pointer;
     transition: all 0.12s;
   }
@@ -6545,22 +6558,21 @@ function HistorialItem({ contacto, settings, readOnly, onSave, onDelete }) {
     <div className="historial-item">
       <div className="historial-row">
         <span className="hist-fecha-reg" title="Registrado el">{formatFechaCorta(fechaRegistro)}</span>
-        <span className="chip" style={{
-          color: cfg?.color, background: cfg?.bg,
-          padding: '3px 10px', borderRadius: 10, fontSize: '0.7rem',
-          fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px'
-        }}>
-          {cfg?.label || contacto.tipo}
-        </span>
-        <ActorStar item={contacto} />
-        {contacto.agendadoPara && (
-          <span className="hist-fecha-obj" title={tooltipObj}>
-            {formatFechaHora(contacto.agendadoPara)}
+        <span className="hist-chip-slot">
+          <span className="chip" style={{
+            color: cfg?.color, background: cfg?.bg,
+            borderRadius: 10,
+            fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.3px'
+          }} title={cfg?.label || contacto.tipo}>
+            {cfg?.label || contacto.tipo}
           </span>
-        )}
-        {contacto.observacion && (
-          <span className="hist-obs" title={contacto.observacion}>{contacto.observacion}</span>
-        )}
+        </span>
+        <span className="hist-star-slot"><ActorStar item={contacto} /></span>
+        <span className="hist-fecha-obj" title={contacto.agendadoPara ? tooltipObj : undefined}>
+          {contacto.agendadoPara && (
+            <><span className="hist-arrow">→</span>{formatFechaHora(contacto.agendadoPara)}</>
+          )}
+        </span>
         {!readOnly && (
           <div className="hist-row-actions">
             <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
@@ -6568,6 +6580,9 @@ function HistorialItem({ contacto, settings, readOnly, onSave, onDelete }) {
           </div>
         )}
       </div>
+      {contacto.observacion && (
+        <div className="hist-obs">{contacto.observacion}</div>
+      )}
     </div>
   );
 }
