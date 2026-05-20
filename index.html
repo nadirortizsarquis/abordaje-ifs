@@ -1068,6 +1068,18 @@
   .historial-row {
     display: flex; align-items: center; gap: 10px;
     min-width: 0;
+    /* Si la fila no entra (chip ancho + ActorStar + observación + acciones),
+       wrappea a la siguiente línea en lugar de empujar la "×" fuera del
+       borde derecho del item. */
+    flex-wrap: wrap;
+    row-gap: 6px;
+  }
+  /* Editar + × van agrupados a la derecha. Si el row wrappea, ambos botones
+     bajan juntos a la nueva línea — la "×" deja de quedar cortada. */
+  .hist-row-actions {
+    display: flex; align-items: center; gap: 4px;
+    flex-shrink: 0;
+    margin-left: auto;
   }
   .hist-fecha-reg {
     font-size: 0.74rem;
@@ -1339,7 +1351,6 @@
     font-size: 0.72rem;
     cursor: pointer;
     transition: all 0.12s;
-    margin-left: auto;
   }
   .btn-edit-mini:hover { border-color: var(--azul); color: var(--azul); }
 
@@ -6551,10 +6562,10 @@ function HistorialItem({ contacto, settings, readOnly, onSave, onDelete }) {
           <span className="hist-obs" title={contacto.observacion}>{contacto.observacion}</span>
         )}
         {!readOnly && (
-          <>
+          <div className="hist-row-actions">
             <button className="btn-edit-mini" onClick={() => setEditing(true)}>Editar</button>
             <button className="btn-hist-del" onClick={onDelete} title="Eliminar este registro">×</button>
-          </>
+          </div>
         )}
       </div>
     </div>
