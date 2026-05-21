@@ -4252,6 +4252,10 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
   const [loadingArchivadas, setLoadingArchivadas] = useState(false);
   const archivadasFetchAtRef = useRef(0);
   const wrapRef = useRef(null);
+  // Lock por prospectoId para serializar invocaciones de sincronizarSeguimiento.
+  // Sin esto, dos handleAddContacto rápidos (doble tap, auto-save) disparaban
+  // dos syncs concurrentes que duplican eventos en Google Calendar.
+  const syncLocksRef = useRef(new Map());
   const items = useMemo(
     () => buscarGlobal(state, query, gcalSearchEvents, incluirArchivadas ? tareasArchivadas : null),
     [state, query, gcalSearchEvents, incluirArchivadas, tareasArchivadas]
@@ -4848,8 +4852,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     // (el cascade de Supabase no toca Google).
     if (isPilot) {
       try {
-        const past = new Date(); past.setFullYear(past.getFullYear() - 2);
-        const future = new Date(); future.setFullYear(future.getFullYear() + 5);
+        // Rango muy amplio (-10 / +10 años) para cubrir cualquier evento
+        // histórico o agenda lejana del prospect. La operación de borrar un
+        // prospect es infrecuente; el costo extra del list es aceptable.
+        // (Una versión más eficiente sería filtrar por privateExtendedProperty
+        // en la edge function, pero requiere cambios server-side.)
+        const past = new Date(); past.setFullYear(past.getFullYear() - 10);
+        const future = new Date(); future.setFullYear(future.getFullYear() + 10);
         const evts = await gcalApi.list(past.toISOString(), future.toISOString());
         for (const ev of (evts || [])) {
           if (ev.extendedProperties?.private?.abordaje_prospect_id === id) {
@@ -4884,7 +4893,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Sincroniza la tarea (Abordar) y/o el agendado del prospect según el contacto activo.
   // contactoActivo: el contacto que define el seguimiento vigente. Si null/sin agendadoPara,
   // sólo limpia (no crea nada).
-  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
+  // _syncSeguimientoBody hace el trabajo crudo. sincronizarSeguimiento (más abajo)
+  // lo envuelve en un lock por prospectoId para evitar duplicados por race condition.
+  const _syncSeguimientoBody = async (prospectoId, contactoActivo, prevState) => {
     // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
     //    Consultamos directamente a Supabase en lugar de filtrar prevState.tareas.items
     //    para evitar duplicados cuando se encadenan gestiones rápidas (el closure
@@ -4922,8 +4933,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     let idsAgendadosBorrados = new Set();
     if (isPilot) {
       try {
+        // Rango -1d / +10 años. El "+6 meses" original dejaba huérfanas agendas
+        // a 7+ meses (zombies que aparecen luego como del prospect viejo).
+        // Mantenemos `now` como floor (no tocamos pasado: histórico intacto).
         const now = new Date();
-        const futuroMax = new Date(); futuroMax.setMonth(futuroMax.getMonth() + 6);
+        const futuroMax = new Date(); futuroMax.setFullYear(futuroMax.getFullYear() + 10);
         const evts = await gcalApi.list(now.toISOString(), futuroMax.toISOString());
         for (const ev of (evts || [])) {
           const pid = ev.extendedProperties?.private?.abordaje_prospect_id;
@@ -5016,6 +5030,26 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
+  // Wrapper público de sincronizarSeguimiento. Serializa las invocaciones por
+  // prospectoId — si llega una segunda mientras corre la primera, espera a que
+  // termine antes de arrancar. Esto evita duplicados en Google Calendar cuando
+  // dos gestiones se registran rápido (doble tap mobile, auto-save, etc.).
+  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
+    const prevLock = syncLocksRef.current.get(prospectoId) || Promise.resolve();
+    const run = prevLock.catch(() => {}).then(() =>
+      _syncSeguimientoBody(prospectoId, contactoActivo, prevState)
+    );
+    syncLocksRef.current.set(prospectoId, run);
+    try {
+      return await run;
+    } finally {
+      // Solo limpiar si nadie más encoló otra sync detrás nuestro.
+      if (syncLocksRef.current.get(prospectoId) === run) {
+        syncLocksRef.current.delete(prospectoId);
+      }
+    }
+  };
+
   const handleAddContacto = async (prospectoId, contacto) => {
     if (guardReadOnly()) return;
     try {
@@ -5032,10 +5066,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       }));
       await storage.updateProspecto(prospectoId, { estado: nuevoEstado, proximoContacto: nuevoProx });
 
-      // Sincronización tarea/agenda automática (solo si trae fecha objetivo)
-      if (contacto.agendadoPara) {
-        await sincronizarSeguimiento(prospectoId, nuevo, state);
-      }
+      // Sincronización tarea/agenda automática. La llamamos SIEMPRE (incluso
+      // cuando el contacto nuevo no trae agendadoPara, ej. 'rechazado' o
+      // 'contestador'): así limpiamos cualquier tarea auto / agenda anterior
+      // que ya no aplica. La función maneja el caso sin agendadoPara como
+      // "solo limpiar, no crear nada".
+      await sincronizarSeguimiento(prospectoId, nuevo, state);
 
       showToast('Gestión registrada');
     } catch (e) { handleErr(e, 'createContacto'); }
@@ -5680,12 +5716,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         observaciones,
         proximoContacto
       });
+      // Si la tarea tenía evento en Google Calendar, lo borramos antes de
+      // eliminar la tarea — sino el evento queda huérfano con un
+      // abordaje_tarea_id apuntando a un id que ya no existe.
+      if (isPilot && tarea.googleEventId) {
+        try { await gcalApi.delete(tarea.googleEventId); }
+        catch (e) { console.warn('gcal del tarea (convertir):', e?.message || e); }
+      }
       await storage.deleteTarea(tareaId);
       setState(s => ({
         ...s,
         prospectos: [prospect, ...s.prospectos],
         tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== tareaId) }
       }));
+      if (isPilot) bumpGcal();
       setTareaEditando(null);
       setConvertirTareaId(null);
       showToast('Prospecto creado desde tarea');
