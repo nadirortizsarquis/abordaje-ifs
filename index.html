@@ -4745,6 +4745,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // suelta el drag de una columna, el handler arma este state y se renderiza
   // ConfirmColMoveModal. Si confirma, ejecutamos el move. Si cancela, descartamos.
   const [pendingColMove, setPendingColMove] = useState(null);
+  // Modal de confirmación al eliminar una tarea. Si la tarea tiene fecha, da
+  // opción de "solo sacar del calendar" además de "borrar tarea completa".
+  // Si no tiene fecha, solo pregunta borrar / cancelar.
+  const [pendingDeleteTarea, setPendingDeleteTarea] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -5426,7 +5430,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
   const handleDeleteTarea = async (id) => {
     if (guardReadOnly()) return;
-    if (!confirm('¿Eliminar esta tarea?')) return;
+    // La confirmación se hace ahora desde ConfirmDeleteTareaModal (que ofrece
+    // además "solo sacar del calendar" si la tarea tiene fecha).
     const prev = state.tareas.items;
     const tarea = prev.find(t => t.id === id);
     setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
@@ -5942,7 +5947,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           readOnly={readOnly}
           onClose={() => setTareaEditando(null)}
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
-          onDelete={() => handleDeleteTarea(tareaEditando.id)}
+          onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
           onConvertir={() => setConvertirTareaId(tareaEditando.id)}
         />
@@ -5967,6 +5972,25 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           position={pendingColMove.position}
           onCancel={() => setPendingColMove(null)}
           onConfirm={handleConfirmMoveColumna}
+        />
+      )}
+
+      {pendingDeleteTarea && (
+        <ConfirmDeleteTareaModal
+          tarea={pendingDeleteTarea}
+          onCancel={() => setPendingDeleteTarea(null)}
+          onUnlinkCalendar={async () => {
+            const t = pendingDeleteTarea;
+            setPendingDeleteTarea(null);
+            await handleUpdateTarea(t.id, { fechaRecordatorio: null, horaRecordatorio: null });
+            setTareaEditando(null);
+            showToast('Tarea sacada del calendario');
+          }}
+          onDeleteAll={async () => {
+            const t = pendingDeleteTarea;
+            setPendingDeleteTarea(null);
+            await handleDeleteTarea(t.id);
+          }}
         />
       )}
 
@@ -9664,6 +9688,75 @@ function ConfirmColMoveModal({ movingName, targetName, position, onCancel, onCon
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={onConfirm} autoFocus>Mover</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: CONFIRMAR ELIMINAR TAREA ───────────────────────────
+// Aparece al hacer click "Eliminar" en TareaModal. Si la tarea tiene fecha
+// (= hay un evento en el calendar), ofrece la opción de "solo sacar del
+// calendar" para mantener la tarea viva en el Kanban sin la cita asociada.
+// Si no tiene fecha, solo pregunta borrar / cancelar.
+function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAll }) {
+  const tieneFecha = !!tarea.fechaRecordatorio;
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const fechaTxt = tieneFecha
+    ? (tarea.horaRecordatorio
+        ? `${formatFechaCorta(tarea.fechaRecordatorio)} ${tarea.horaRecordatorio}`
+        : formatFechaCorta(tarea.fechaRecordatorio))
+    : '';
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-tarea-title" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3 id="confirm-del-tarea-title">Eliminar tarea</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 12px', lineHeight: 1.5 }}>
+            <strong>{tarea.titulo || '(sin título)'}</strong>
+          </p>
+          {tieneFecha ? (
+            <>
+              <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: '0 0 14px', lineHeight: 1.5 }}>
+                Esta tarea tiene una cita en el calendar para el <strong>{fechaTxt}</strong>. ¿Qué querés hacer?
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <button type="button" className="btn-secondary" onClick={onUnlinkCalendar}
+                  style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
+                  <strong style={{ display: 'block', marginBottom: 3 }}>Solo sacar del calendar</strong>
+                  <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', fontWeight: 400 }}>
+                    La tarea sigue viva en el Kanban, sin fecha ni cita.
+                  </span>
+                </button>
+                <button type="button" className="btn-danger" onClick={onDeleteAll}
+                  style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
+                  <strong style={{ display: 'block', marginBottom: 3 }}>Borrar tarea completa</strong>
+                  <span style={{ fontSize: '0.78rem', opacity: 0.9, fontWeight: 400 }}>
+                    Saca la tarea del Kanban y borra el evento del calendar.
+                  </span>
+                </button>
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: '0.88rem', color: 'var(--texto-suave)', margin: '0 0 6px', lineHeight: 1.5 }}>
+              Esta acción no se puede deshacer.
+            </p>
+          )}
+        </div>
+        <div className="modal-footer" style={{ justifyContent: tieneFecha ? 'flex-end' : 'space-between' }}>
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          {!tieneFecha && (
+            <button className="btn-danger" onClick={onDeleteAll} autoFocus>Eliminar</button>
+          )}
         </div>
       </div>
     </div>
