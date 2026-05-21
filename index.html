@@ -443,6 +443,42 @@
   }
   .help-callout strong { display: block; margin-bottom: 4px; color: inherit; }
 
+  /* ── Banner de desconexión de Google Calendar ── */
+  .gcal-disconnected-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 4px 0;
+    padding: 10px 14px;
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 8px;
+    color: #92400e;
+    font-size: 0.86rem;
+    font-weight: 500;
+  }
+  .gcal-disconnected-icon {
+    font-size: 1rem;
+    flex: 0 0 auto;
+  }
+  .gcal-disconnected-text {
+    flex: 1 1 auto;
+    line-height: 1.4;
+  }
+  .gcal-disconnected-cta {
+    flex: 0 0 auto;
+    background: #d97706;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  .gcal-disconnected-cta:hover { background: #b45309; }
+
   /* ── KANBAN TAREAS ─ violeta #7c3aed para distinguir de estados de prospecto ── */
   .kanban-wrap {
     display: flex;
@@ -4149,9 +4185,15 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
   if (q.length < 2) return [];
   const resultados = [];
 
-  // Prospectos (lista de abordaje)
+  // Prospectos (lista de abordaje). El haystack incluye también las
+  // observaciones de cada gestión registrada (contactos[].observacion), así
+  // un texto cargado en una gestión vieja te lleva al prospect que la tiene.
   for (const p of state.prospectos || []) {
-    const haystack = [p.nombre, p.telefono, p.detalle, p.observaciones, p.referente, p.preferenciaContacto]
+    const obsContactos = (p.contactos || [])
+      .map(c => c.observacion)
+      .filter(Boolean)
+      .join(' ');
+    const haystack = [p.nombre, p.telefono, p.detalle, p.observaciones, p.referente, p.preferenciaContacto, obsContactos]
       .filter(Boolean).join(' ').toLowerCase();
     if (haystack.includes(q)) {
       resultados.push({
@@ -4250,6 +4292,14 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
 
 function BuscadorGlobal({ state, isPilot, onClickItem }) {
   const [query, setQuery] = useState('');
+  // Debounce de 200ms: el input refleja la query al instante (responsive),
+  // pero el filtrado solo corre cuando el user deja de tipear 200ms. Evita
+  // recorrer todo el state en cada keystroke con 500+ prospectos.
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(query), 200);
+    return () => clearTimeout(t);
+  }, [query]);
   const [open, setOpen] = useState(false);
   // Cache de eventos de Google para búsqueda (rango amplio, lazy load).
   // Se carga cuando el user escribe ≥2 chars; se mantiene hasta cerrar el
@@ -4270,15 +4320,16 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
   // dos syncs concurrentes que duplican eventos en Google Calendar.
   const syncLocksRef = useRef(new Map());
   const items = useMemo(
-    () => buscarGlobal(state, query, gcalSearchEvents, incluirArchivadas ? tareasArchivadas : null),
-    [state, query, gcalSearchEvents, incluirArchivadas, tareasArchivadas]
+    () => buscarGlobal(state, debouncedQuery, gcalSearchEvents, incluirArchivadas ? tareasArchivadas : null),
+    [state, debouncedQuery, gcalSearchEvents, incluirArchivadas, tareasArchivadas]
   );
 
   // Cuando el user escribe ≥2 chars Y estamos en piloto, cargamos eventos de
   // Google con rango amplio (-3 a +12 meses) una sola vez. Cache 5 min.
+  // Usamos debouncedQuery para no triggear fetch en cada keystroke.
   useEffect(() => {
     if (!isPilot) return;
-    if (query.trim().length < 2) return;
+    if (debouncedQuery.trim().length < 2) return;
     const now = Date.now();
     if (now - gcalFetchAtRef.current < 5 * 60 * 1000 && gcalSearchEvents) return;
     let cancelled = false;
@@ -4288,13 +4339,13 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
       .then(evts => { if (!cancelled) { setGcalSearchEvents(evts || []); gcalFetchAtRef.current = Date.now(); } })
       .catch(err => console.warn('buscador gcal:', err?.message || err));
     return () => { cancelled = true; };
-  }, [isPilot, query]);
+  }, [isPilot, debouncedQuery]);
 
   // Fetch on-demand de tareas archivadas: solo si el check está tildado y hay
   // query ≥ 2 chars. Cache 5 min para no machacar Supabase.
   useEffect(() => {
     if (!incluirArchivadas) return;
-    if (query.trim().length < 2) return;
+    if (debouncedQuery.trim().length < 2) return;
     const now = Date.now();
     if (now - archivadasFetchAtRef.current < 5 * 60 * 1000 && tareasArchivadas) return;
     let cancelled = false;
@@ -4304,7 +4355,7 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
       .catch(err => console.warn('buscador archivadas:', err?.message || err))
       .finally(() => { if (!cancelled) setLoadingArchivadas(false); });
     return () => { cancelled = true; };
-  }, [incluirArchivadas, query]);
+  }, [incluirArchivadas, debouncedQuery]);
 
   useEffect(() => {
     const onClick = (e) => {
@@ -4797,6 +4848,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Detecta si el evento es parte de una serie recurrente y avisa al user
   // que se borra toda la serie (la edge function aún no maneja "esta sola").
   const [pendingDeleteAgenda, setPendingDeleteAgenda] = useState(null);
+  // Modal para crear nueva columna del Kanban (reemplaza el prompt() nativo
+  // por uno coherente con el resto de la app, validación y autofocus).
+  const [addingColumna, setAddingColumna] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -5694,13 +5748,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
-  const handleAddColumna = async () => {
+  // Click en "+ Nueva columna" abre modal. El modal hace la validación de
+  // título no vacío y autofocus; al confirmar dispara handleConfirmAddColumna.
+  const handleAddColumna = () => {
     if (guardReadOnly()) return;
-    const titulo = prompt('Nombre de la nueva columna:');
-    if (!titulo || !titulo.trim()) return;
+    setAddingColumna(true);
+  };
+  const handleConfirmAddColumna = async (titulo) => {
+    setAddingColumna(false);
+    const t = (titulo || '').trim();
+    if (!t) return;
     try {
       const orden = state.tareas.columnas.length;
-      const c = await storage.createColumna(titulo.trim(), orden);
+      const c = await storage.createColumna(t, orden);
       setState(s => ({
         ...s,
         tareas: { ...s.tareas, columnas: [...s.tareas.columnas, c] }
@@ -6072,6 +6132,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectAgenda={(a) => setAgendaEditando(a)}
             onSelectOrphan={(ev) => setPendingOrphanEvent(ev)}
             onGcalActorIdsLoaded={handleGcalActorIdsLoaded}
+            onOpenSettings={() => setShowSettings(true)}
             onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
@@ -6198,6 +6259,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           isRecurring={pendingDeleteAgenda.isRecurring}
           onCancel={() => setPendingDeleteAgenda(null)}
           onConfirm={handleConfirmDeleteAgenda}
+        />
+      )}
+
+      {addingColumna && (
+        <AddColumnaModal
+          onCancel={() => setAddingColumna(false)}
+          onConfirm={handleConfirmAddColumna}
         />
       )}
 
@@ -7453,7 +7521,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -7461,6 +7529,9 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
   // rango o cuando el padre bumpea `gcalReloadKey` (post create/update/delete).
   const [gcalEvents, setGcalEvents] = useState([]);
   const [gcalLoading, setGcalLoading] = useState(false);
+  // true cuando la edge function gcal-events devolvió `skip` (token revocado
+  // por el user en Google o sin gcal_enabled). Muestra banner para reconectar.
+  const [gcalDisconnected, setGcalDisconnected] = useState(false);
 
   const { timeMin, timeMax } = useMemo(() => calcRangeForGcal(mode, cursor), [mode, cursor]);
   useEffect(() => {
@@ -7470,13 +7541,22 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     gcalApi.list(timeMin, timeMax)
       .then(evts => {
         if (cancelled) return;
-        setGcalEvents(evts || []);
+        // gcalApi.list devuelve null cuando la edge function respondió skip
+        // (token expirado, revocado o sin gcal_enabled). Distinto a [] que
+        // significa "fetch OK pero sin eventos en el rango".
+        if (evts === null) {
+          setGcalDisconnected(true);
+          setGcalEvents([]);
+          return;
+        }
+        setGcalDisconnected(false);
+        setGcalEvents(evts);
         // Propaga al padre los actor_ids encontrados en los eventos de Google
         // — App los necesita para que ActorStar muestre el nombre real del
         // asistente (en lugar del fallback "asistente") cuando creó el evento.
         if (onGcalActorIdsLoaded) {
           const ids = new Set();
-          for (const ev of (evts || [])) {
+          for (const ev of evts) {
             const aid = ev?.extendedProperties?.private?.abordaje_actor_id;
             if (aid) ids.add(aid);
           }
@@ -7575,8 +7655,11 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     </div>
   );
 
+  // Render del calendar según mode. Se envuelve más abajo con el banner de
+  // desconexión Google si aplica.
+  let calendarNode;
   if (mode === 'mes') {
-    return <MonthCalendar
+    calendarNode = <MonthCalendar
       cursor={cursor}
       events={events}
       eventsByKey={eventsByKey}
@@ -7587,9 +7670,8 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       onJumpTo={jumpTo}
       subTabs={subTabs}
     />;
-  }
-  if (mode === 'semana') {
-    return <WeekCalendar
+  } else if (mode === 'semana') {
+    calendarNode = <WeekCalendar
       anchorDate={cursor}
       events={events}
       settings={settings}
@@ -7601,21 +7683,40 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       subTabs={subTabs}
       ndays={settings.includeWeekends ? 7 : 5}
     />;
+  } else {
+    // mode === 'hoy'
+    calendarNode = <WeekCalendar
+      anchorDate={cursor}
+      events={events}
+      settings={settings}
+      onSelectEvent={onSelectEvent}
+      onSlotClick={onSlotClick}
+      onMoveEvent={onMoveEvent}
+      goPrev={goPrev} goNext={goNext} goToday={goToday}
+      onJumpTo={jumpTo}
+      subTabs={subTabs}
+      ndays={1}
+      singleDay={true}
+    />;
   }
-  // mode === 'hoy'
-  return <WeekCalendar
-    anchorDate={cursor}
-    events={events}
-    settings={settings}
-    onSelectEvent={onSelectEvent}
-    onSlotClick={onSlotClick}
-    onMoveEvent={onMoveEvent}
-    goPrev={goPrev} goNext={goNext} goToday={goToday}
-    onJumpTo={jumpTo}
-    subTabs={subTabs}
-    ndays={1}
-    singleDay={true}
-  />;
+  return (
+    <>
+      {gcalDisconnected && (
+        <div className="gcal-disconnected-banner" role="alert">
+          <span className="gcal-disconnected-icon" aria-hidden="true">⚠</span>
+          <span className="gcal-disconnected-text">
+            La conexión con Google Calendar se interrumpió (token expirado o revocado). Reconectá para ver y sincronizar tus eventos.
+          </span>
+          {onOpenSettings && (
+            <button type="button" className="gcal-disconnected-cta" onClick={onOpenSettings}>
+              Reconectar
+            </button>
+          )}
+        </div>
+      )}
+      {calendarNode}
+    </>
+  );
 }
 
 // ── MONTH/YEAR PICKER (popover en título del calendario) ─────
@@ -10006,6 +10107,51 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ── MODAL: AGREGAR COLUMNA KANBAN ─────────────────────────────
+// Reemplaza el prompt() nativo con un modal estándar de la app.
+// Valida que el título no esté vacío.
+function AddColumnaModal({ onCancel, onConfirm }) {
+  const [titulo, setTitulo] = useState('');
+  const [error, setError] = useState('');
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const confirmar = () => {
+    const t = titulo.trim();
+    if (!t) { setError('El nombre no puede estar vacío.'); return; }
+    onConfirm(t);
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <form className="modal" role="dialog" aria-modal="true" aria-labelledby="add-col-title"
+        style={{ maxWidth: 420 }}
+        onSubmit={(e) => { e.preventDefault(); confirmar(); }}>
+        <div className="modal-header">
+          <h3 id="add-col-title">Nueva columna</h3>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <div className="field">
+            <label>Nombre <span className="req">*</span></label>
+            <input type="text" value={titulo} autoFocus
+              onChange={e => { setTitulo(e.target.value); setError(''); }}
+              placeholder="Ej: Seguimiento, Cerradas, Pendientes…" />
+          </div>
+          {error && <div className="field-error">{error}</div>}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button type="submit" className="btn-primary">Crear</button>
+        </div>
+      </form>
     </div>
   );
 }
