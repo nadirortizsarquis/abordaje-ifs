@@ -4753,6 +4753,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // opción de "solo sacar del calendar" además de "borrar tarea completa".
   // Si no tiene fecha, solo pregunta borrar / cancelar.
   const [pendingDeleteTarea, setPendingDeleteTarea] = useState(null);
+  // Evento huérfano del calendar (un evento Google con abordaje_tarea_id o
+  // abordaje_prospect_id que no coincide con el state actual — típicamente
+  // residuos de bugs viejos de sync). Al clickearlo, en lugar de abrir el
+  // modal de la tarea/prospect (que mostraría OTROS datos), abrimos un modal
+  // específico para borrarlo del calendar sin tocar la entidad subyacente.
+  const [pendingOrphanEvent, setPendingOrphanEvent] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -4895,7 +4901,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // sólo limpia (no crea nada).
   // _syncSeguimientoBody hace el trabajo crudo. sincronizarSeguimiento (más abajo)
   // lo envuelve en un lock por prospectoId para evitar duplicados por race condition.
-  const _syncSeguimientoBody = async (prospectoId, contactoActivo, prevState) => {
+  const _syncSeguimientoBody = async (prospectoId, contactoActivo, prevState, opts = {}) => {
     // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
     //    Consultamos directamente a Supabase en lugar de filtrar prevState.tareas.items
     //    para evitar duplicados cuando se encadenan gestiones rápidas (el closure
@@ -4978,7 +4984,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         try {
           await gcalApi.create(buildGoogleEventBody({
             startIso: contactoActivo.agendadoPara,
-            summary: `Cita — ${prospect?.nombre || 'prospect'}`,
+            // Si el caller pasó un título explícito (típicamente "Nueva agenda"
+            // desde el calendar con form.titulo lleno), lo usamos en lugar del
+            // default. Sino, "Cita — <nombre>".
+            summary: opts.summaryOverride || `Cita — ${prospect?.nombre || 'prospect'}`,
             description: contactoActivo.observacion || '',
             prospectId: prospectoId,
           }));
@@ -5034,10 +5043,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // prospectoId — si llega una segunda mientras corre la primera, espera a que
   // termine antes de arrancar. Esto evita duplicados en Google Calendar cuando
   // dos gestiones se registran rápido (doble tap mobile, auto-save, etc.).
-  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState) => {
+  // `opts.summaryOverride`: si se pasa, se usa como título del evento Google
+  // en lugar del default "Cita — <nombre>". Útil cuando el user creó la agenda
+  // desde el calendar con un título explícito.
+  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState, opts = {}) => {
     const prevLock = syncLocksRef.current.get(prospectoId) || Promise.resolve();
     const run = prevLock.catch(() => {}).then(() =>
-      _syncSeguimientoBody(prospectoId, contactoActivo, prevState)
+      _syncSeguimientoBody(prospectoId, contactoActivo, prevState, opts)
     );
     syncLocksRef.current.set(prospectoId, run);
     try {
@@ -5050,7 +5062,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
-  const handleAddContacto = async (prospectoId, contacto) => {
+  const handleAddContacto = async (prospectoId, contacto, opts = {}) => {
     if (guardReadOnly()) return;
     try {
       const nuevo = await storage.createContacto(prospectoId, contacto);
@@ -5071,7 +5083,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       // 'contestador'): así limpiamos cualquier tarea auto / agenda anterior
       // que ya no aplica. La función maneja el caso sin agendadoPara como
       // "solo limpiar, no crear nada".
-      await sincronizarSeguimiento(prospectoId, nuevo, state);
+      await sincronizarSeguimiento(prospectoId, nuevo, state, opts);
 
       showToast('Gestión registrada');
     } catch (e) { handleErr(e, 'createContacto'); }
@@ -5285,6 +5297,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (err) { handleErr(err, 'moveEvent'); }
   };
 
+  // Borrar un evento huérfano del Google Calendar. No toca la tarea/prospect
+  // subyacente (esos están "vivos" en el state apuntando a otro evento, o
+  // ya fueron borrados). Solo elimina el evento Google que quedó colgado.
+  const handleDeleteOrphanEvent = async (event) => {
+    setPendingOrphanEvent(null);
+    if (!isPilot || !event?.googleEvent?.id) return;
+    try {
+      const calendarId = event.googleEvent._gcalId || undefined;
+      await gcalApi.delete(event.googleEvent.id, calendarId);
+      bumpGcal();
+      showToast('Evento huérfano eliminado del calendar');
+    } catch (e) { handleErr(e, 'deleteOrphanEvent'); }
+  };
+
   const handleUpdateAgenda = async (agendaId, patch, gcalCalendarId) => {
     if (guardReadOnly()) return;
     try {
@@ -5346,11 +5372,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           referente: '', observaciones: '',
         });
         setState(s => ({ ...s, prospectos: [prospecto, ...s.prospectos] }));
-        await handleAddContacto(prospecto.id, {
-          tipo: 'agendado',
-          agendadoPara: agendadoParaIso,
-          observacion: nota,
-        });
+        // Pasamos el título del modal como summaryOverride: si el user puso
+        // "Cita reunión Pérez" en el form, queremos ese título en el evento
+        // de Google, no el default "Cita — nombre".
+        const titulo = (form.titulo || '').trim();
+        await handleAddContacto(
+          prospecto.id,
+          {
+            tipo: 'agendado',
+            agendadoPara: agendadoParaIso,
+            observacion: nota,
+          },
+          titulo ? { summaryOverride: titulo } : {}
+        );
       } else if (isPilot) {
         // Agenda standalone en Google directo (sin prospect, sin abordaje_agendados).
         await gcalApi.create(buildGoogleEventBody({
@@ -5701,12 +5735,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (tarea.observacion) notasParts.push(tarea.observacion);
     const observaciones = notasParts.join('\n\n');
 
-    let proximoContacto = null;
-    if (tarea.fechaRecordatorio) {
-      proximoContacto = tarea.horaRecordatorio
-        ? `${tarea.fechaRecordatorio}T${tarea.horaRecordatorio}:00`
-        : tarea.fechaRecordatorio;
-    }
+    // Si la tarea tenía fecha, vamos a registrar un contacto inicial tipo
+    // 'fecha_exacta' después de crear el prospect. Eso queda como gestión
+    // visible en el historial Y dispara sincronizarSeguimiento que recrea
+    // la tarea auto (lila) + evento Google asociada al prospect. Sin esto
+    // el prospect quedaba con proximoContacto pero sin contactos[] →
+    // deriveEstado decía 'nuevo' (incoherente).
+    const tareaConFecha = !!tarea.fechaRecordatorio;
+    const agendadoParaIso = tareaConFecha
+      ? (tarea.horaRecordatorio
+          ? `${tarea.fechaRecordatorio}T${tarea.horaRecordatorio}:00`
+          : tarea.fechaRecordatorio)
+      : null;
 
     const nombreCompleto = `${(nombre || '').trim()} ${(apellido || '').trim()}`.trim();
 
@@ -5714,7 +5754,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       const prospect = await storage.createProspecto({
         nombre: nombreCompleto,
         observaciones,
-        proximoContacto
+        // No pasamos proximoContacto acá: si la tarea tenía fecha, la setea
+        // sincronizarSeguimiento abajo a través del contacto que se crea.
       });
       // Si la tarea tenía evento en Google Calendar, lo borramos antes de
       // eliminar la tarea — sino el evento queda huérfano con un
@@ -5729,6 +5770,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         prospectos: [prospect, ...s.prospectos],
         tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== tareaId) }
       }));
+      // Si tenía fecha, registramos contacto inicial. sincronizarSeguimiento
+      // se encarga de crear la tarea auto + evento Google nuevo.
+      if (tareaConFecha) {
+        await handleAddContacto(prospect.id, {
+          tipo: 'fecha_exacta',
+          agendadoPara: agendadoParaIso,
+          observacion: tarea.titulo || 'Convertido desde tarea',
+        });
+      }
       if (isPilot) bumpGcal();
       setTareaEditando(null);
       setConvertirTareaId(null);
@@ -5925,6 +5975,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectProspecto={setSelectedId}
             onSelectTarea={(t) => setTareaEditando(t)}
             onSelectAgenda={(a) => setAgendaEditando(a)}
+            onSelectOrphan={(ev) => setPendingOrphanEvent(ev)}
             onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
@@ -6035,6 +6086,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             setPendingDeleteTarea(null);
             await handleDeleteTarea(t.id);
           }}
+        />
+      )}
+
+      {pendingOrphanEvent && (
+        <OrphanEventModal
+          event={pendingOrphanEvent}
+          onCancel={() => setPendingOrphanEvent(null)}
+          onDelete={() => handleDeleteOrphanEvent(pendingOrphanEvent)}
         />
       )}
 
@@ -7131,8 +7190,15 @@ function calcRangeForGcal(mode, cursor) {
 // Mapea eventos de Google Calendar al formato interno del calendar de Abordaje.
 // Propaga `gcalColor` (background del calendar de origen) y `gcalCalendarName`
 // para pintar eventos externos con el color/nombre del calendario en Google.
-function extractGcalEventsForCalendar(gcalEvents, prospectos) {
+// `tareasItems` se usa para detectar eventos huérfanos: eventos con
+// `abordaje_tarea_id` cuya tarea ya no existe en state O cuya tarea apunta
+// a otro evento (típicamente eventos viejos que quedaron en Google después
+// de editar la fecha de la tarea cuando había un bug de sync). Los huérfanos
+// se marcan con `isOrphan=true` y el click abre un modal específico que
+// permite borrarlos sin tocar la tarea.
+function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
   const events = [];
+  const tareasById = new Map((tareasItems || []).map(t => [t.id, t]));
   // Deduplicate por id (eventos compartidos pueden aparecer en varios calendars).
   const seen = new Set();
   for (const ev of (gcalEvents || [])) {
@@ -7146,12 +7212,21 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos) {
     const tareaId = ext.abordaje_tarea_id || null;
     let kind = 'agenda';
     let prospectoNombre = null;
+    let isOrphan = false;
     if (prospectoId) {
       kind = 'prospecto';
       const p = prospectos.find(x => x.id === prospectoId);
       prospectoNombre = p?.nombre || '(prospect eliminado)';
+      // Si el prospect ya no existe, es huérfano.
+      if (!p) isOrphan = true;
     } else if (tareaId) {
       kind = 'tarea';
+      const tarea = tareasById.get(tareaId);
+      // Huérfano si: la tarea ya no existe, O existe pero apunta a otro evento
+      // (duplicación de sync histórica antes del fix de googleEventId).
+      if (!tarea || (tarea.googleEventId && tarea.googleEventId !== ev.id)) {
+        isOrphan = true;
+      }
     }
     events.push({
       id: ev.id,
@@ -7160,6 +7235,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos) {
       prospectoId,
       tareaId,
       prospectoNombre,
+      isOrphan,
       label: prospectoNombre || ev.summary || '(sin título)',
       fecha: start,
       tipo: 'agendado',
@@ -7273,7 +7349,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onMoveEvent, onSlotClick }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -7295,7 +7371,7 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
   }, [isPilot, timeMin, timeMax, gcalReloadKey]);
 
   const events = useMemo(() => {
-    if (isPilot) return extractGcalEventsForCalendar(gcalEvents, prospectos);
+    if (isPilot) return extractGcalEventsForCalendar(gcalEvents, prospectos, tareasState?.items);
     return extractCalendarEvents(prospectos, tareasState, agendados);
   }, [isPilot, gcalEvents, prospectos, tareasState, agendados]);
   const eventsByKey = useMemo(() => eventsByDayKey(events), [events]);
@@ -7304,6 +7380,14 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
   // En piloto los eventos provienen de Google y portan googleEvent/tareaId/prospectoId.
   // En non-piloto vienen del state local con tareaData/agendaData/prospectoId.
   const onSelectEvent = useCallback((e) => {
+    // Si es huérfano (evento Google con tareaId/prospectoId que no matchea
+    // el state actual), no abrimos el modal de la entidad subyacente sino
+    // un modal específico que ofrece borrarlo del calendar. Sino sería
+    // confuso: el modal mostraría datos de OTRO evento (el actual de la tarea).
+    if (e.isOrphan && onSelectOrphan) {
+      onSelectOrphan(e);
+      return;
+    }
     if (e.kind === 'tarea' && onSelectTarea) {
       if (e.tareaData) onSelectTarea(e.tareaData);
       else if (e.tareaId) {
@@ -7315,7 +7399,7 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     } else if (e.kind === 'prospecto' && onSelectProspecto) {
       onSelectProspecto(e.prospectoId);
     }
-  }, [onSelectProspecto, onSelectTarea, onSelectAgenda, tareasState]);
+  }, [onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, tareasState]);
 
   // Cuando cambia el mode, ajustar cursor a un anchor sensato
   useEffect(() => {
@@ -9801,6 +9885,54 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
           {!tieneFecha && (
             <button className="btn-danger" onClick={onDeleteAll} autoFocus>Eliminar</button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: EVENTO HUÉRFANO DEL CALENDAR ───────────────────────
+// Aparece al clickear un evento Google que tiene abordaje_tarea_id /
+// abordaje_prospect_id desincronizado del state (la entidad no existe o
+// apunta a otro evento). Ofrece borrar el evento sin tocar la tarea/prospect.
+function OrphanEventModal({ event, onCancel, onDelete }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onDelete();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel, onDelete]);
+
+  const fecha = event?.fecha ? new Date(event.fecha) : null;
+  const fechaTxt = fecha
+    ? `${formatFechaCorta(fecha.toISOString().slice(0,10))} ${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}`
+    : '';
+  const titulo = event?.googleEvent?.summary || event?.label || '(sin título)';
+  const motivo = event?.tareaId
+    ? 'La tarea asociada ya no existe o apunta a otro evento.'
+    : 'El prospect asociado ya no existe.';
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="orphan-event-title" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3 id="orphan-event-title">Evento huérfano del calendar</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 6px', lineHeight: 1.5 }}>
+            <strong>{titulo}</strong>
+            {fechaTxt && <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}> — {fechaTxt}</span>}
+          </p>
+          <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', margin: '0 0 14px', lineHeight: 1.5 }}>
+            {motivo} Suele ser un residuo de una edición anterior. Podés borrarlo del calendar de Google sin afectar nada más.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-danger" onClick={onDelete} autoFocus>Borrar del calendar</button>
         </div>
       </div>
     </div>
