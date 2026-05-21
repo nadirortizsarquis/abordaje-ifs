@@ -2820,7 +2820,10 @@ function mapColumnaFromDB(c) {
     titulo: c.titulo,
     orden: c.orden,
     slug: c.slug || null,
-    protegida: !!c.slug   // si tiene slug, es columna especial protegida
+    protegida: !!c.slug,   // si tiene slug, es columna especial protegida
+    actorId: c.actor_id || null,
+    agenteId: c.agente_id || null,
+    updatedAt: c.updated_at || null,
   };
 }
 
@@ -2928,7 +2931,7 @@ const storage = {
     // schema y se quiere visible en el frontend, actualizar el select aquí.
     const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
-    const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug';
+    const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
     const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
@@ -3105,8 +3108,10 @@ const storage = {
   // ── Columnas Kanban ──
   async createColumna(titulo, orden = 999) {
     const agenteId = await auth.getEffectiveAgenteId();
+    const user = await auth.getUser();
     const { data, error } = await sb.from('abordaje_tareas_columnas').insert({
-      agente_id: agenteId, titulo, orden
+      agente_id: agenteId, titulo, orden,
+      actor_id: user?.id || null,
     }).select().single();
     if (error) throw error;
     return mapColumnaFromDB(data);
@@ -3117,6 +3122,12 @@ const storage = {
     if ('titulo' in patch) dbPatch.titulo = patch.titulo;
     if ('orden' in patch) dbPatch.orden = patch.orden;
     if (Object.keys(dbPatch).length === 0) return;
+    // Si el patch es solo `orden` (reorden interno por drag), no pisamos actor
+    // — la acción "interesante" es renombrar, no reordenar. Pero conviene
+    // marcarlo también para tener trazabilidad. Lo dejamos en ambos casos.
+    const user = await auth.getUser();
+    if (user?.id) dbPatch.actor_id = user.id;
+    dbPatch.updated_at = new Date().toISOString();
     const { error } = await sb.from('abordaje_tareas_columnas').update(dbPatch).eq('id', id);
     if (error) throw error;
   },
@@ -3393,16 +3404,18 @@ const EVENT_COLOR_PALETTE = {
 const EVENT_COLOR_ORDER = ['rojo','naranja','amarillo','verde','turquesa','azul','rosa','gris'];
 
 // Construye la clave que identifica univocamente un evento del calendar para
-// guardar su override de color. Eventos del kind 'agenda' usan el id de la
-// agenda nativa o el del googleEvent (en piloto). Eventos prospect/tarea usan
-// el id del prospect/tarea (no del evento), para que se mantenga aunque se
-// regenere el evento.
+// guardar su override de color. Priorizamos el id semántico (prospect/tarea/
+// agenda) sobre el del evento Google, así el override se mantiene aunque el
+// user active/desactive piloto o el evento Google se regenere. Solo cae al
+// id de Google cuando es un evento externo sin vínculo a entidades Abordaje.
 function buildEventKey(e) {
   if (!e) return null;
-  if (e.googleEvent?.id) return 'gcal:' + e.googleEvent.id;
   if (e.kind === 'prospecto' && e.prospectoId) return 'prospecto:' + e.prospectoId;
   if (e.kind === 'tarea' && (e.tareaData?.id || e.tareaId)) return 'tarea:' + (e.tareaData?.id || e.tareaId);
   if (e.kind === 'agenda' && e.agendaData?.id) return 'agenda:' + e.agendaData.id;
+  // Eventos externos de Google (sin tareaId/prospectoId/agendaId) o agendas
+  // standalone del piloto que solo viven en Google.
+  if (e.googleEvent?.id) return 'gcal:' + e.googleEvent.id;
   return null;
 }
 
@@ -4516,6 +4529,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // asistente. La marca visual (★) en cards/listas se basa en actor_id.
   const isAssistant = !!agente?.assistant_of_id;
   const [principalProfile, setPrincipalProfile] = useState(null);
+  // Trigger para refrescar principalProfile durante la sesión. Si el principal
+  // cambia `shares_calendar_with_assistant` o desactiva `gcal_enabled` mientras
+  // el asistente está logueado, el asistente seguía intentando hablar con
+  // Google hasta el siguiente refresh manual. Ahora se refresca al cambiar
+  // de tab (junto con loadState).
+  const [principalReloadKey, setPrincipalReloadKey] = useState(0);
   useEffect(() => {
     if (!isAssistant) { setPrincipalProfile(null); return; }
     let cancelled = false;
@@ -4524,7 +4543,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       .eq('id', agente.assistant_of_id).maybeSingle()
       .then(({ data }) => { if (!cancelled) setPrincipalProfile(data || null); });
     return () => { cancelled = true; };
-  }, [isAssistant, agente?.assistant_of_id]);
+  }, [isAssistant, agente?.assistant_of_id, principalReloadKey]);
 
   // Cache de actor_id → { display_name, email } para mostrar nombres en el
   // tooltip de la estrella. Carga lazy: solo fetch los profiles que aparecen
@@ -4532,6 +4551,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // todos los profiles (que para admin pueden ser muchos) cuando solo
   // necesitamos los que efectivamente actuaron sobre las entidades visibles.
   const [actorMap, setActorMap] = useState({});
+  // Set de actorIds que vienen de eventos Google (extendedProperties).
+  // CalendarioView lo popula tras cada fetch; useEffect del actorMap los
+  // incluye así ActorStar resuelve el nombre real para eventos externos.
+  const [gcalActorIds, setGcalActorIds] = useState(() => new Set());
+  const handleGcalActorIdsLoaded = useCallback((ids) => {
+    setGcalActorIds(prev => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const id of ids) if (!next.has(id)) { next.add(id); changed = true; }
+      return changed ? next : prev;
+    });
+  }, []);
   // `isPilot` = true cuando el calendar usa Google como fuente de verdad.
   // Originalmente era flag exclusivo de nortiz@ifs-broker.com durante el
   // piloto de Fase 1; hoy es simplemente "user con gcal_enabled=true". El
@@ -4639,7 +4670,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       for (const c of p.contactos || []) if (c.actorId) ids.add(c.actorId);
     }
     for (const t of state.tareas?.items || []) if (t.actorId) ids.add(t.actorId);
+    for (const c of state.tareas?.columnas || []) if (c.actorId) ids.add(c.actorId);
     for (const a of state.agendados || []) if (a.actorId) ids.add(a.actorId);
+    for (const id of gcalActorIds) ids.add(id);
     const missing = [...ids].filter(id => id && !actorMap[id]);
     if (missing.length === 0) return;
     let cancelled = false;
@@ -4652,7 +4685,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       });
     });
     return () => { cancelled = true; };
-  }, [agente?.id, agente?.assistant_of_id, state.prospectos, state.tareas, state.agendados, actorMap]);
+  }, [agente?.id, agente?.assistant_of_id, state.prospectos, state.tareas, state.agendados, gcalActorIds, actorMap]);
 
   // Override de colores para eventos del calendar (click derecho sobre tarjeta).
   // Si setColor recibe null/'' borra el override (vuelve al color automático).
@@ -4759,6 +4792,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // modal de la tarea/prospect (que mostraría OTROS datos), abrimos un modal
   // específico para borrarlo del calendar sin tocar la entidad subyacente.
   const [pendingOrphanEvent, setPendingOrphanEvent] = useState(null);
+  // Modal de confirmación al borrar una agenda standalone. Reemplaza el
+  // confirm() nativo del browser por un modal coherente con el resto.
+  // Detecta si el evento es parte de una serie recurrente y avisa al user
+  // que se borra toda la serie (la edge function aún no maneja "esta sola").
+  const [pendingDeleteAgenda, setPendingDeleteAgenda] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -4809,6 +4847,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         const s = await storage.loadState(viewAs?.id);
         if (!cancel) setState(s);
         if (isPilot) bumpGcal();
+        // Si soy asistente, también refrescamos el profile del principal
+        // — pudo haber cambiado shares_calendar_with_assistant o gcal_enabled
+        // mientras yo navegaba.
+        if (isAssistant) setPrincipalReloadKey(k => k + 1);
       } catch (e) {
         console.warn('refresh on tab switch:', e?.message || e);
       }
@@ -5257,6 +5299,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         const durMs = (oldEnd - oldStart) || 60 * 60_000;
         const newStart = new Date(newStartIso);
         const newEnd = new Date(newStart.getTime() + durMs);
+        const oldStartIso = oldStart.toISOString();
+        const oldEndIso = oldEnd.toISOString();
         await gcalApi.update(e.googleEvent.id, {
           start: { dateTime: newStart.toISOString(), timeZone: GCAL_TZ },
           end:   { dateTime: newEnd.toISOString(),   timeZone: GCAL_TZ },
@@ -5265,13 +5309,26 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         // los cards del kanban reflejen la nueva fecha. Usamos storage.updateTarea
         // (no sb.from directo) para que se setee `actor_id` y aparezca la
         // ActorStar cuando un asistente mueve una tarea via drag en calendar.
+        // Si esto falla, revertimos el move en Google para no quedar
+        // inconsistentes entre Google y la DB.
         if (e.kind === 'tarea' && e.tareaId) {
           const d = new Date(newStartIso);
           const newF = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
           const newH = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-          await storage.updateTarea(e.tareaId, {
-            fechaRecordatorio: newF, horaRecordatorio: newH,
-          });
+          try {
+            await storage.updateTarea(e.tareaId, {
+              fechaRecordatorio: newF, horaRecordatorio: newH,
+            });
+          } catch (dbErr) {
+            // Rollback Google al estado anterior.
+            try {
+              await gcalApi.update(e.googleEvent.id, {
+                start: { dateTime: oldStartIso, timeZone: GCAL_TZ },
+                end:   { dateTime: oldEndIso,   timeZone: GCAL_TZ },
+              }, e.googleEvent._gcalId);
+            } catch (rbErr) { console.error('rollback gcal:', rbErr); }
+            throw dbErr;
+          }
           const me = await auth.getUser();
           setState(s => ({
             ...s,
@@ -5329,9 +5386,21 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       showToast('Agenda actualizada');
     } catch (e) { handleErr(e, 'updateAgenda'); }
   };
-  const handleDeleteAgenda = async (agendaId, gcalCalendarId) => {
+  // Wrapper: en lugar del confirm() nativo, arma el state del modal propio
+  // que ofrece confirmación consistente con el resto de la UI y avisa si
+  // el evento es parte de una serie recurrente.
+  const handleRequestDeleteAgenda = (agenda, agendaId, gcalCalendarId) => {
     if (guardReadOnly()) return;
-    if (!confirm('¿Eliminar esta agenda? También se borra del Google Calendar.')) return;
+    const ev = agenda?.googleEvent || null;
+    const isRecurring = !!(ev?.recurringEventId || (ev?.recurrence && ev.recurrence.length > 0));
+    setPendingDeleteAgenda({ agendaId, gcalCalendarId, isRecurring });
+  };
+
+  const handleConfirmDeleteAgenda = async () => {
+    const req = pendingDeleteAgenda;
+    setPendingDeleteAgenda(null);
+    if (!req) return;
+    const { agendaId, gcalCalendarId } = req;
     try {
       if (isPilot) {
         await gcalApi.delete(agendaId, gcalCalendarId);
@@ -5400,13 +5469,27 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       }
       setNuevaAgendaSlot(null);
       showToast('Agenda creada');
-    } catch (e) { handleErr(e, 'createAgenda'); }
+    } catch (e) {
+      // CRÍTICO cerrar el modal aunque haya error: la create puede haberse
+      // ejecutado parcialmente (Google ok, DB falló o viceversa). Si dejamos
+      // el modal abierto el user reintenta con el mismo form y crea un
+      // duplicado. Mejor cerrarlo y que vea el resultado en el calendar.
+      setNuevaAgendaSlot(null);
+      handleErr(e, 'createAgenda');
+    }
   };
 
   const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
     if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
     if (!tarea || tarea.columnaId === nuevaColumnaId) return;
+    // Validamos que la columna destino exista en el state. Si fue borrada
+    // en otra sesión, evitamos un error crudo de FK al persistir.
+    const colDest = state.tareas.columnas.find(c => c.id === nuevaColumnaId);
+    if (!colDest) {
+      showToast('La columna destino ya no existe');
+      return;
+    }
     // Optimistic
     setState(s => ({
       ...s,
@@ -5706,13 +5789,24 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       showToast('La columna "Abordar" no se puede eliminar');
       return;
     }
-    const tareasEnCol = state.tareas.items.filter(t => t.columnaId === columnaId).length;
+    const tareasEnCol = state.tareas.items.filter(t => t.columnaId === columnaId);
     let msg = '¿Eliminar esta columna?';
-    if (tareasEnCol > 0) {
-      msg = `Esta columna tiene ${tareasEnCol} tarea${tareasEnCol === 1 ? '' : 's'}. Si la eliminás, esas tareas también se eliminan. ¿Continuar?`;
+    if (tareasEnCol.length > 0) {
+      msg = `Esta columna tiene ${tareasEnCol.length} tarea${tareasEnCol.length === 1 ? '' : 's'}. Si la eliminás, esas tareas también se eliminan. ¿Continuar?`;
     }
     if (!confirm(msg)) return;
     try {
+      // ANTES de borrar la columna (DB cascade borra las tareas), eliminamos
+      // los eventos Google asociados a las tareas — sino quedarían huérfanos
+      // en el calendar con abordaje_tarea_id apuntando a ids muertos.
+      if (isPilot) {
+        for (const t of tareasEnCol) {
+          if (t.googleEventId) {
+            try { await gcalApi.delete(t.googleEventId); }
+            catch (e) { console.warn('gcal del tarea (deleteColumna):', e?.message || e); }
+          }
+        }
+      }
       // El cascade del FK en DB borra las tareas asociadas
       await storage.deleteColumna(columnaId);
       setState(s => ({
@@ -5723,6 +5817,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           items: s.tareas.items.filter(t => t.columnaId !== columnaId)
         }
       }));
+      if (isPilot) bumpGcal();
     } catch (e) { handleErr(e, 'deleteColumna'); }
   };
 
@@ -5976,6 +6071,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectTarea={(t) => setTareaEditando(t)}
             onSelectAgenda={(a) => setAgendaEditando(a)}
             onSelectOrphan={(ev) => setPendingOrphanEvent(ev)}
+            onGcalActorIdsLoaded={handleGcalActorIdsLoaded}
             onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
@@ -6015,7 +6111,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             readOnly={readOnly}
             onCancel={() => setAgendaEditando(null)}
             onSave={(patch) => handleUpdateAgenda(agendaId, patch, gcalCalId)}
-            onDelete={() => handleDeleteAgenda(agendaId, gcalCalId)}
+            onDelete={() => handleRequestDeleteAgenda(agendaEditando, agendaId, gcalCalId)}
           />
         );
       })()}
@@ -6094,6 +6190,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           event={pendingOrphanEvent}
           onCancel={() => setPendingOrphanEvent(null)}
           onDelete={() => handleDeleteOrphanEvent(pendingOrphanEvent)}
+        />
+      )}
+
+      {pendingDeleteAgenda && (
+        <ConfirmDeleteAgendaModal
+          isRecurring={pendingDeleteAgenda.isRecurring}
+          onCancel={() => setPendingDeleteAgenda(null)}
+          onConfirm={handleConfirmDeleteAgenda}
         />
       )}
 
@@ -7349,7 +7453,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -7364,11 +7468,25 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     let cancelled = false;
     setGcalLoading(true);
     gcalApi.list(timeMin, timeMax)
-      .then(evts => { if (!cancelled) setGcalEvents(evts || []); })
+      .then(evts => {
+        if (cancelled) return;
+        setGcalEvents(evts || []);
+        // Propaga al padre los actor_ids encontrados en los eventos de Google
+        // — App los necesita para que ActorStar muestre el nombre real del
+        // asistente (en lugar del fallback "asistente") cuando creó el evento.
+        if (onGcalActorIdsLoaded) {
+          const ids = new Set();
+          for (const ev of (evts || [])) {
+            const aid = ev?.extendedProperties?.private?.abordaje_actor_id;
+            if (aid) ids.add(aid);
+          }
+          if (ids.size > 0) onGcalActorIdsLoaded(ids);
+        }
+      })
       .catch(err => console.warn('gcal list:', err?.message || err))
       .finally(() => { if (!cancelled) setGcalLoading(false); });
     return () => { cancelled = true; };
-  }, [isPilot, timeMin, timeMax, gcalReloadKey]);
+  }, [isPilot, timeMin, timeMax, gcalReloadKey, onGcalActorIdsLoaded]);
 
   const events = useMemo(() => {
     if (isPilot) return extractGcalEventsForCalendar(gcalEvents, prospectos, tareasState?.items);
@@ -9315,6 +9433,7 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
           onKeyDown={(e) => { if (e.key === 'Enter') e.target.blur(); if (e.key === 'Escape') { setTituloEdit(columna.titulo); e.target.blur(); } }}
           aria-label="Nombre de columna"
         />
+        <ActorStar item={columna} />
         <span className="kanban-col-count">{tareas.length}</span>
         {!columna.protegida && (
           <button className="kanban-col-del" onClick={onDelete} title="Eliminar columna" aria-label="Eliminar columna">×</button>
@@ -9885,6 +10004,52 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
           {!tieneFecha && (
             <button className="btn-danger" onClick={onDeleteAll} autoFocus>Eliminar</button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: CONFIRMAR ELIMINAR AGENDA ──────────────────────────
+// Reemplaza el confirm() nativo. Si la agenda es parte de una serie
+// recurrente de Google Calendar, avisa al user que se borra TODA la serie
+// (el backend gcal-events actual no diferencia "esta sola" vs "todas").
+function ConfirmDeleteAgendaModal({ isRecurring, onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onConfirm();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel, onConfirm]);
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-agenda-title" style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <h3 id="confirm-del-agenda-title">Eliminar agenda</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          {isRecurring ? (
+            <>
+              <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 10px', lineHeight: 1.5 }}>
+                Esta agenda forma parte de una <strong>serie recurrente</strong>.
+              </p>
+              <div className="help-callout danger" style={{ fontSize: '0.84rem' }}>
+                <strong>Atención:</strong> al confirmar se borra <strong>toda la serie</strong> del Google Calendar, no solo esta instancia.
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 6px', lineHeight: 1.5 }}>
+              Esta agenda también se borra del Google Calendar.
+            </p>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar</button>
         </div>
       </div>
     </div>
@@ -10594,7 +10759,13 @@ function Root() {
     });
     const { data } = auth.onChange((event, session) => {
       if (!mounted) return;
-      if (event === 'SIGNED_OUT') setUser(null);
+      if (event === 'SIGNED_OUT') {
+        // Invalida el cache del profile (assistant_of_id, role, etc.) para
+        // que un próximo login con user distinto en la misma tab no use el
+        // cacheado del anterior por un instante.
+        auth.invalidateProfileCache();
+        setUser(null);
+      }
       else if (session?.user) setUser(session.user);
     });
     return () => { mounted = false; data?.subscription?.unsubscribe?.(); };
@@ -10633,7 +10804,10 @@ function AppShell() {
     auth.getUser().then(u => { if (mounted) setUser(u); });
     const { data } = auth.onChange((event, session) => {
       if (!mounted) return;
-      if (event === 'SIGNED_OUT') { setUser(null); setAgente(null); setViewAs(null); }
+      if (event === 'SIGNED_OUT') {
+        auth.invalidateProfileCache();
+        setUser(null); setAgente(null); setViewAs(null);
+      }
       else if (session?.user) setUser(session.user);
     });
     return () => { mounted = false; data?.subscription?.unsubscribe?.(); };
