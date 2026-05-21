@@ -5210,18 +5210,21 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           end:   { dateTime: newEnd.toISOString(),   timeZone: GCAL_TZ },
         }, e.googleEvent._gcalId);
         // Si era una tarea local, también actualizar abordaje_tareas para que
-        // los cards del kanban reflejen la nueva fecha.
+        // los cards del kanban reflejen la nueva fecha. Usamos storage.updateTarea
+        // (no sb.from directo) para que se setee `actor_id` y aparezca la
+        // ActorStar cuando un asistente mueve una tarea via drag en calendar.
         if (e.kind === 'tarea' && e.tareaId) {
           const d = new Date(newStartIso);
           const newF = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
           const newH = `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-          await sb.from('abordaje_tareas').update({
-            fecha_recordatorio: newF, hora_recordatorio: newH,
-          }).eq('id', e.tareaId);
+          await storage.updateTarea(e.tareaId, {
+            fechaRecordatorio: newF, horaRecordatorio: newH,
+          });
+          const me = await auth.getUser();
           setState(s => ({
             ...s,
             tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === e.tareaId
-              ? { ...t, fechaRecordatorio: newF, horaRecordatorio: newH } : t) }
+              ? { ...t, fechaRecordatorio: newF, horaRecordatorio: newH, actorId: me?.id || t.actorId, updatedAt: new Date().toISOString() } : t) }
           }));
         }
         bumpGcal();
@@ -5386,13 +5389,28 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           if (merged.googleEventId && hasFecha) {
             await gcalApi.update(merged.googleEventId, eventBody);
           } else if (merged.googleEventId && !hasFecha) {
-            // Le quitaron la fecha → borrar evento
+            // Le quitaron la fecha → borrar evento. Sincronizamos también el
+            // state local para que la próxima edición no piense que el evento
+            // sigue existiendo (causaba updates a 404 / desincronización).
             await gcalApi.delete(merged.googleEventId);
             await storage.updateTarea(id, { googleEventId: null });
+            setState(s => ({
+              ...s,
+              tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? { ...t, googleEventId: null } : t) }
+            }));
           } else if (!merged.googleEventId && hasFecha) {
-            // Le pusieron fecha por primera vez → crear evento
+            // Le pusieron fecha por primera vez → crear evento. CRÍTICO
+            // sincronizar el state local con el nuevo googleEventId: sin
+            // esto, una segunda edición rápida volvía a entrar acá y creaba
+            // un evento Google duplicado (el primero quedaba huérfano).
             const evt = await gcalApi.create(eventBody);
-            if (evt?.id) await storage.updateTarea(id, { googleEventId: evt.id });
+            if (evt?.id) {
+              await storage.updateTarea(id, { googleEventId: evt.id });
+              setState(s => ({
+                ...s,
+                tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? { ...t, googleEventId: evt.id } : t) }
+              }));
+            }
           }
           bumpGcal();
         } catch (e) { console.warn('gcal sync (update tarea):', e?.message || e); }
@@ -5451,6 +5469,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           try { await gcalApi.delete(tarea.googleEventId); }
           catch (e) { console.warn('gcal sync (archivar tarea):', e?.message || e); }
           await storage.updateTarea(id, { googleEventId: null });
+          // Mutamos el objeto en memoria: si después se desarchiva en la
+          // misma sesión, la rama de desarchivar va a leer este `googleEventId`
+          // como null y va a recrear el evento Google correctamente.
+          if (tarea) tarea.googleEventId = null;
         }
         await storage.updateTarea(id, { archivada: true });
         setTareaEditando(null);
@@ -5466,6 +5488,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       try {
         await storage.updateTarea(id, { archivada: false });
         const tareaActualizada = { ...(tarea || {}), archivada: false, updatedAt: new Date().toISOString() };
+        // Si el objeto trae un googleEventId, puede estar stale (al archivar
+        // borramos el evento de Google, pero si veníamos de una sesión vieja
+        // el `tarea` parameter conserva el id). Lo limpiamos por las dudas —
+        // un delete a un evento ya borrado tira 404 que silenciamos.
+        if (isPilot && tareaActualizada.googleEventId) {
+          try { await gcalApi.delete(tareaActualizada.googleEventId); } catch (_) {}
+          tareaActualizada.googleEventId = null;
+          try { await storage.updateTarea(id, { googleEventId: null }); } catch (_) {}
+        }
         setState(s => ({
           ...s,
           tareas: {
@@ -5475,7 +5506,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               : [...s.tareas.items, tareaActualizada]
           }
         }));
-        if (isPilot && tareaActualizada.fechaRecordatorio && !tareaActualizada.googleEventId) {
+        if (isPilot && tareaActualizada.fechaRecordatorio) {
           try {
             const fechaIso = new Date(`${tareaActualizada.fechaRecordatorio}T${(tareaActualizada.horaRecordatorio || '09:00')}:00`).toISOString();
             const evt = await gcalApi.create(buildGoogleEventBody({
@@ -5484,7 +5515,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               description: tareaActualizada.observacion || '',
               tareaId: id,
             }));
-            if (evt?.id) await storage.updateTarea(id, { googleEventId: evt.id });
+            if (evt?.id) {
+              await storage.updateTarea(id, { googleEventId: evt.id });
+              // Sincronizamos el state local con el nuevo googleEventId
+              // — si no, una edición posterior podría volver a crear evento
+              // duplicado (mismo bug que en handleUpdateTarea).
+              setState(s => ({
+                ...s,
+                tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? { ...t, googleEventId: evt.id } : t) }
+              }));
+            }
           } catch (e) { console.warn('gcal sync (desarchivar tarea):', e?.message || e); }
         }
         setTareaEditando(null);
@@ -7112,6 +7152,11 @@ function colorCalendarEvento(e, colorsMap) {
     const c = deriveColorsFromGcalHex(e.gcalColor);
     if (c) return c;
   }
+  // Regla de origen: si el evento nace de una tarea del Kanban (manual o
+  // auto-generada desde una gestión), su color es violeta — coherente con la
+  // identidad visual de las tareas (cards lila). Esto se impone aunque la
+  // tarea tenga prospectoId y el último contacto del prospect sea 'agendado'.
+  if (e?.kind === 'tarea') return CAL_COLOR_VIOLETA;
   const t = e?.tipo;
   if (t === 'agendado') return CAL_COLOR_VERDE;
   if (t === 'contestador') return CAL_COLOR_GRIS;
