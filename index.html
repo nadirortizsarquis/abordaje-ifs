@@ -474,9 +474,16 @@
     gap: 6px;
     cursor: grab;
     user-select: none;
-    touch-action: none;
+    /* touch-action sin "none" por default: en mobile el toque sobre el header
+       puede scrollear normal. Sólo bloqueamos scroll cuando el long-press
+       arma el drag (clase body.kanban-dragging — más abajo). */
   }
   .kanban-col-head:active { cursor: grabbing; }
+  .kanban-col-head.long-press-armed {
+    background: rgba(0, 152, 218, 0.06);
+    box-shadow: inset 0 0 0 1px var(--azul);
+    transition: background 0.15s, box-shadow 0.15s;
+  }
   .kanban-col.col-dragging { opacity: 0.5; }
   .kanban-col.col-drop-before { box-shadow: -3px 0 0 0 var(--azul); }
   .kanban-col.col-drop-after  { box-shadow:  3px 0 0 0 var(--azul); }
@@ -663,19 +670,59 @@
     font-style: italic;
   }
 
-  /* ── Drag & drop entre columnas (pointer events) ── */
-  .tarea-card { cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  /* ── Drag & drop entre columnas (pointer events) ──
+     En mouse (desktop): el drag arranca instantáneo con threshold de 6px.
+     En touch (mobile): se requiere long-press de 400ms con dedo quieto antes
+     de armar el drag — así el scroll vertical de la pantalla no se confunde
+     con un drag accidental. Mientras se espera el long-press el touch-action
+     queda libre (scroll natural). Cuando el long-press se completa, se aplica
+     body.kanban-dragging que bloquea touch-action para que el dedo arrastre
+     la card en vez de scrollear la página. */
+  .tarea-card { cursor: grab; user-select: none; -webkit-user-select: none; }
   .tarea-card:active { cursor: grabbing; }
   .tarea-card.dragging {
     opacity: 0.45;
     box-shadow: 0 6px 18px rgba(0,0,0,0.15);
     pointer-events: none;
   }
+  /* Feedback visual sutil cuando el long-press completa: la card "se levanta". */
+  .tarea-card.long-press-armed {
+    transform: scale(1.02);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.22);
+    transition: transform 0.15s, box-shadow 0.15s;
+  }
+  /* Mientras hay un drag de kanban activo (cards o columnas), bloqueamos
+     touch-action en las zonas relevantes para que el dedo mueva la card,
+     no scrollee la página. */
+  body.kanban-dragging .tarea-card,
+  body.kanban-dragging .kanban-col-body,
+  body.kanban-dragging .kanban-col-head,
+  body.kanban-dragging .kanban-wrap { touch-action: none; }
   .kanban-col-body.drag-over {
     background: rgba(0,152,218,0.07);
     outline: 2px dashed var(--azul);
     outline-offset: -4px;
     border-radius: 8px;
+  }
+
+  /* ── Mobile: columnas sin tope vertical (lado a lado, altura natural) ──
+     Decisión 2026-05-21: en cel las columnas mantienen el layout horizontal
+     pero cada una toma su altura natural (todas las cards visibles, sin
+     scroll interno). El scroll vertical de la página se encarga del resto.
+     Aunque las alturas queden dispares, evita tener que pelearse con un
+     scroll interno por columna en touch. */
+  @media (max-width: 720px) {
+    .kanban-wrap {
+      height: auto;
+      overflow-y: visible;
+    }
+    .kanban-col {
+      max-height: none;
+    }
+    .kanban-col-body {
+      overflow-y: visible;
+      flex: 1 0 auto;
+    }
   }
 
   /* ── Carga rápida inline ── */
@@ -4694,6 +4741,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [tick, setTick] = useState(0);  // re-render cada 60s para recalcular urgencias
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
+  // Estado del modal de confirmación de reorden de columnas. Cuando el user
+  // suelta el drag de una columna, el handler arma este state y se renderiza
+  // ConfirmColMoveModal. Si confirma, ejecutamos el move. Si cancela, descartamos.
+  const [pendingColMove, setPendingColMove] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -5459,8 +5510,31 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (e) { handleErr(e, 'createColumna'); }
   };
 
-  const handleMoveColumna = async (columnaId, targetColumnaId, position) => {
+  // El drop del drag de columna llama acá: en vez de mover directo, armamos
+  // un modal de confirmación. Esto previene reorders accidentales (sobre todo
+  // en mobile donde el long-press de header puede ser involuntario).
+  const handleRequestMoveColumna = (columnaId, targetColumnaId, position) => {
     if (guardReadOnly()) return;
+    if (columnaId === targetColumnaId) return;
+    const cols = state.tareas?.columnas || [];
+    const moving = cols.find(c => c.id === columnaId);
+    const target = cols.find(c => c.id === targetColumnaId);
+    if (!moving || !target) return;
+    setPendingColMove({
+      columnaId,
+      targetColumnaId,
+      position,
+      movingName: moving.titulo,
+      targetName: target.titulo,
+    });
+  };
+
+  const handleConfirmMoveColumna = async () => {
+    const req = pendingColMove;
+    setPendingColMove(null);
+    if (!req) return;
+    if (guardReadOnly()) return;
+    const { columnaId, targetColumnaId, position } = req;
     if (columnaId === targetColumnaId) return;
     const prev = state.tareas.columnas;
     const ordenadas = [...prev].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
@@ -5734,7 +5808,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onAddColumna={handleAddColumna}
           onRenameColumna={handleRenameColumna}
           onDeleteColumna={handleDeleteColumna}
-          onMoveColumna={handleMoveColumna}
+          onMoveColumna={handleRequestMoveColumna}
         />
       )}
 
@@ -5845,6 +5919,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           />
         );
       })()}
+
+      {pendingColMove && (
+        <ConfirmColMoveModal
+          movingName={pendingColMove.movingName}
+          targetName={pendingColMove.targetName}
+          position={pendingColMove.position}
+          onCancel={() => setPendingColMove(null)}
+          onConfirm={handleConfirmMoveColumna}
+        />
+      )}
 
       {selectedProspecto && (
         <PanelLateral
@@ -8865,7 +8949,11 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
   const cancelRef = useRef(false);
   const colRef = useRef(null);
   const headRef = useRef(null);
-  const colDragRef = useRef({ active: false, captured: false, startX: 0, pointerId: null });
+  const colDragRef = useRef({ active: false, captured: false, startX: 0, pointerId: null, armed: false });
+  // pendingTouchRef: misma idea que en TareaCard — esperamos 400ms con dedo
+  // quieto sobre el header antes de armar el drag de la columna en touch.
+  const pendingTouchRef = useRef(null);
+  const [armed, setArmed] = useState(false);
   useEffect(() => { setTituloEdit(columna.titulo); }, [columna.titulo]);
 
   const commitTitulo = () => {
@@ -8894,10 +8982,29 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
   };
 
   // ── Drag de columna (pointer events sobre el header, excepto inputs/buttons) ──
+  // Mouse: drag inmediato con threshold de 6px.
+  // Touch: long-press de 400ms antes de armar el drag.
   const clearColDropMarkers = () => {
     document.querySelectorAll('.kanban-col.col-drop-before, .kanban-col.col-drop-after')
       .forEach(n => n.classList.remove('col-drop-before', 'col-drop-after'));
   };
+
+  const clearTouchPending = () => {
+    const p = pendingTouchRef.current;
+    if (!p) return;
+    if (p.timerId) clearTimeout(p.timerId);
+    document.removeEventListener('pointermove', p.onMoveWait);
+    document.removeEventListener('pointerup', p.onUpWait);
+    document.removeEventListener('pointercancel', p.onUpWait);
+    pendingTouchRef.current = null;
+  };
+
+  useEffect(() => () => {
+    clearTouchPending();
+    if (document.body.classList.contains('kanban-dragging')) {
+      document.body.classList.remove('kanban-dragging');
+    }
+  }, []);
 
   const onHeadPointerDown = (e) => {
     if (readOnly) return;
@@ -8905,14 +9012,46 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
     // No iniciar drag si el click va sobre un input o botón del header
     const tag = e.target.tagName;
     if (tag === 'INPUT' || tag === 'BUTTON' || tag === 'TEXTAREA') return;
-    colDragRef.current = { active: true, captured: false, startX: e.clientX, pointerId: e.pointerId };
+    if (colDragRef.current.active || pendingTouchRef.current) return;
+
+    if (e.pointerType === 'touch') {
+      const startX = e.clientX, startY = e.clientY;
+      const pointerId = e.pointerId;
+      const onMoveWait = (ev) => {
+        const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+        if (moved > 8) clearTouchPending();
+      };
+      const onUpWait = () => {
+        // Soltó antes del long-press = tap inocuo sobre el header (sin acción).
+        clearTouchPending();
+      };
+      document.addEventListener('pointermove', onMoveWait);
+      document.addEventListener('pointerup', onUpWait);
+      document.addEventListener('pointercancel', onUpWait);
+      const timerId = setTimeout(() => {
+        const p = pendingTouchRef.current;
+        if (!p) return;
+        document.removeEventListener('pointermove', p.onMoveWait);
+        document.removeEventListener('pointerup', p.onUpWait);
+        document.removeEventListener('pointercancel', p.onUpWait);
+        pendingTouchRef.current = null;
+        setArmed(true);
+        document.body.classList.add('kanban-dragging');
+        colDragRef.current = { active: true, captured: false, startX, pointerId, armed: true };
+      }, 400);
+      pendingTouchRef.current = { startX, startY, pointerId, timerId, onMoveWait, onUpWait };
+    } else {
+      colDragRef.current = { active: true, captured: false, startX: e.clientX, pointerId: e.pointerId, armed: false };
+    }
   };
 
   const onHeadPointerMove = (e) => {
+    if (pendingTouchRef.current) return;
     const ds = colDragRef.current;
     if (!ds.active) return;
     const dx = e.clientX - ds.startX;
-    if (!ds.captured && Math.abs(dx) > 6) {
+    const threshold = ds.armed ? 0 : 6;
+    if (!ds.captured && Math.abs(dx) > threshold) {
       ds.captured = true;
       try { headRef.current.setPointerCapture(e.pointerId); } catch (_) {}
       colRef.current?.classList.add('col-dragging');
@@ -8943,13 +9082,16 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
           const isLeftHalf = e.clientX < rect.left + rect.width / 2;
           const targetId = overCol.dataset.colId;
           if (targetId && targetId !== columna.id && typeof onMoveColumna === 'function') {
+            // Disparamos el request — el App muestra modal de confirmación.
             onMoveColumna(columna.id, targetId, isLeftHalf ? 'before' : 'after');
           }
         }
       }
       clearColDropMarkers();
     }
-    colDragRef.current = { active: false, captured: false, startX: 0, pointerId: null };
+    document.body.classList.remove('kanban-dragging');
+    setArmed(false);
+    colDragRef.current = { active: false, captured: false, startX: 0, pointerId: null, armed: false };
   };
 
   return (
@@ -8960,7 +9102,7 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
     >
       <div
         ref={headRef}
-        className="kanban-col-head"
+        className={`kanban-col-head ${armed ? 'long-press-armed' : ''}`}
         onPointerDown={onHeadPointerDown}
         onPointerMove={onHeadPointerMove}
         onPointerUp={(e) => finishHeadDrag(e, true)}
@@ -9011,7 +9153,13 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
 function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
   const cardRef = useRef(null);
   const dragRef = useRef({ active: false, startX: 0, startY: 0, dragging: false, pointerId: null });
+  // pendingTouchRef: fase de espera del long-press en touch. Mientras está
+  // activa, escuchamos pointermove a nivel document para detectar si el dedo
+  // se movió >8px (= el user está scrolleando, cancelamos) o se soltó antes
+  // de los 400ms (= tap, abrimos el editor).
+  const pendingTouchRef = useRef(null);
   const [dragging, setDragging] = useState(false);
+  const [armed, setArmed] = useState(false);
 
   const fechaTxt = tarea.fechaRecordatorio
     ? (tarea.horaRecordatorio
@@ -9031,20 +9179,87 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
     document.querySelectorAll('.kanban-col-body.drag-over').forEach(n => n.classList.remove('drag-over'));
   };
 
+  const clearTouchPending = () => {
+    const p = pendingTouchRef.current;
+    if (!p) return;
+    if (p.timerId) clearTimeout(p.timerId);
+    document.removeEventListener('pointermove', p.onMoveWait);
+    document.removeEventListener('pointerup', p.onUpWait);
+    document.removeEventListener('pointercancel', p.onUpWait);
+    pendingTouchRef.current = null;
+  };
+
+  // Limpieza si el componente se desmonta mid-gesture.
+  useEffect(() => () => {
+    clearTouchPending();
+    if (document.body.classList.contains('kanban-dragging')) {
+      document.body.classList.remove('kanban-dragging');
+    }
+  }, []);
+
   const onPointerDown = (e) => {
     if (readOnly) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
-    dragRef.current = { active: true, startX: e.clientX, startY: e.clientY, dragging: false, pointerId: e.pointerId };
+    if (dragRef.current.active || pendingTouchRef.current) return;
+
+    if (e.pointerType === 'touch') {
+      // Touch: esperamos 400ms con dedo quieto antes de armar el drag.
+      const startX = e.clientX, startY = e.clientY;
+      const pointerId = e.pointerId;
+      const onMoveWait = (ev) => {
+        const moved = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+        if (moved > 8) clearTouchPending();
+      };
+      const onUpWait = () => {
+        // Soltó antes del long-press = tap → abrir editor.
+        clearTouchPending();
+        onClick();
+      };
+      document.addEventListener('pointermove', onMoveWait);
+      document.addEventListener('pointerup', onUpWait);
+      document.addEventListener('pointercancel', onUpWait);
+      const timerId = setTimeout(() => {
+        const p = pendingTouchRef.current;
+        if (!p) return;
+        // Long-press completo: cleanup listeners de espera y pasamos a drag.
+        document.removeEventListener('pointermove', p.onMoveWait);
+        document.removeEventListener('pointerup', p.onUpWait);
+        document.removeEventListener('pointercancel', p.onUpWait);
+        pendingTouchRef.current = null;
+        setArmed(true);
+        document.body.classList.add('kanban-dragging');
+        dragRef.current = {
+          active: true, startX, startY,
+          dragging: false, pointerId,
+        };
+        try { cardRef.current.setPointerCapture(pointerId); } catch (_) {}
+      }, 400);
+      pendingTouchRef.current = { startX, startY, pointerId, timerId, onMoveWait, onUpWait };
+    } else {
+      // Mouse: drag inmediato (threshold de 6px de movimiento para distinguir
+      // click de drag real).
+      dragRef.current = { active: true, startX: e.clientX, startY: e.clientY, dragging: false, pointerId: e.pointerId };
+    }
   };
 
   const onPointerMove = (e) => {
+    // Si estamos en la fase de espera del long-press, los listeners de
+    // document hacen el trabajo (cancelar si se movió >8px). Acá no hacemos
+    // nada para no interferir.
+    if (pendingTouchRef.current) return;
+
     const ds = dragRef.current;
     if (!ds.active) return;
     const dx = e.clientX - ds.startX;
     const dy = e.clientY - ds.startY;
-    if (!ds.dragging && Math.hypot(dx, dy) > 6) {
+    // Si el drag viene de long-press (armed=true), cualquier movimiento ya
+    // cuenta como drag. En mouse, threshold 6px.
+    const threshold = armed ? 0 : 6;
+    if (!ds.dragging && Math.hypot(dx, dy) > threshold) {
       ds.dragging = true;
-      try { cardRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      if (!armed) {
+        try { cardRef.current.setPointerCapture(e.pointerId); } catch (_) {}
+      }
       setDragging(true);
     }
     if (ds.dragging) {
@@ -9072,9 +9287,12 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
       }
       clearDragOver();
       setDragging(false);
-    } else if (commit) {
+    } else if (commit && !armed) {
+      // Mouse sin drag = click. (Touch sin drag ya se manejó en onUpWait.)
       onClick();
     }
+    document.body.classList.remove('kanban-dragging');
+    setArmed(false);
     dragRef.current = { active: false, startX: 0, startY: 0, dragging: false, pointerId: null };
   };
 
@@ -9084,7 +9302,7 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
   return (
     <div
       ref={cardRef}
-      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''}`}
+      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${armed ? 'long-press-armed' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -9360,6 +9578,47 @@ function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={confirmar}>Convertir</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: CONFIRMAR REORDEN DE COLUMNAS ──────────────────────
+// Se abre al soltar el drag de una columna sobre otra. Muestra a dónde se
+// movería y pide confirmación. Sirve tanto para mouse como para touch: en
+// ambos casos previene reorders accidentales (relevante sobre todo en mobile
+// donde el long-press puede dispararse sin intención clara).
+function ConfirmColMoveModal({ movingName, targetName, position, onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onConfirm();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel, onConfirm]);
+
+  const posLabel = position === 'after' ? 'después de' : 'antes de';
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-col-move-title" style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <h3 id="confirm-col-move-title">Mover columna</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 6px', lineHeight: 1.5 }}>
+            ¿Mover la columna <strong>{movingName}</strong> {posLabel} <strong>{targetName}</strong>?
+          </p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0' }}>
+            El nuevo orden queda guardado para todos los dispositivos.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-primary" onClick={onConfirm} autoFocus>Mover</button>
         </div>
       </div>
     </div>
