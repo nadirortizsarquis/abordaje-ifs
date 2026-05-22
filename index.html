@@ -3637,6 +3637,15 @@ function isoToDDMMYY(iso) {
   if (!iso) return '';
   return dateToDDMMYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
 }
+// Variantes con año completo (4 dígitos) — necesarias para FechaTexto que
+// ahora usa formato dd/mm/aaaa para el tipeo predictivo segmentado.
+function dateToDDMMYYYY(d) {
+  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
+}
+function isoToDDMMYY8(iso) {
+  if (!iso) return '';
+  return dateToDDMMYYYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
+}
 function dateToYMD(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
 }
@@ -3747,71 +3756,165 @@ function showToast(msg, opts = {}) {
 }
 
 // ── INPUTS DE TEXTO TOLERANTES ─────────────────────────────────
-function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aa' }) {
+// FechaTexto: tipeo predictivo dd/mm/aaaa. El user tipea solo dígitos y los
+// "/" se insertan solos después del día y del mes. Si solo escribe dd/mm
+// el año se completa con el actual al perder foco. Si tipea dd/mm/aa el año
+// se asume 20aa. Click en un segmento (día/mes/año) lo selecciona entero
+// para sobrescribirlo sin tener que borrar todo.
+function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aaaa' }) {
   // valueIso es "yyyy-mm-dd" (date input) o ISO completo o ''
-  const [text, setText] = useState(() => valueIso ? isoToDDMMYY(valueIso) : '');
+  const [text, setText] = useState(() => valueIso ? isoToDDMMYY8(valueIso) : '');
   const [valido, setValido] = useState(true);
+  const inputRef = useRef(null);
 
   useEffect(() => {
-    setText(valueIso ? isoToDDMMYY(valueIso) : '');
+    setText(valueIso ? isoToDDMMYY8(valueIso) : '');
     setValido(true);
   }, [valueIso]);
 
-  const onBlur = () => {
-    if (!text.trim()) { onChange(''); setValido(true); return; }
-    const d = parseFechaFlex(text);
-    if (d) {
-      setText(dateToDDMMYY(d));
-      onChange(dateToYMD(d));
+  // Reformatea visualmente "DDMMAAAA" → "DD/MM/AAAA" insertando barras a
+  // medida que se completan los segmentos. Tope a 8 dígitos.
+  const formatDigits = (digits) => {
+    if (!digits) return '';
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 4) return digits.slice(0, 2) + '/' + digits.slice(2);
+    return digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+  };
+
+  // Intenta parsear y emitir al padre si la fecha está completa y es válida.
+  // Si está incompleta, no emite (deja al user terminar).
+  const tryEmit = (raw) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 8);
+    const display = formatDigits(digits);
+    setText(display);
+    if (digits.length === 0) {
+      onChange('');
+      setValido(true);
+      return;
+    }
+    if (digits.length >= 8) {
+      const dd = digits.slice(0, 2), mm = digits.slice(2, 4), yyyy = digits.slice(4);
+      const dateStr = `${yyyy}-${mm}-${dd}`;
+      const d = new Date(dateStr + 'T00:00:00');
+      if (!isNaN(d) && d.getDate() === parseInt(dd, 10) && d.getMonth() === parseInt(mm, 10) - 1) {
+        onChange(dateStr);
+        setValido(true);
+      } else {
+        setValido(false);
+      }
+    } else {
+      // Texto parcial: no emitir aún (el padre conserva el último valor).
+      setValido(true);
+    }
+  };
+
+  // Al perder foco / Enter: completar año si solo hay dd/mm o dd/mm/aa.
+  const commitFormat = () => {
+    let digits = text.replace(/\D/g, '');
+    if (digits.length === 0) { onChange(''); setValido(true); return; }
+    if (digits.length === 4) {
+      // dd/mm sin año → asumir año actual.
+      digits = digits + String(new Date().getFullYear());
+    } else if (digits.length === 6) {
+      // dd/mm/aa → 20aa.
+      digits = digits.slice(0, 4) + '20' + digits.slice(4);
+    } else if (digits.length < 4) {
+      setValido(false);
+      return;
+    } else if (digits.length === 5 || digits.length === 7) {
+      // Cantidad de dígitos rara — inválido.
+      setValido(false);
+      return;
+    }
+    const dd = digits.slice(0, 2), mm = digits.slice(2, 4), yyyy = digits.slice(4, 8);
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    const d = new Date(dateStr + 'T00:00:00');
+    if (!isNaN(d) && d.getDate() === parseInt(dd, 10) && d.getMonth() === parseInt(mm, 10) - 1) {
+      setText(`${dd}/${mm}/${yyyy}`);
+      onChange(dateStr);
       setValido(true);
     } else {
       setValido(false);
     }
   };
 
+  // Click en un segmento: seleccionarlo entero para sobrescribirlo de un tipeo.
+  // Segmentos por posición visible: día = chars 0-1, mes = 3-4, año = 6-9.
+  const onClickOrFocus = (e) => {
+    const el = e.target;
+    setTimeout(() => {
+      const pos = el.selectionStart;
+      const len = el.value.length;
+      if (len === 0) return;
+      if (pos <= 2) { el.setSelectionRange(0, Math.min(2, len)); }
+      else if (pos <= 5) { el.setSelectionRange(3, Math.min(5, len)); }
+      else { el.setSelectionRange(6, Math.min(10, len)); }
+    }, 0);
+  };
+
   return (
-    <input type="text" placeholder={placeholder} value={text}
-      onChange={e => { setText(e.target.value); setValido(true); }}
-      onBlur={onBlur}
+    <input ref={inputRef} type="text" placeholder={placeholder} value={text}
+      inputMode="numeric"
+      onChange={e => tryEmit(e.target.value)}
+      onBlur={commitFormat}
+      onClick={onClickOrFocus}
+      onFocus={onClickOrFocus}
+      onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
       style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
     />
   );
 }
 
-function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
+// HoraTexto: tipeo predictivo hh:mm. El user tipea solo dígitos y el ":" se
+// inserta solo después del segundo dígito de hora. Si solo escribe "HH" se
+// completa con ":00" al perder foco o Enter. Click sobre el segmento de hora
+// o de minutos lo selecciona entero para sobrescribirlo de un tipeo.
+function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
   // value es "HH:MM" o ''
   const [text, setText] = useState(value || '');
   const [valido, setValido] = useState(true);
 
   useEffect(() => { setText(value || ''); setValido(true); }, [value]);
 
-  // Intenta parsear y emitir al padre apenas el texto sea válido. Sin esto,
-  // si el user tipeaba "14" y apretaba Guardar sin sacar foco, el padre
-  // recibía el último valor commiteado (o vacío), no "14:00".
-  const tryEmit = (val) => {
-    setText(val);
-    if (!val.trim()) {
-      onChange('');
-      setValido(true);
-      return;
+  // Reformatea visualmente "HHMM" → "HH:MM" insertando ":" cuando hay 3+ dígitos.
+  const formatDigits = (digits) => {
+    if (!digits) return '';
+    if (digits.length <= 2) return digits;
+    return digits.slice(0, 2) + ':' + digits.slice(2);
+  };
+
+  // Algoritmo de parseo: respeta el viejo parseHoraFlex (acepta "9" como 9:00,
+  // "930" como 9:30) pero emite el formato canónico al padre apenas haya algo
+  // válido. Sin esto el form padre lee "9" en lugar de "09:00" si el user
+  // apreta Guardar antes de blur.
+  const tryEmit = (raw) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 4);
+    setText(formatDigits(digits));
+    if (digits.length === 0) {
+      onChange(''); setValido(true); return;
     }
-    const t = parseHoraFlex(val);
-    if (t) {
-      onChange(`${pad2(t.h)}:${pad2(t.m)}`);
+    let h, m;
+    if (digits.length <= 2) { h = parseInt(digits, 10); m = 0; }
+    else if (digits.length === 3) { h = parseInt(digits[0], 10); m = parseInt(digits.slice(1), 10); }
+    else { h = parseInt(digits.slice(0,2), 10); m = parseInt(digits.slice(2), 10); }
+    if (h <= 23 && m <= 59) {
+      onChange(`${pad2(h)}:${pad2(m)}`);
       setValido(true);
     } else {
       setValido(false);
-      // No emitimos al padre — mantiene el último valor válido y el borde rojo
-      // indica que el texto actual no parsea.
     }
   };
 
-  // Al perder foco (o apretar Enter), reformateamos visualmente al canon.
+  // Al perder foco / Enter: si solo hay hora (2 dígitos), completar con :00 visual.
   const commitFormat = () => {
-    if (!text.trim()) { onChange(''); setValido(true); return; }
-    const t = parseHoraFlex(text);
-    if (t) {
-      const hhmm = `${pad2(t.h)}:${pad2(t.m)}`;
+    const digits = text.replace(/\D/g, '');
+    if (digits.length === 0) { onChange(''); setValido(true); return; }
+    let h, m;
+    if (digits.length <= 2) { h = parseInt(digits, 10); m = 0; }
+    else if (digits.length === 3) { h = parseInt(digits[0], 10); m = parseInt(digits.slice(1), 10); }
+    else { h = parseInt(digits.slice(0,2), 10); m = parseInt(digits.slice(2), 10); }
+    if (h <= 23 && m <= 59) {
+      const hhmm = `${pad2(h)}:${pad2(m)}`;
       setText(hhmm);
       onChange(hhmm);
       setValido(true);
@@ -3820,15 +3923,26 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
     }
   };
 
+  // Click selecciona el segmento (hora 0-1, minutos 3-4) para sobrescribir.
+  const onClickOrFocus = (e) => {
+    const el = e.target;
+    setTimeout(() => {
+      const pos = el.selectionStart;
+      const len = el.value.length;
+      if (len === 0) return;
+      if (pos <= 2) { el.setSelectionRange(0, Math.min(2, len)); }
+      else { el.setSelectionRange(3, Math.min(5, len)); }
+    }, 0);
+  };
+
   return (
     <input type="text" placeholder={placeholder} value={text}
+      inputMode="numeric"
       onChange={e => tryEmit(e.target.value)}
       onBlur={commitFormat}
-      onKeyDown={e => {
-        // Enter dentro del input dispara el commit antes de que React
-        // propague el evento al form (submit). Así "14" llega como "14:00".
-        if (e.key === 'Enter') commitFormat();
-      }}
+      onClick={onClickOrFocus}
+      onFocus={onClickOrFocus}
+      onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
       style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
     />
   );
@@ -4883,6 +4997,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Modal para crear nueva columna del Kanban (reemplaza el prompt() nativo
   // por uno coherente con el resto de la app, validación y autofocus).
   const [addingColumna, setAddingColumna] = useState(false);
+  // Modal de acciones al clickear un evento del calendar que viene de un
+  // prospect (kind='prospecto'). Ofrece "eliminar la gestión" (que limpia
+  // contacto + evento Google) o "abrir ficha del prospect" (comportamiento
+  // viejo, abre panel lateral).
+  const [pendingProspectAgenda, setPendingProspectAgenda] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   // Persistimos la vista activa en localStorage para que sobreviva al refresh.
   const [view, setView] = useState(() => {
@@ -5267,9 +5386,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (e) { handleErr(e, 'updateContacto'); }
   };
 
-  const handleDeleteContacto = async (prospectoId, contactoId) => {
+  const handleDeleteContacto = async (prospectoId, contactoId, opts = {}) => {
     if (guardReadOnly()) return;
-    if (!confirm('¿Eliminar este registro de gestión?')) return;
+    // opts.skipConfirm: para callers que ya confirmaron via modal propio
+    // (ej. eliminar agenda desde el calendar). Evita doble confirmación.
+    if (!opts.skipConfirm && !confirm('¿Eliminar este registro de gestión?')) return;
     try {
       const prevState = state;
       const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
@@ -5451,6 +5572,30 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         await handleUpdateAgenda(e.agendaData.id, { fecha: newStartIso, nota: e.agendaData.nota });
       }
     } catch (err) { handleErr(err, 'moveEvent'); }
+  };
+
+  // Borrar la gestión "agendado" que generó este evento del calendar (kind=
+  // 'prospecto'). Elimina el contacto del historial Y el evento Google. El
+  // prospect vuelve al estado anterior automáticamente (deriveEstado mira
+  // el contacto previo). Mantiene el resto del historial intacto.
+  const handleDeleteProspectAgenda = async () => {
+    const evt = pendingProspectAgenda;
+    setPendingProspectAgenda(null);
+    if (!evt?.prospectoId) return;
+    const prospect = state.prospectos.find(p => p.id === evt.prospectoId);
+    if (!prospect) return;
+    // El evento del calendar viene del último contacto agendado del prospect.
+    const ultimoAgendado = [...(prospect.contactos || [])].reverse()
+      .find(c => c.agendadoPara && c.tipo === 'agendado');
+    if (!ultimoAgendado) {
+      showToast('No se encontró la gestión asociada');
+      return;
+    }
+    // handleDeleteContacto se encarga de sincronizar (limpia evento Google
+    // del prospect, actualiza estado y proximoContacto, etc.). skipConfirm
+    // porque ya confirmamos via nuestro modal.
+    await handleDeleteContacto(evt.prospectoId, ultimoAgendado.id, { skipConfirm: true });
+    showToast('Agenda eliminada');
   };
 
   // Borrar un evento huérfano del Google Calendar. No toca la tarea/prospect
@@ -6176,6 +6321,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectTarea={(t) => setTareaEditando(t)}
             onSelectAgenda={(a) => setAgendaEditando(a)}
             onSelectOrphan={(ev) => setPendingOrphanEvent(ev)}
+            onSelectProspectoEvent={(ev) => setPendingProspectAgenda(ev)}
             onGcalActorIdsLoaded={handleGcalActorIdsLoaded}
             onOpenSettings={() => setShowSettings(true)}
             onMoveEvent={readOnly ? null : handleMoveEvent}
@@ -6313,6 +6459,23 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onConfirm={handleConfirmAddColumna}
         />
       )}
+
+      {pendingProspectAgenda && (() => {
+        const prospect = state.prospectos.find(p => p.id === pendingProspectAgenda.prospectoId);
+        return (
+          <ProspectAgendaActionModal
+            event={pendingProspectAgenda}
+            prospectName={prospect?.nombre || pendingProspectAgenda.prospectoNombre || '(prospect)'}
+            onCancel={() => setPendingProspectAgenda(null)}
+            onDeleteAgenda={handleDeleteProspectAgenda}
+            onOpenProspect={() => {
+              const id = pendingProspectAgenda.prospectoId;
+              setPendingProspectAgenda(null);
+              setSelectedId(id);
+            }}
+          />
+        );
+      })()}
 
       {selectedProspecto && (
         <PanelLateral
@@ -7581,7 +7744,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -7654,10 +7817,14 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       }
     } else if (e.kind === 'agenda' && onSelectAgenda) {
       onSelectAgenda(e.googleEvent ? { googleEvent: e.googleEvent } : e.agendaData);
-    } else if (e.kind === 'prospecto' && onSelectProspecto) {
-      onSelectProspecto(e.prospectoId);
+    } else if (e.kind === 'prospecto') {
+      // Si hay handler específico para eventos de prospect, lo usamos (abre
+      // un modal con opciones: eliminar la gestión, abrir ficha, etc.).
+      // Sino, fallback al comportamiento viejo de abrir el panel directo.
+      if (onSelectProspectoEvent) onSelectProspectoEvent(e);
+      else if (onSelectProspecto) onSelectProspecto(e.prospectoId);
     }
-  }, [onSelectProspecto, onSelectTarea, onSelectAgenda, onSelectOrphan, tareasState]);
+  }, [onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, tareasState]);
 
   // Cuando cambia el mode, ajustar cursor a un anchor sensato
   useEffect(() => {
@@ -10170,6 +10337,62 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
           {!tieneFecha && (
             <button className="btn-danger" onClick={onDeleteAll} autoFocus>Eliminar</button>
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: ACCIÓN SOBRE EVENTO DE PROSPECT EN CALENDAR ────────
+// Aparece al clickear un evento del calendar que viene de un prospect
+// (kind='prospecto', generado por una gestión "Agendado"). Ofrece eliminar
+// la agenda (borra contacto del historial + evento Google, el prospect
+// vuelve a su estado anterior) o abrir la ficha del prospect (panel lateral
+// para ver historial completo, editar datos, etc.).
+function ProspectAgendaActionModal({ event, prospectName, onCancel, onDeleteAgenda, onOpenProspect }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const fecha = event?.fecha ? new Date(event.fecha) : null;
+  const fechaTxt = fecha
+    ? `${formatFechaCorta(fecha.toISOString().slice(0,10))} ${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}`
+    : '';
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="prosp-agenda-title" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3 id="prosp-agenda-title">Agenda de {prospectName}</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          {fechaTxt && (
+            <p style={{ fontSize: '0.88rem', color: 'var(--texto-suave)', margin: '4px 0 14px', lineHeight: 1.5 }}>
+              Cita: <strong>{fechaTxt}</strong>
+            </p>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <button type="button" className="btn-secondary" onClick={onOpenProspect}
+              style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
+              <strong style={{ display: 'block', marginBottom: 3 }}>Abrir ficha del prospect</strong>
+              <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', fontWeight: 400 }}>
+                Ver historial, editar datos, registrar otra gestión.
+              </span>
+            </button>
+            <button type="button" className="btn-danger" onClick={onDeleteAgenda}
+              style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
+              <strong style={{ display: 'block', marginBottom: 3 }}>Eliminar la agenda</strong>
+              <span style={{ fontSize: '0.78rem', opacity: 0.9, fontWeight: 400 }}>
+                Borra la gestión del historial del prospect y el evento del calendar. La etiqueta verde se actualiza sola.
+              </span>
+            </button>
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
         </div>
       </div>
     </div>
