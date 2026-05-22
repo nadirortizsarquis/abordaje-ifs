@@ -443,14 +443,51 @@
   }
   .help-callout strong { display: block; margin-bottom: 4px; color: inherit; }
 
-  /* ── Input nativo type=time en formato 24hs ──
-     Oculta el campo AM/PM del input nativo en Chromium/Edge para forzar
-     visualmente formato 24hs (lang="es-AR" en el input cubre el caso de
-     locales bien comportados, pero algunos browsers ignoran el atributo
-     y muestran AM/PM igual). En iOS Safari no hay forma de forzar 24hs
-     desde web: depende del setting del SO. */
-  input[type="time"]::-webkit-datetime-edit-ampm-field { display: none; }
-  input[type="time"]::-webkit-datetime-edit-meridiem-field { display: none; }
+  /* ── HoraTexto: 2 inputs HH:MM unificados visualmente como uno solo ──
+     Solución para garantizar 24hs en todos los browsers (el input nativo
+     type=time muestra AM/PM en muchos casos y CSS no puede forzarlo). */
+  .hora-pair {
+    display: inline-flex;
+    align-items: center;
+    border: 1.5px solid var(--borde, #e5e7eb);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: white;
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: fit-content;
+  }
+  .hora-pair:focus-within {
+    border-color: var(--azul, #0098DA);
+    box-shadow: 0 0 0 3px rgba(0, 152, 218, 0.12);
+  }
+  .hora-pair input {
+    width: 1.6em;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+    text-align: center;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    font-variant-numeric: tabular-nums;
+    box-shadow: none !important;
+    min-height: 0 !important;
+  }
+  .hora-pair input::placeholder {
+    color: var(--texto-suave, #b0b6c0);
+    font-weight: 400;
+  }
+  .hora-pair-sep {
+    padding: 0 1px;
+    font-weight: 600;
+    color: var(--texto, #1a1a2e);
+    user-select: none;
+  }
 
   /* ── Banner de desconexión de Google Calendar ── */
   .gcal-disconnected-banner {
@@ -3789,16 +3826,85 @@ function FechaTexto({ valueIso, onChange, placeholder = '' }) {
   );
 }
 
-// HoraTexto: input nativo type=time. Forzamos formato 24hs via:
-//  - lang="es-AR" para que el browser elija locale 24hs.
-//  - CSS abajo oculta el campo AM/PM (Chromium/Edge). En iOS Safari el
-//    formato depende del setting del SO (Ajustes → General → Fecha y Hora
-//    → Hora 24 horas).
+// HoraTexto: 2 inputs HH y MM separados, visualmente unificados con un ":".
+// Es la única forma de garantizar formato 24hs en todos los browsers/SO:
+// el input nativo type=time muestra AM/PM según el locale del browser o el
+// setting del SO en iOS, y el CSS para ocultarlo no cambia el formato interno
+// (el campo HH sigue limitado a 1-12). Acá tenemos control total: 24hs
+// siempre, teclado numérico en mobile, auto-jump de HH a MM, click selecciona
+// el campo entero para reemplazar de un tipeo.
 function HoraTexto({ value, onChange }) {
+  const [hh, setHh] = useState('');
+  const [mm, setMm] = useState('');
+  const mmRef = useRef(null);
+
+  useEffect(() => {
+    if (value) {
+      const parts = String(value).split(':');
+      setHh((parts[0] || '').slice(0, 2));
+      setMm((parts[1] || '').slice(0, 2));
+    } else {
+      setHh(''); setMm('');
+    }
+  }, [value]);
+
+  const emit = (newHh, newMm) => {
+    if (!newHh && !newMm) { onChange(''); return; }
+    const h = parseInt(newHh || '0', 10);
+    const m = parseInt(newMm || '0', 10);
+    if (newHh && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      onChange(`${pad2(h)}:${pad2(m)}`);
+    }
+  };
+
+  const onHhChange = (e) => {
+    let v = e.target.value.replace(/\D/g, '').slice(0, 2);
+    // Si el primer dígito es > 2, no puede ser HH de 2 dígitos válida.
+    // Lo aceptamos pero auto-jump al MM (lo trata como hora de 1 dígito).
+    setHh(v);
+    emit(v, mm);
+    // Auto-jump al MM cuando completa 2 dígitos válidos (00-23) o cuando
+    // el primer dígito ya es > 2 (no puede continuar como 2 dígitos).
+    if ((v.length === 2 && parseInt(v, 10) <= 23) || (v.length === 1 && parseInt(v, 10) > 2)) {
+      setTimeout(() => {
+        if (mmRef.current) { mmRef.current.focus(); mmRef.current.select(); }
+      }, 0);
+    }
+  };
+
+  const onMmChange = (e) => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+    setMm(v);
+    emit(hh, v);
+  };
+
+  const onMmBlur = () => {
+    // Si dejó MM vacío pero hay HH, asumir :00.
+    if (hh && !mm) { setMm('00'); emit(hh, '00'); }
+  };
+
+  // Doble cobertura: select() en focus, click y mouseup. Algunos browsers
+  // (iOS Safari, mobile Chrome) cancelan el select() del focus en el siguiente
+  // tick si el evento de click reposiciona el cursor. Cubrirlo en los 3
+  // garantiza que click sobre el campo siempre seleccione todo y el primer
+  // dígito reemplace.
+  const selectAll = (e) => {
+    const el = e.target;
+    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
+  };
+
   return (
-    <input type="time" lang="es-AR" value={value || ''}
-      onChange={e => onChange(e.target.value || '')}
-    />
+    <span className="hora-pair">
+      <input type="text" inputMode="numeric" value={hh} maxLength={2}
+        placeholder="--" aria-label="Hora"
+        onChange={onHhChange}
+        onFocus={selectAll} onClick={selectAll} onMouseUp={selectAll} />
+      <span className="hora-pair-sep">:</span>
+      <input ref={mmRef} type="text" inputMode="numeric" value={mm} maxLength={2}
+        placeholder="--" aria-label="Minutos"
+        onChange={onMmChange} onBlur={onMmBlur}
+        onFocus={selectAll} onClick={selectAll} onMouseUp={selectAll} />
+    </span>
   );
 }
 
