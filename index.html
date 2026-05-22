@@ -5152,9 +5152,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         // En piloto, también crear evento en Google para que aparezca en el calendar.
         if (isPilot) {
           try {
-            const local = new Date(`${fecha}T${(hora || '09:00')}:00`);
+            // Local string directo, sin pasar por toISOString (que convierte
+            // a UTC y desfasaba la hora cuando el browser no estaba en ARG).
+            const startIso = `${fecha}T${hora || '09:00'}`;
             const evt = await gcalApi.create(buildGoogleEventBody({
-              startIso: local.toISOString(),
+              startIso,
               summary: titulo,
               description: obsTarea,
               tareaId: tarea.id,
@@ -5341,7 +5343,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         try {
           const local = new Date(slot.date.getFullYear(), slot.date.getMonth(), slot.date.getDate(), slot.hour, slot.minute, 0);
           const evt = await gcalApi.create(buildGoogleEventBody({
-            startIso: local.toISOString(),
+            // dateToLocalIso preserva la hora local; toISOString convertía
+            // a UTC y luego buildGoogleEventBody la re-traducía por casualidad
+            // si el browser estaba en ARG. Pasar local string es robusto a
+            // cualquier timezone del browser.
+            startIso: dateToLocalIso(local),
             summary: 'Tarea',
             tareaId: tarea.id,
           }));
@@ -6863,14 +6869,19 @@ function RegistrarGestion({ onSubmit, settings }) {
       if (unidad === 'minutos') d.setMinutes(d.getMinutes() + n);
       else if (unidad === 'horas') d.setHours(d.getHours() + n);
       else if (unidad === 'dias') d.setDate(d.getDate() + n);
-      agendadoPara = d.toISOString();
+      // dateToLocalIso preserva la hora local. toISOString() lo convertía a
+      // UTC y todo el flow downstream (DB, lista, calendar) terminaba con la
+      // hora desfasada en +3hs (ARG → UTC).
+      agendadoPara = dateToLocalIso(d);
     } else if (cfg.input === 'fecha') {
       if (!fechaIso) { alert('Falta la fecha'); return; }
-      agendadoPara = new Date(fechaIso + 'T10:00:00').toISOString();
+      // Local string directo, sin pasar por Date → toISOString.
+      agendadoPara = `${fechaIso}T10:00`;
     } else if (cfg.input === 'fechahora') {
       if (!fechaIso) { alert('Falta la fecha'); return; }
       if (!hora) { alert('Falta la hora'); return; }
-      agendadoPara = new Date(fechaIso + 'T' + hora + ':00').toISOString();
+      // Local string directo. La hora ya está en formato "HH:MM" desde HoraTexto.
+      agendadoPara = `${fechaIso}T${hora}`;
       extraDur = parseInt(duracionMin, 10) || defaultDur;
     } else {
       agendadoPara = calcAgendadoPara(tipoSel, null);
