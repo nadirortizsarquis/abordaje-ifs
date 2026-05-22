@@ -3370,14 +3370,23 @@ function canLinkGoogleCalendar(profile) {
 //   prospectId / tareaId: opcionales, se guardan en extendedProperties.private
 //     para que el calendar pueda identificar a qué entidad de Abordaje corresponden.
 const GCAL_TZ = 'America/Argentina/Buenos_Aires';
+// Formatea Date a "YYYY-MM-DDTHH:MM:SS" en hora LOCAL (sin Z ni offset).
+// Necesario para Google Calendar: si mandamos dateTime con Z (UTC) + timeZone,
+// Google guarda el instante UTC y aplica timeZone solo para display. Cuando
+// el browser del cel está en una zona distinta, ve un desfase (ej. 14 ARG
+// guardado como 17 UTC se mostraba como 17 al user). Mandar dateTime local
+// + timeZone le dice a Google "este es el instante en esa zona", no ambiguo.
+function dateToGcalLocal(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
 function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + durationMin * 60_000);
   const body = {
     summary: summary || 'Agenda IFS',
     description: description || '',
-    start: { dateTime: start.toISOString(), timeZone: GCAL_TZ },
-    end:   { dateTime: end.toISOString(),   timeZone: GCAL_TZ },
+    start: { dateTime: dateToGcalLocal(start), timeZone: GCAL_TZ },
+    end:   { dateTime: dateToGcalLocal(end),   timeZone: GCAL_TZ },
   };
   const ext = {};
   if (prospectId) ext.abordaje_prospect_id = prospectId;
@@ -3776,7 +3785,29 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
 
   useEffect(() => { setText(value || ''); setValido(true); }, [value]);
 
-  const onBlur = () => {
+  // Intenta parsear y emitir al padre apenas el texto sea válido. Sin esto,
+  // si el user tipeaba "14" y apretaba Guardar sin sacar foco, el padre
+  // recibía el último valor commiteado (o vacío), no "14:00".
+  const tryEmit = (val) => {
+    setText(val);
+    if (!val.trim()) {
+      onChange('');
+      setValido(true);
+      return;
+    }
+    const t = parseHoraFlex(val);
+    if (t) {
+      onChange(`${pad2(t.h)}:${pad2(t.m)}`);
+      setValido(true);
+    } else {
+      setValido(false);
+      // No emitimos al padre — mantiene el último valor válido y el borde rojo
+      // indica que el texto actual no parsea.
+    }
+  };
+
+  // Al perder foco (o apretar Enter), reformateamos visualmente al canon.
+  const commitFormat = () => {
     if (!text.trim()) { onChange(''); setValido(true); return; }
     const t = parseHoraFlex(text);
     if (t) {
@@ -3791,8 +3822,13 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm (24h)' }) {
 
   return (
     <input type="text" placeholder={placeholder} value={text}
-      onChange={e => { setText(e.target.value); setValido(true); }}
-      onBlur={onBlur}
+      onChange={e => tryEmit(e.target.value)}
+      onBlur={commitFormat}
+      onKeyDown={e => {
+        // Enter dentro del input dispara el commit antes de que React
+        // propague el evento al form (submit). Así "14" llega como "14:00".
+        if (e.key === 'Enter') commitFormat();
+      }}
       style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
     />
   );
@@ -5353,11 +5389,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         const durMs = (oldEnd - oldStart) || 60 * 60_000;
         const newStart = new Date(newStartIso);
         const newEnd = new Date(newStart.getTime() + durMs);
-        const oldStartIso = oldStart.toISOString();
-        const oldEndIso = oldEnd.toISOString();
+        // Usamos dateTime en hora LOCAL (no UTC) + timeZone. Si mandamos
+        // toISOString() (UTC con Z) Google interpreta y muestra desfasado
+        // según el browser que abra el calendar — bug de 3hs reportado.
+        const oldStartLocal = dateToGcalLocal(oldStart);
+        const oldEndLocal = dateToGcalLocal(oldEnd);
         await gcalApi.update(e.googleEvent.id, {
-          start: { dateTime: newStart.toISOString(), timeZone: GCAL_TZ },
-          end:   { dateTime: newEnd.toISOString(),   timeZone: GCAL_TZ },
+          start: { dateTime: dateToGcalLocal(newStart), timeZone: GCAL_TZ },
+          end:   { dateTime: dateToGcalLocal(newEnd),   timeZone: GCAL_TZ },
         }, e.googleEvent._gcalId);
         // Si era una tarea local, también actualizar abordaje_tareas para que
         // los cards del kanban reflejen la nueva fecha. Usamos storage.updateTarea
@@ -5374,11 +5413,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               fechaRecordatorio: newF, horaRecordatorio: newH,
             });
           } catch (dbErr) {
-            // Rollback Google al estado anterior.
+            // Rollback Google al estado anterior (también en hora local).
             try {
               await gcalApi.update(e.googleEvent.id, {
-                start: { dateTime: oldStartIso, timeZone: GCAL_TZ },
-                end:   { dateTime: oldEndIso,   timeZone: GCAL_TZ },
+                start: { dateTime: oldStartLocal, timeZone: GCAL_TZ },
+                end:   { dateTime: oldEndLocal,   timeZone: GCAL_TZ },
               }, e.googleEvent._gcalId);
             } catch (rbErr) { console.error('rollback gcal:', rbErr); }
             throw dbErr;
@@ -7385,6 +7424,12 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     let kind = 'agenda';
     let prospectoNombre = null;
     let isOrphan = false;
+    // Distinguimos "creado desde Abordaje" de "evento externo del calendar
+    // personal" mirando el tag `abordaje_agente_id` (lo inyecta gcalApi._decorate
+    // en cualquier create/update de Abordaje). Sin esto, las agendas standalone
+    // creadas en "Nueva agenda" (que no tienen prospectId/tareaId) se mezclan
+    // con eventos personales del calendar y heredan su color celeste.
+    const createdByAbordaje = !!ev?.extendedProperties?.private?.abordaje_agente_id;
     if (prospectoId) {
       kind = 'prospecto';
       const p = prospectos.find(x => x.id === prospectoId);
@@ -7415,7 +7460,11 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,
-      isExternalGcal: !prospectoId && !tareaId,
+      // External = sin vínculo a entidad Abordaje Y no fue creado por Abordaje.
+      // Las agendas standalone creadas via "Nueva agenda" (sin prospect/tarea)
+      // pero con tag abordaje_agente_id se consideran "nuestras" → kind=agenda
+      // → color verde (regla por tipo en colorCalendarEvento), no celeste.
+      isExternalGcal: !prospectoId && !tareaId && !createdByAbordaje,
       // Actor/agente inyectados al crear/editar desde Abordaje (extendedProperties.private)
       actorId: ext.abordaje_actor_id || null,
       agenteId: ext.abordaje_agente_id || null,
@@ -8249,8 +8298,13 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                 if (e.target.closest('.cal-week-event')) return;
                 const rect = e.currentTarget.getBoundingClientRect();
                 const y = e.clientY - rect.top;
-                const totalMin = Math.max(0, Math.min(23 * 60 + 45, Math.round((y / HOUR_HEIGHT) * 60)));
-                const snapped = Math.round(totalMin / 15) * 15;
+                const totalMin = Math.max(0, Math.min(23 * 60 + 59, (y / HOUR_HEIGHT) * 60));
+                // Snap al inicio de cada slot configurado (default 60min). Floor
+                // para que clickear en cualquier punto de una "celda visual" abra
+                // siempre el inicio de esa celda (ej. click dentro de la celda 18
+                // siempre devuelve 18:00, no 18:30 que era lo que daba round antes).
+                const slotSnap = Math.max(15, settings?.slotDurationMin || 60);
+                const snapped = Math.floor(totalMin / slotSnap) * slotSnap;
                 onSlotClick(d, Math.floor(snapped / 60), snapped % 60);
               }}>
               {hours.map(h => (
