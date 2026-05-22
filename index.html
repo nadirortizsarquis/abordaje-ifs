@@ -443,10 +443,49 @@
   }
   .help-callout strong { display: block; margin-bottom: 4px; color: inherit; }
 
-  /* Oculta el AM/PM del input nativo type=time (no fuerza 24hs internamente,
-     solo evita que se vea visualmente cuando el browser igual lo muestra). */
-  input[type="time"]::-webkit-datetime-edit-ampm-field { display: none; }
-  input[type="time"]::-webkit-datetime-edit-meridiem-field { display: none; }
+  /* ── HoraTexto: 4 slots HH:MM, agrupados visualmente como un solo input ──
+     Imita la estética del input nativo type=time pero con control total
+     sobre 24hs (el nativo no permite forzar formato). */
+  .hora-slots {
+    display: inline-flex;
+    align-items: center;
+    border: 1.5px solid var(--borde, #e5e7eb);
+    border-radius: 6px;
+    padding: 8px 10px;
+    background: white;
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.2;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    width: fit-content;
+  }
+  .hora-slots:focus-within {
+    border-color: var(--azul, #0098DA);
+    box-shadow: 0 0 0 3px rgba(0, 152, 218, 0.12);
+  }
+  .hora-slots input {
+    width: 0.85em;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+    text-align: center;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    font-variant-numeric: tabular-nums;
+    box-shadow: none !important;
+    min-height: 0 !important;
+  }
+  .hora-slots input:empty::before,
+  .hora-slots input:placeholder-shown { color: var(--texto-suave, #b0b6c0); }
+  .hora-slots-sep {
+    padding: 0 2px;
+    font-weight: 600;
+    color: var(--texto, #1a1a2e);
+    user-select: none;
+  }
 
   /* ── Banner de desconexión de Google Calendar ── */
   .gcal-disconnected-banner {
@@ -3785,16 +3824,58 @@ function FechaTexto({ valueIso, onChange, placeholder = '' }) {
   );
 }
 
-// HoraTexto: input nativo type=time. Devuelve "HH:MM" directo.
-// Para forzar 24hs intentamos lang="es-AR" + CSS para ocultar AM/PM, pero
-// el formato interno (HH 0-23 vs 1-12) lo decide el browser/SO y desde web
-// NO se puede forzar. Si en tu cel ves formato 12hs: Ajustes del SO →
-// Fecha y Hora → "Hora 24 horas".
+// HoraTexto: 4 slots de 1 dígito cada uno (H H : M M), agrupados visualmente
+// como un solo input. Cada slot se edita independiente: click en él lo
+// selecciona, tipeás un dígito y reemplaza ese carácter. Sin auto-jump al
+// siguiente slot, sin auto-complete. Formato 24hs garantizado.
 function HoraTexto({ value, onChange }) {
+  // Slots: [h1, h2, m1, m2]. Inicializa desde value "HH:MM" o vacío.
+  const fromValue = (v) => (v && v.length >= 5)
+    ? [v[0], v[1], v[3], v[4]]
+    : ['', '', '', ''];
+  const [slots, setSlots] = useState(() => fromValue(value));
+
+  useEffect(() => { setSlots(fromValue(value)); }, [value]);
+
+  const updateSlot = (idx, v) => {
+    const next = [...slots];
+    next[idx] = v;
+    setSlots(next);
+    // Emit al padre solo si los 4 slots están llenos y forman tiempo válido.
+    if (next.every(s => s !== '')) {
+      const hh = parseInt(next[0] + next[1], 10);
+      const mm = parseInt(next[2] + next[3], 10);
+      if (hh <= 23 && mm <= 59) onChange(`${pad2(hh)}:${pad2(mm)}`);
+    } else if (next.every(s => s === '')) {
+      onChange('');
+    }
+    // Casos intermedios (algunos slots llenos): no emit, padre mantiene valor previo.
+  };
+
+  const onSlotChange = (idx) => (e) => {
+    const v = (e.target.value || '').replace(/\D/g, '').slice(0, 1);
+    updateSlot(idx, v);
+  };
+  // Select-all on focus para que click+tipeo reemplace el dígito en lugar de
+  // tratar de insertar (con maxLength=1 algunos browsers rechazan el segundo
+  // carácter, en otros lo reemplaza — uniformamos con select).
+  const onSlotFocus = (e) => {
+    const el = e.target;
+    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
+  };
+
   return (
-    <input type="time" lang="es-AR" value={value || ''}
-      onChange={e => onChange(e.target.value || '')}
-    />
+    <span className="hora-slots">
+      <input type="text" inputMode="numeric" maxLength={1} value={slots[0]}
+        aria-label="Decena de hora" onChange={onSlotChange(0)} onFocus={onSlotFocus} />
+      <input type="text" inputMode="numeric" maxLength={1} value={slots[1]}
+        aria-label="Unidad de hora" onChange={onSlotChange(1)} onFocus={onSlotFocus} />
+      <span className="hora-slots-sep">:</span>
+      <input type="text" inputMode="numeric" maxLength={1} value={slots[2]}
+        aria-label="Decena de minutos" onChange={onSlotChange(2)} onFocus={onSlotFocus} />
+      <input type="text" inputMode="numeric" maxLength={1} value={slots[3]}
+        aria-label="Unidad de minutos" onChange={onSlotChange(3)} onFocus={onSlotFocus} />
+    </span>
   );
 }
 
