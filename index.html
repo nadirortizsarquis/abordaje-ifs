@@ -5077,47 +5077,52 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     setPendingDeleteProspect(null);
     if (guardReadOnly()) return;
 
-    // En piloto, limpiar el calendar de Google antes de borrar el prospect
-    // para que no queden eventos huérfanos con abordaje_prospect_id stale
-    // (el cascade de Supabase no toca Google).
-    if (isPilot) {
-      try {
-        // Rango muy amplio (-10 / +10 años) para cubrir cualquier evento
-        // histórico o agenda lejana del prospect. La operación de borrar un
-        // prospect es infrecuente; el costo extra del list es aceptable.
-        // (Una versión más eficiente sería filtrar por privateExtendedProperty
-        // en la edge function, pero requiere cambios server-side.)
-        const past = new Date(); past.setFullYear(past.getFullYear() - 10);
-        const future = new Date(); future.setFullYear(future.getFullYear() + 10);
-        const evts = await gcalApi.list(past.toISOString(), future.toISOString());
-        for (const ev of (evts || [])) {
-          if (ev.extendedProperties?.private?.abordaje_prospect_id === id) {
-            try { await gcalApi.delete(ev.id); }
-            catch (e) { console.warn('gcal del prospect orphan:', e); }
-          }
-        }
-      } catch (e) { console.warn('gcal list al borrar prospect:', e); }
-
-      const tareasAuto = (state.tareas?.items || []).filter(t => t.prospectoId === id);
-      for (const t of tareasAuto) {
-        if (t.googleEventId) {
-          try { await gcalApi.delete(t.googleEventId); }
-          catch (e) { console.warn('gcal del tarea auto:', e); }
-        }
-      }
-    }
-
+    // UI optimista: sacamos de pantalla AL TOQUE y mostramos toast. La
+    // limpieza de Google y el delete real de DB van en background. Si algo
+    // falla, rollback + toast de error. Antes esto se hacía secuencial y
+    // el user veía la UI congelada 5-15s mientras gcalApi.list iteraba
+    // todos los calendars accesibles + delete uno por uno.
     const prev = state.prospectos;
+    const tareasAutoSnapshot = (state.tareas?.items || []).filter(t => t.prospectoId === id);
     setState(s => ({ ...s, prospectos: s.prospectos.filter(p => p.id !== id) }));
-    try {
-      await storage.deleteProspecto(id);
-      if (isPilot) bumpGcal();
-      setSelectedId(null);
-      showToast('Prospecto eliminado');
-    } catch (e) {
-      handleErr(e, 'deleteProspecto');
-      setState(s => ({ ...s, prospectos: prev }));
-    }
+    setSelectedId(null);
+    showToast('Prospecto eliminado');
+
+    // Trabajo de fondo: limpieza Google + delete DB. No bloquea la UI.
+    (async () => {
+      try {
+        if (isPilot) {
+          // Listamos y borramos eventos del prospect en paralelo (Promise.all)
+          // para que N eventos huérfanos no sumen N×latencia. Rango -10/+10
+          // años cubre cualquier agenda. Idealmente sería filter server-side
+          // (privateExtendedProperty), pero requiere cambios en edge function.
+          try {
+            const past = new Date(); past.setFullYear(past.getFullYear() - 10);
+            const future = new Date(); future.setFullYear(future.getFullYear() + 10);
+            const evts = await gcalApi.list(past.toISOString(), future.toISOString());
+            const toDelete = (evts || []).filter(ev =>
+              ev.extendedProperties?.private?.abordaje_prospect_id === id
+            );
+            await Promise.all(toDelete.map(ev =>
+              gcalApi.delete(ev.id).catch(e => console.warn('gcal del prospect orphan:', e))
+            ));
+          } catch (e) { console.warn('gcal list al borrar prospect:', e); }
+
+          // Tareas auto del prospect: borrar sus eventos Google en paralelo.
+          await Promise.all(tareasAutoSnapshot
+            .filter(t => t.googleEventId)
+            .map(t => gcalApi.delete(t.googleEventId).catch(e => console.warn('gcal del tarea auto:', e)))
+          );
+        }
+
+        await storage.deleteProspecto(id);
+        if (isPilot) bumpGcal();
+      } catch (e) {
+        handleErr(e, 'deleteProspecto');
+        // Rollback al state anterior (el prospect vuelve a la lista).
+        setState(s => ({ ...s, prospectos: prev }));
+      }
+    })();
   };
 
   // Sincroniza la tarea (Abordar) y/o el agendado del prospect según el contacto activo.
@@ -5648,17 +5653,28 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     setPendingDeleteAgenda(null);
     if (!req) return;
     const { agendaId, gcalCalendarId } = req;
-    try {
-      if (isPilot) {
-        await gcalApi.delete(agendaId, gcalCalendarId);
-        bumpGcal();
-      } else {
-        await storage.deleteAgendado(agendaId);
-        setState(s => ({ ...s, agendados: s.agendados.filter(a => a.id !== agendaId) }));
+    // UI optimista: cerramos modal y mostramos toast al toque. El delete real
+    // va en background. En non-piloto guardamos el snapshot por si hay rollback.
+    const prevAgendados = state.agendados;
+    if (!isPilot) {
+      setState(s => ({ ...s, agendados: s.agendados.filter(a => a.id !== agendaId) }));
+    }
+    setAgendaEditando(null);
+    showToast('Agenda eliminada');
+
+    (async () => {
+      try {
+        if (isPilot) {
+          await gcalApi.delete(agendaId, gcalCalendarId);
+          bumpGcal();
+        } else {
+          await storage.deleteAgendado(agendaId);
+        }
+      } catch (e) {
+        handleErr(e, 'deleteAgenda');
+        if (!isPilot) setState(s => ({ ...s, agendados: prevAgendados }));
       }
-      setAgendaEditando(null);
-      showToast('Agenda eliminada');
-    } catch (e) { handleErr(e, 'deleteAgenda'); }
+    })();
   };
 
   // Guarda una "Nueva agenda" creada desde el calendario.
@@ -5830,25 +5846,29 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
   const handleDeleteTarea = async (id) => {
     if (guardReadOnly()) return;
-    // La confirmación se hace ahora desde ConfirmDeleteTareaModal (que ofrece
+    // La confirmación se hace desde ConfirmDeleteTareaModal (que ofrece
     // además "solo sacar del calendar" si la tarea tiene fecha).
+    // UI optimista: sacamos de pantalla y mostramos toast al toque. Limpieza
+    // Google + delete DB van en background. Si algo falla, rollback.
     const prev = state.tareas.items;
     const tarea = prev.find(t => t.id === id);
     setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
-    try {
-      // En piloto, borrar primero el evento de Google (si existe).
-      if (isPilot && tarea?.googleEventId) {
-        try { await gcalApi.delete(tarea.googleEventId); }
-        catch (e) { console.warn('gcal sync (delete tarea):', e?.message || e); }
+    setTareaEditando(null);
+    showToast('Tarea eliminada');
+
+    (async () => {
+      try {
+        if (isPilot && tarea?.googleEventId) {
+          try { await gcalApi.delete(tarea.googleEventId); }
+          catch (e) { console.warn('gcal sync (delete tarea):', e?.message || e); }
+        }
+        await storage.deleteTarea(id);
+        if (isPilot) bumpGcal();
+      } catch (e) {
+        handleErr(e, 'deleteTarea');
+        setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
       }
-      await storage.deleteTarea(id);
-      setTareaEditando(null);
-      if (isPilot) bumpGcal();
-      showToast('Tarea eliminada');
-    } catch (e) {
-      handleErr(e, 'deleteTarea');
-      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
-    }
+    })();
   };
 
   // Archivar/Desarchivar tarea. Al archivar:
