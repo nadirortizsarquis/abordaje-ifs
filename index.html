@@ -4941,6 +4941,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // opción de "solo sacar del calendar" además de "borrar tarea completa".
   // Si no tiene fecha, solo pregunta borrar / cancelar.
   const [pendingDeleteTarea, setPendingDeleteTarea] = useState(null);
+  // Modal de confirmación al eliminar un prospect (reemplaza el confirm()
+  // nativo del browser por un modal acorde al diseño del proyecto).
+  const [pendingDeleteProspect, setPendingDeleteProspect] = useState(null);
   // Evento huérfano del calendar (un evento Google con abordaje_tarea_id o
   // abordaje_prospect_id que no coincide con el state actual — típicamente
   // residuos de bugs viejos de sync). Al clickearlo, en lugar de abrir el
@@ -5058,9 +5061,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (e) { handleErr(e, 'createProspecto'); }
   };
 
-  const handleDelete = async (id) => {
+  // Click en "Eliminar" desde el panel del prospect: arma el modal de
+  // confirmación. El borrado real lo hace executeDeleteProspect cuando el
+  // user confirma desde el modal propio (en lugar del confirm() nativo feo).
+  const handleDelete = (id) => {
     if (guardReadOnly()) return;
-    if (!confirm('¿Eliminar este prospecto? No se puede deshacer.')) return;
+    const prospect = state.prospectos.find(p => p.id === id);
+    if (!prospect) return;
+    setPendingDeleteProspect(prospect);
+  };
+
+  const executeDeleteProspect = async (id) => {
+    setPendingDeleteProspect(null);
+    if (guardReadOnly()) return;
 
     // En piloto, limpiar el calendar de Google antes de borrar el prospect
     // para que no queden eventos huérfanos con abordaje_prospect_id stale
@@ -6403,6 +6416,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           position={pendingColMove.position}
           onCancel={() => setPendingColMove(null)}
           onConfirm={handleConfirmMoveColumna}
+        />
+      )}
+
+      {pendingDeleteProspect && (
+        <ConfirmDeleteProspectModal
+          prospect={pendingDeleteProspect}
+          onCancel={() => setPendingDeleteProspect(null)}
+          onConfirm={() => executeDeleteProspect(pendingDeleteProspect.id)}
         />
       )}
 
@@ -10263,6 +10284,64 @@ function ConfirmColMoveModal({ movingName, targetName, position, onCancel, onCon
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
           <button className="btn-primary" onClick={onConfirm} autoFocus>Mover</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── MODAL: CONFIRMAR ELIMINAR PROSPECT ────────────────────────
+// Reemplaza el confirm() nativo del browser por un modal acorde al diseño.
+// Muestra contexto del prospect (nombre, gestiones, próxima cita) para que
+// el user no borre por accidente uno con historial cargado.
+function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+
+  const contactos = prospect.contactos || [];
+  const proximaCita = prospect.proximoContacto
+    ? formatFechaCorta(prospect.proximoContacto.slice(0, 10))
+    : null;
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-prosp-title" style={{ maxWidth: 460 }}>
+        <div className="modal-header">
+          <h3 id="confirm-del-prosp-title">Eliminar prospect</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.95rem', color: 'var(--texto)', margin: '4px 0 14px', lineHeight: 1.5 }}>
+            <strong>{prospect.nombre || '(sin nombre)'}</strong>
+            {prospect.telefono && (
+              <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}> · {prospect.telefono}</span>
+            )}
+          </p>
+          {(contactos.length > 0 || proximaCita) && (
+            <div className="help-callout" style={{ marginBottom: 14 }}>
+              {contactos.length > 0 && (
+                <div style={{ fontSize: '0.84rem', marginBottom: proximaCita ? 4 : 0 }}>
+                  <strong>{contactos.length}</strong> gestión{contactos.length === 1 ? '' : 'es'} registrada{contactos.length === 1 ? '' : 's'} en el historial
+                </div>
+              )}
+              {proximaCita && (
+                <div style={{ fontSize: '0.84rem' }}>
+                  Próximo contacto: <strong>{proximaCita}</strong>
+                </div>
+              )}
+            </div>
+          )}
+          <div className="help-callout danger" style={{ fontSize: '0.84rem', lineHeight: 1.5 }}>
+            <strong>Esta acción no se puede deshacer.</strong>
+            Se elimina el prospect, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar prospect</button>
         </div>
       </div>
     </div>
