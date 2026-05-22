@@ -464,7 +464,7 @@
     box-shadow: 0 0 0 3px rgba(0, 152, 218, 0.12);
   }
   .hora-slots input {
-    width: 0.85em;
+    width: 0.65em;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -478,10 +478,8 @@
     box-shadow: none !important;
     min-height: 0 !important;
   }
-  .hora-slots input:empty::before,
-  .hora-slots input:placeholder-shown { color: var(--texto-suave, #b0b6c0); }
   .hora-slots-sep {
-    padding: 0 2px;
+    padding: 0;
     font-weight: 600;
     color: var(--texto, #1a1a2e);
     user-select: none;
@@ -3826,14 +3824,16 @@ function FechaTexto({ valueIso, onChange, placeholder = '' }) {
 
 // HoraTexto: 4 slots de 1 dígito cada uno (H H : M M), agrupados visualmente
 // como un solo input. Cada slot se edita independiente: click en él lo
-// selecciona, tipeás un dígito y reemplaza ese carácter. Sin auto-jump al
-// siguiente slot, sin auto-complete. Formato 24hs garantizado.
+// selecciona, tipeás un dígito y reemplaza ese carácter. Auto-jump al
+// siguiente slot SOLO cuando tipeás (no cuando borrás). Formato 24hs
+// garantizado.
 function HoraTexto({ value, onChange }) {
   // Slots: [h1, h2, m1, m2]. Inicializa desde value "HH:MM" o vacío.
   const fromValue = (v) => (v && v.length >= 5)
     ? [v[0], v[1], v[3], v[4]]
     : ['', '', '', ''];
   const [slots, setSlots] = useState(() => fromValue(value));
+  const refs = [useRef(null), useRef(null), useRef(null), useRef(null)];
 
   useEffect(() => { setSlots(fromValue(value)); }, [value]);
 
@@ -3855,10 +3855,15 @@ function HoraTexto({ value, onChange }) {
   const onSlotChange = (idx) => (e) => {
     const v = (e.target.value || '').replace(/\D/g, '').slice(0, 1);
     updateSlot(idx, v);
+    // Auto-jump al siguiente slot SOLO si efectivamente tipeó un dígito (v
+    // no vacío). Si borró, queda en el slot actual para que pueda re-tipear.
+    if (v && idx < 3) {
+      setTimeout(() => {
+        const next = refs[idx + 1].current;
+        if (next) { next.focus(); try { next.select(); } catch (_) {} }
+      }, 0);
+    }
   };
-  // Select-all on focus para que click+tipeo reemplace el dígito en lugar de
-  // tratar de insertar (con maxLength=1 algunos browsers rechazan el segundo
-  // carácter, en otros lo reemplaza — uniformamos con select).
   const onSlotFocus = (e) => {
     const el = e.target;
     setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
@@ -3866,14 +3871,14 @@ function HoraTexto({ value, onChange }) {
 
   return (
     <span className="hora-slots">
-      <input type="text" inputMode="numeric" maxLength={1} value={slots[0]}
+      <input ref={refs[0]} type="text" inputMode="numeric" maxLength={1} value={slots[0]}
         aria-label="Decena de hora" onChange={onSlotChange(0)} onFocus={onSlotFocus} />
-      <input type="text" inputMode="numeric" maxLength={1} value={slots[1]}
+      <input ref={refs[1]} type="text" inputMode="numeric" maxLength={1} value={slots[1]}
         aria-label="Unidad de hora" onChange={onSlotChange(1)} onFocus={onSlotFocus} />
       <span className="hora-slots-sep">:</span>
-      <input type="text" inputMode="numeric" maxLength={1} value={slots[2]}
+      <input ref={refs[2]} type="text" inputMode="numeric" maxLength={1} value={slots[2]}
         aria-label="Decena de minutos" onChange={onSlotChange(2)} onFocus={onSlotFocus} />
-      <input type="text" inputMode="numeric" maxLength={1} value={slots[3]}
+      <input ref={refs[3]} type="text" inputMode="numeric" maxLength={1} value={slots[3]}
         aria-label="Unidad de minutos" onChange={onSlotChange(3)} onFocus={onSlotFocus} />
     </span>
   );
