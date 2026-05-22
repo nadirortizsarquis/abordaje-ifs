@@ -449,6 +449,7 @@
   .hora-slots {
     display: inline-flex;
     align-items: center;
+    gap: 0;
     border: 1.5px solid var(--borde, #e5e7eb);
     border-radius: 6px;
     padding: 8px 10px;
@@ -456,6 +457,7 @@
     font-family: inherit;
     font-size: 0.9rem;
     line-height: 1.2;
+    letter-spacing: 0;
     transition: border-color 0.15s, box-shadow 0.15s;
     width: fit-content;
   }
@@ -464,7 +466,7 @@
     box-shadow: 0 0 0 3px rgba(0, 152, 218, 0.12);
   }
   .hora-slots input {
-    width: 0.65em;
+    width: 1ch;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
@@ -475,14 +477,20 @@
     font-size: inherit;
     color: inherit;
     font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
     box-shadow: none !important;
     min-height: 0 !important;
+    flex: 0 0 1ch;
+    -webkit-appearance: none;
+    appearance: none;
   }
   .hora-slots-sep {
     padding: 0;
+    margin: 0;
     font-weight: 600;
     color: var(--texto, #1a1a2e);
     user-select: none;
+    flex: 0 0 auto;
   }
 
   /* ── Banner de desconexión de Google Calendar ── */
