@@ -3883,28 +3883,36 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
     return digits.slice(0, 2) + ':' + digits.slice(2);
   };
 
-  // Solo emite al padre cuando hay 2 dígitos (HH completo) o 4 dígitos
-  // (HHMM completo). Casos intermedios (1 o 3 dígitos) son estados de
-  // transición mientras el user tipea — no emite así si el user submitea
-  // a mitad de tipeo (ej. "1" antes de poner el "4") el padre queda con
-  // el último valor válido en lugar de uno raro como "01:00". Al perder
-  // foco o apretar Enter, commitFormat parsea lo que haya quedado.
+  // Emite al padre SOLO cuando hay 4 dígitos completos (HHMM) o cuando se
+  // limpia todo (0 dígitos). Estados intermedios (1, 2, 3 dígitos) no emiten
+  // — el padre conserva el valor previo hasta que el user termine o haga
+  // blur/Enter. Esto da tiempo al user de terminar de tipear MM sin que el
+  // sistema asuma prematuramente ":00". Al perder foco o apretar Enter,
+  // commitFormat sí parsea lo que haya y completa con ":00" si falta.
   const tryEmit = (raw) => {
     const digits = raw.replace(/\D/g, '').slice(0, 4);
     setText(formatDigits(digits));
     if (digits.length === 0) {
       onChange(''); setValido(true); return;
     }
-    if (digits.length !== 2 && digits.length !== 4) {
-      // 1 o 3 dígitos: estado intermedio, no emit. Validamos visualmente.
-      const lookahead = digits.length === 1 ? parseInt(digits, 10) : null;
-      // Para 1 dígito, marcamos rojo si > 2 (porque "3X" empieza con 3 no es válido).
-      setValido(lookahead == null || lookahead <= 2);
+    if (digits.length < 4) {
+      // Estado intermedio: no emit. Validamos visualmente el rango.
+      if (digits.length === 1) {
+        // "3" no puede ser inicio de hora de 2 dígitos válida (30-99). Pero
+        // sí puede ser hora completa de 1 dígito (3:00). Aceptamos hasta 9.
+        setValido(parseInt(digits, 10) <= 9);
+      } else if (digits.length === 2) {
+        // 2 dígitos: validamos que sean hora válida 00-23.
+        setValido(parseInt(digits, 10) <= 23);
+      } else if (digits.length === 3) {
+        // 3 dígitos "HHM": validamos hora.
+        setValido(parseInt(digits.slice(0,2), 10) <= 23);
+      }
       return;
     }
-    let h, m;
-    if (digits.length === 2) { h = parseInt(digits, 10); m = 0; }
-    else { h = parseInt(digits.slice(0,2), 10); m = parseInt(digits.slice(2), 10); }
+    // 4 dígitos completos: parsear y emitir.
+    const h = parseInt(digits.slice(0,2), 10);
+    const m = parseInt(digits.slice(2), 10);
     if (h <= 23 && m <= 59) {
       onChange(`${pad2(h)}:${pad2(m)}`);
       setValido(true);
