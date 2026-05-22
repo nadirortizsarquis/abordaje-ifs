@@ -800,3 +800,42 @@ de 12hs y el calendar nativo del SO es útil).
 timezone, sin race conditions de sync, con modales coherentes en todo el
 proyecto, y UX de inputs hora/fecha resuelto con el formato custom de 4
 slots que garantiza 24hs sin importar el browser/SO.
+
+---
+
+# Sesión 2026-05-22 — Performance + responsive header
+
+## UI optimista al eliminar (prospect / tarea / agenda)
+
+Antes, eliminar un prospect con Google Calendar activo podía bloquear la
+UI 5-15 segundos: el `executeDeleteProspect` esperaba secuencialmente
+`gcalApi.list(-10/+10 años)` + un delete por cada evento huérfano + el
+delete de DB, todo antes de actualizar la pantalla. Para tareas y agendas
+el delay era ~1-3s pero también notable.
+
+Refactor a **UI optimista** en los 3 handlers:
+- `executeDeleteProspect`, `handleDeleteTarea`, `handleConfirmDeleteAgenda`.
+- Sacan el item del state Y muestran toast "Eliminado" **al instante**.
+- La limpieza Google + delete DB se hace en background (IIFE async).
+- Si algo falla, rollback al state previo + toast de error.
+- En el prospect: deletes Google paralelizados con `Promise.all` (de
+  N×latencia a 1×latencia cuando hay varios eventos huérfanos).
+
+Trade-off aceptado: si Google/Supabase fallan, el item vuelve a aparecer
+con un toast. La mayoría de los casos el user solo ve "Eliminado" al toque.
+
+## Header mobile con nombres largos
+
+Reportado: en la PWA mobile, perfiles con nombre largo (ej. "Federico Del
+Boca") empujaban el botón "Salir" a una segunda línea, lo que aumentaba
+la altura del header y escondía las tabs Lista/Tareas/Calendario.
+
+Fix CSS puro en `@media (max-width: 720px)`:
+- `.header-actions` con `flex-wrap: nowrap` (todo en una línea).
+- `.header-actions > *` con `flex: 0 0 auto` (no se encogen).
+- `.header-user` con `flex: 0 1 auto`, `max-width: 11ch`,
+  `overflow: hidden`, `text-overflow: ellipsis`.
+
+Resultado: el nombre se trunca con "…" según el ancho disponible. Salir,
+Ajustes, ADMIN, campanita y tabs quedan siempre visibles. Aplica a
+cualquier asesor con nombre largo (no es solo para Federico).
