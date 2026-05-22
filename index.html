@@ -3654,8 +3654,14 @@ function dateToYMD(d) {
 function deriveEstado(prospecto) {
   const arr = prospecto.contactos || [];
   if (arr.length === 0) return 'nuevo';
-  const ultimo = arr[arr.length - 1];
-  const cfg = tipoConfig(ultimo.tipo);
+  // Si el último contacto fue una cita agendada pero ya no tiene fecha (el
+  // agente la canceló desde el calendar con "solo del calendar", dejando el
+  // registro histórico), retrocedemos para no quedarnos pegados en estado
+  // 'agendado' sin agenda real.
+  let i = arr.length - 1;
+  while (i >= 0 && arr[i].tipo === 'agendado' && !arr[i].agendadoPara) i--;
+  if (i < 0) return 'nuevo';
+  const cfg = tipoConfig(arr[i].tipo);
   return cfg ? cfg.estado : 'nuevo';
 }
 
@@ -3883,19 +3889,27 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
     return digits.slice(0, 2) + ':' + digits.slice(2);
   };
 
-  // Algoritmo de parseo: respeta el viejo parseHoraFlex (acepta "9" como 9:00,
-  // "930" como 9:30) pero emite el formato canónico al padre apenas haya algo
-  // válido. Sin esto el form padre lee "9" en lugar de "09:00" si el user
-  // apreta Guardar antes de blur.
+  // Solo emite al padre cuando hay 2 dígitos (HH completo) o 4 dígitos
+  // (HHMM completo). Casos intermedios (1 o 3 dígitos) son estados de
+  // transición mientras el user tipea — no emite así si el user submitea
+  // a mitad de tipeo (ej. "1" antes de poner el "4") el padre queda con
+  // el último valor válido en lugar de uno raro como "01:00". Al perder
+  // foco o apretar Enter, commitFormat parsea lo que haya quedado.
   const tryEmit = (raw) => {
     const digits = raw.replace(/\D/g, '').slice(0, 4);
     setText(formatDigits(digits));
     if (digits.length === 0) {
       onChange(''); setValido(true); return;
     }
+    if (digits.length !== 2 && digits.length !== 4) {
+      // 1 o 3 dígitos: estado intermedio, no emit. Validamos visualmente.
+      const lookahead = digits.length === 1 ? parseInt(digits, 10) : null;
+      // Para 1 dígito, marcamos rojo si > 2 (porque "3X" empieza con 3 no es válido).
+      setValido(lookahead == null || lookahead <= 2);
+      return;
+    }
     let h, m;
-    if (digits.length <= 2) { h = parseInt(digits, 10); m = 0; }
-    else if (digits.length === 3) { h = parseInt(digits[0], 10); m = parseInt(digits.slice(1), 10); }
+    if (digits.length === 2) { h = parseInt(digits, 10); m = 0; }
     else { h = parseInt(digits.slice(0,2), 10); m = parseInt(digits.slice(2), 10); }
     if (h <= 23 && m <= 59) {
       onChange(`${pad2(h)}:${pad2(m)}`);
@@ -5574,28 +5588,58 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (err) { handleErr(err, 'moveEvent'); }
   };
 
-  // Borrar la gestión "agendado" que generó este evento del calendar (kind=
-  // 'prospecto'). Elimina el contacto del historial Y el evento Google. El
-  // prospect vuelve al estado anterior automáticamente (deriveEstado mira
-  // el contacto previo). Mantiene el resto del historial intacto.
-  const handleDeleteProspectAgenda = async () => {
+  // "Eliminar solo del calendar": borra el evento Google y vacía la fecha
+  // de la gestión, pero deja el registro de "agendado para X" en el historial
+  // del prospect. Útil cuando la cita se canceló o cambió pero querés
+  // mantener trazabilidad. La etiqueta verde del cliente se actualiza sola
+  // porque deriveEstado retrocede a contactos previos cuando el último es
+  // un agendado sin fecha.
+  const handleSoloDelCalendarProspectAgenda = async () => {
     const evt = pendingProspectAgenda;
     setPendingProspectAgenda(null);
     if (!evt?.prospectoId) return;
     const prospect = state.prospectos.find(p => p.id === evt.prospectoId);
     if (!prospect) return;
-    // El evento del calendar viene del último contacto agendado del prospect.
     const ultimoAgendado = [...(prospect.contactos || [])].reverse()
       .find(c => c.agendadoPara && c.tipo === 'agendado');
     if (!ultimoAgendado) {
       showToast('No se encontró la gestión asociada');
       return;
     }
-    // handleDeleteContacto se encarga de sincronizar (limpia evento Google
-    // del prospect, actualiza estado y proximoContacto, etc.). skipConfirm
-    // porque ya confirmamos via nuestro modal.
-    await handleDeleteContacto(evt.prospectoId, ultimoAgendado.id, { skipConfirm: true });
-    showToast('Agenda eliminada');
+    try {
+      // Borrar eventos Google del prospect (en piloto el agendado vive ahí).
+      if (isPilot) {
+        try {
+          const past = new Date(); past.setFullYear(past.getFullYear() - 1);
+          const future = new Date(); future.setFullYear(future.getFullYear() + 10);
+          const evts = await gcalApi.list(past.toISOString(), future.toISOString());
+          for (const ev of (evts || [])) {
+            if (ev.extendedProperties?.private?.abordaje_prospect_id === evt.prospectoId) {
+              try { await gcalApi.delete(ev.id); } catch (e) { console.warn('gcal del:', e); }
+            }
+          }
+        } catch (e) { console.warn('gcal list:', e); }
+      }
+      // Vaciar la fecha del contacto (queda en el historial sin agenda activa).
+      await storage.updateContacto(ultimoAgendado.id, { agendadoPara: null });
+      // Recalcular estado y proximoContacto del prospect a partir del state
+      // actualizado. Si todos los contactos previos eran 'agendado sin fecha',
+      // queda 'nuevo'.
+      const contactosNuevos = (prospect.contactos || []).map(c =>
+        c.id === ultimoAgendado.id ? { ...c, agendadoPara: null } : c
+      );
+      const proxNuevo = [...contactosNuevos].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
+      const estadoNuevo = deriveEstado({ ...prospect, contactos: contactosNuevos });
+      setState(s => ({
+        ...s,
+        prospectos: s.prospectos.map(p => p.id === evt.prospectoId
+          ? { ...p, contactos: contactosNuevos, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
+      }));
+      await storage.updateProspecto(evt.prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+      if (isPilot) bumpGcal();
+      showToast('Agenda eliminada del calendar');
+    } catch (e) { handleErr(e, 'soloDelCalendarProspect'); }
   };
 
   // Borrar un evento huérfano del Google Calendar. No toca la tarea/prospect
@@ -6467,7 +6511,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             event={pendingProspectAgenda}
             prospectName={prospect?.nombre || pendingProspectAgenda.prospectoNombre || '(prospect)'}
             onCancel={() => setPendingProspectAgenda(null)}
-            onDeleteAgenda={handleDeleteProspectAgenda}
+            onSoloCalendar={handleSoloDelCalendarProspectAgenda}
             onOpenProspect={() => {
               const id = pendingProspectAgenda.prospectoId;
               setPendingProspectAgenda(null);
@@ -10349,7 +10393,7 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
 // la agenda (borra contacto del historial + evento Google, el prospect
 // vuelve a su estado anterior) o abrir la ficha del prospect (panel lateral
 // para ver historial completo, editar datos, etc.).
-function ProspectAgendaActionModal({ event, prospectName, onCancel, onDeleteAgenda, onOpenProspect }) {
+function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalendar, onOpenProspect }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', onKey);
@@ -10363,7 +10407,7 @@ function ProspectAgendaActionModal({ event, prospectName, onCancel, onDeleteAgen
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="prosp-agenda-title" style={{ maxWidth: 460 }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="prosp-agenda-title" style={{ maxWidth: 480 }}>
         <div className="modal-header">
           <h3 id="prosp-agenda-title">Agenda de {prospectName}</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
@@ -10375,18 +10419,19 @@ function ProspectAgendaActionModal({ event, prospectName, onCancel, onDeleteAgen
             </p>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button type="button" className="btn-secondary" onClick={onOpenProspect}
+            <button type="button" className="btn-primary" onClick={onOpenProspect}
               style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
               <strong style={{ display: 'block', marginBottom: 3 }}>Abrir ficha del prospect</strong>
-              <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', fontWeight: 400 }}>
-                Ver historial, editar datos, registrar otra gestión.
+              <span style={{ fontSize: '0.78rem', opacity: 0.92, fontWeight: 400 }}>
+                Si querés eliminar la gestión del historial, hacelo desde ahí. Eso también borra la agenda del calendar.
               </span>
             </button>
-            <button type="button" className="btn-danger" onClick={onDeleteAgenda}
+            <button type="button" className="btn-danger" onClick={onSoloCalendar}
               style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
-              <strong style={{ display: 'block', marginBottom: 3 }}>Eliminar la agenda</strong>
-              <span style={{ fontSize: '0.78rem', opacity: 0.9, fontWeight: 400 }}>
-                Borra la gestión del historial del prospect y el evento del calendar. La etiqueta verde se actualiza sola.
+              <strong style={{ display: 'block', marginBottom: 3 }}>Eliminar solo del calendar</strong>
+              <span style={{ fontSize: '0.78rem', opacity: 0.92, fontWeight: 400 }}>
+                Mantiene el registro de la gestión en el historial del prospect.
+                Quita el evento del calendar y por lo tanto las notificaciones futuras.
               </span>
             </button>
           </div>
