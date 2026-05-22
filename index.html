@@ -3844,18 +3844,13 @@ function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aaaa' }) {
     }
   };
 
-  // Click en un segmento: seleccionarlo entero para sobrescribirlo de un tipeo.
-  // Segmentos por posición visible: día = chars 0-1, mes = 3-4, año = 6-9.
-  const onClickOrFocus = (e) => {
+  // Al ganar foco, seleccionar TODO el texto: el primer dígito que tipee
+  // el user reemplaza la fecha vieja en lugar de insertarse en el medio.
+  // Si quieren ajustar solo un segmento (ej. cambiar el año), mueven el
+  // cursor con flechas después del focus.
+  const onFocus = (e) => {
     const el = e.target;
-    setTimeout(() => {
-      const pos = el.selectionStart;
-      const len = el.value.length;
-      if (len === 0) return;
-      if (pos <= 2) { el.setSelectionRange(0, Math.min(2, len)); }
-      else if (pos <= 5) { el.setSelectionRange(3, Math.min(5, len)); }
-      else { el.setSelectionRange(6, Math.min(10, len)); }
-    }, 0);
+    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
   };
 
   return (
@@ -3863,8 +3858,7 @@ function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aaaa' }) {
       inputMode="numeric"
       onChange={e => tryEmit(e.target.value)}
       onBlur={commitFormat}
-      onClick={onClickOrFocus}
-      onFocus={onClickOrFocus}
+      onFocus={onFocus}
       onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
       style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
     />
@@ -3937,16 +3931,14 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
     }
   };
 
-  // Click selecciona el segmento (hora 0-1, minutos 3-4) para sobrescribir.
-  const onClickOrFocus = (e) => {
+  // Al ganar foco, seleccionamos TODO el texto previo. Así el primer dígito
+  // que el user tipea reemplaza la hora vieja en lugar de insertarse en el
+  // medio (que era el problema reportado: "tenía 23:33, quería tipear 14 y
+  // me quedaba 1423:33"). Si quieren ajustar un solo dígito, mueven el cursor
+  // con flechas después del focus. Comportamiento estándar en inputs numéricos.
+  const onFocus = (e) => {
     const el = e.target;
-    setTimeout(() => {
-      const pos = el.selectionStart;
-      const len = el.value.length;
-      if (len === 0) return;
-      if (pos <= 2) { el.setSelectionRange(0, Math.min(2, len)); }
-      else { el.setSelectionRange(3, Math.min(5, len)); }
-    }, 0);
+    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
   };
 
   return (
@@ -3954,8 +3946,7 @@ function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
       inputMode="numeric"
       onChange={e => tryEmit(e.target.value)}
       onBlur={commitFormat}
-      onClick={onClickOrFocus}
-      onFocus={onClickOrFocus}
+      onFocus={onFocus}
       onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
       style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
     />
