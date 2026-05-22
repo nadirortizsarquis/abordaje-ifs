@@ -4315,10 +4315,6 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
   const [loadingArchivadas, setLoadingArchivadas] = useState(false);
   const archivadasFetchAtRef = useRef(0);
   const wrapRef = useRef(null);
-  // Lock por prospectoId para serializar invocaciones de sincronizarSeguimiento.
-  // Sin esto, dos handleAddContacto rápidos (doble tap, auto-save) disparaban
-  // dos syncs concurrentes que duplican eventos en Google Calendar.
-  const syncLocksRef = useRef(new Map());
   const items = useMemo(
     () => buscarGlobal(state, debouncedQuery, gcalSearchEvents, incluirArchivadas ? tareasArchivadas : null),
     [state, debouncedQuery, gcalSearchEvents, incluirArchivadas, tareasArchivadas]
@@ -4890,6 +4886,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // pestañas se ve el estado actualizado sin necesidad de recargar la página.
   // No corre en el primer mount (skip via ref) para no duplicar el load inicial.
   const firstTabSwitchSkipRef = useRef(true);
+  // Lock por prospectoId para serializar invocaciones de sincronizarSeguimiento.
+  // Sin esto, dos handleAddContacto rápidos (doble tap, auto-save) disparaban
+  // dos syncs concurrentes que duplican eventos en Google Calendar.
+  const syncLocksRef = useRef(new Map());
   useEffect(() => {
     if (firstTabSwitchSkipRef.current) {
       firstTabSwitchSkipRef.current = false;
