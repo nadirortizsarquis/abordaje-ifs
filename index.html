@@ -6908,13 +6908,14 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
           </div>
         )}
 
-        {/* Footer sticky con Cancelar (rojo) + Listo (verde). Reemplaza la
-            tecla Esc en mobile, que no existe. Los cambios ya se guardan
-            on-blur en los inputs, así que ambos botones cierran el panel;
-            "Cancelar" se mantiene rojo por convención visual. */}
+        {/* Footer sticky con Cancelar (secundario, blanco/borde azul) +
+            Guardar (primario, azul degradé). Mismo formato que el resto de
+            los modales del proyecto para coherencia visual. Los cambios ya
+            se guardan on-blur en los inputs, así que ambos botones cierran
+            el panel — el "Cancelar" no descarta nada, solo cierra. */}
         <div className="panel-footer-sticky">
-          <button className="btn-danger" onClick={onClose}>Cancelar</button>
-          <button className="btn-success" onClick={onClose}>Listo</button>
+          <button className="btn-secondary" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={onClose}>Guardar</button>
         </div>
       </div>
     </div>
