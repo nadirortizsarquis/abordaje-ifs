@@ -2691,11 +2691,30 @@
     .header-instr-slot .header-btn { padding: 7px 10px; font-size: 0.74rem; }
     .header-actions {
       order: 5; flex: 1 100%;
-      gap: 8px; flex-wrap: wrap; justify-content: flex-end;
+      gap: 8px;
+      /* nowrap: si el nombre del user es largo (ej. "Federico Del Boca"),
+         se trunca con ellipsis en .header-user en lugar de empujar Salir
+         a una segunda línea, lo que rompía la altura del header y
+         escondía las tabs Lista/Tareas/Calendario. */
+      flex-wrap: nowrap;
+      min-width: 0;
+      justify-content: flex-end;
       align-items: center;
     }
+    .header-actions > * { flex: 0 0 auto; }
     .header-btn { padding: 7px 12px; font-size: 0.78rem; }
-    .header-user { font-size: 0.78rem; padding: 4px 9px; }
+    .header-user {
+      font-size: 0.78rem;
+      padding: 4px 9px;
+      /* Se encoge si el espacio falta. El ellipsis preserva la primera
+         palabra (típicamente el nombre de pila). */
+      flex: 0 1 auto;
+      min-width: 0;
+      max-width: 11ch;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
     .header-admin-badge { font-size: 0.64rem; padding: 2px 6px; }
     .bell-btn { width: 36px; height: 36px; }
 
