@@ -443,6 +443,42 @@
   }
   .help-callout strong { display: block; margin-bottom: 4px; color: inherit; }
 
+  /* ── Input de hora (HoraTexto, 2 inputs HH:MM unificados visualmente) ── */
+  .hora-pair {
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--borde, #e5e7eb);
+    border-radius: 6px;
+    padding: 6px 8px;
+    background: white;
+    font-family: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .hora-pair:focus-within {
+    border-color: var(--azul, #0098DA);
+    box-shadow: 0 0 0 3px rgba(0, 152, 218, 0.12);
+  }
+  .hora-pair input {
+    width: 2.2em;
+    border: none !important;
+    padding: 0 !important;
+    outline: none !important;
+    background: transparent !important;
+    text-align: center;
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    font-variant-numeric: tabular-nums;
+    box-shadow: none !important;
+  }
+  .hora-pair input::placeholder { color: var(--texto-suave, #9ca3af); font-weight: 400; }
+  .hora-pair-sep {
+    padding: 0 2px;
+    font-weight: 600;
+    color: var(--texto-suave, #6b7280);
+    user-select: none;
+  }
+
   /* ── Banner de desconexión de Google Calendar ── */
   .gcal-disconnected-banner {
     display: flex;
@@ -3780,16 +3816,73 @@ function FechaTexto({ valueIso, onChange, placeholder = '' }) {
   );
 }
 
-// HoraTexto: usa el input nativo type=time del browser. Devuelve "HH:MM"
-// directo. Misma razón que FechaTexto: la versión custom de tipeo predictivo
-// se rompía en varios escenarios (auto-format prematuro, selección
-// inconsistente entre browsers, foco en mobile). El input nativo es robusto
-// y conocido — wheel picker en iOS, spinner en desktop.
-function HoraTexto({ value, onChange, placeholder = '' }) {
+// HoraTexto: 2 inputs separados (HH y MM) en lugar del nativo type=time
+// porque éste muestra AM/PM en algunos browsers/locales y no se puede
+// forzar formato 24hs desde HTML. Acá tenemos control total: siempre 24hs,
+// teclado numérico en mobile, y auto-jump de HH a MM cuando completás 2
+// dígitos válidos. Si dejás MM vacío al perder foco, se asume "00".
+function HoraTexto({ value, onChange }) {
+  const [hh, setHh] = useState('');
+  const [mm, setMm] = useState('');
+  const mmRef = useRef(null);
+
+  useEffect(() => {
+    if (value) {
+      const parts = String(value).split(':');
+      setHh((parts[0] || '').slice(0, 2));
+      setMm((parts[1] || '').slice(0, 2));
+    } else {
+      setHh(''); setMm('');
+    }
+  }, [value]);
+
+  const emit = (newHh, newMm) => {
+    if (!newHh && !newMm) { onChange(''); return; }
+    const h = parseInt(newHh || '0', 10);
+    const m = parseInt(newMm || '0', 10);
+    if (newHh && h >= 0 && h <= 23 && m >= 0 && m <= 59) {
+      onChange(`${pad2(h)}:${pad2(m)}`);
+    }
+  };
+
+  const onHhChange = (e) => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+    setHh(v);
+    emit(v, mm);
+    // Auto-jump al MM cuando completa 2 dígitos válidos (00-23).
+    if (v.length === 2 && parseInt(v, 10) <= 23) {
+      setTimeout(() => {
+        if (mmRef.current) { mmRef.current.focus(); mmRef.current.select(); }
+      }, 0);
+    }
+  };
+
+  const onMmChange = (e) => {
+    const v = e.target.value.replace(/\D/g, '').slice(0, 2);
+    setMm(v);
+    emit(hh, v);
+  };
+
+  // Si deja MM vacío al perder foco, asumimos :00 (siempre que haya HH).
+  const onMmBlur = () => {
+    if (hh && !mm) { setMm('00'); emit(hh, '00'); }
+  };
+
+  const onFocusSelect = (e) => {
+    const el = e.target;
+    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
+  };
+
   return (
-    <input type="time" value={value || ''}
-      onChange={e => onChange(e.target.value || '')}
-    />
+    <span className="hora-pair">
+      <input type="text" inputMode="numeric" value={hh} maxLength={2}
+        placeholder="HH" aria-label="Hora"
+        onChange={onHhChange} onFocus={onFocusSelect} />
+      <span className="hora-pair-sep">:</span>
+      <input ref={mmRef} type="text" inputMode="numeric" value={mm} maxLength={2}
+        placeholder="MM" aria-label="Minutos"
+        onChange={onMmChange} onBlur={onMmBlur} onFocus={onFocusSelect} />
+    </span>
   );
 }
 
