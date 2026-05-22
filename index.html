@@ -338,7 +338,9 @@
     background: rgba(30, 27, 75, 0.55);
     backdrop-filter: blur(3px);
     display: flex; align-items: center; justify-content: center;
-    z-index: 200;
+    /* z-index alto para garantizar que un modal abierto sobre el panel
+       lateral del prospect (z-index 200) quede por delante, no detrás. */
+    z-index: 400;
     padding: 24px;
     animation: fadeIn 0.18s ease;
   }
@@ -10335,10 +10337,9 @@ function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm }) {
               )}
             </div>
           )}
-          <div className="help-callout danger" style={{ fontSize: '0.84rem', lineHeight: 1.5 }}>
-            <strong>Esta acción no se puede deshacer.</strong>
-            Se elimina el prospect, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
-          </div>
+          <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: '0', lineHeight: 1.5 }}>
+            Esta acción no se puede deshacer. Se elimina el prospect, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
+          </p>
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>

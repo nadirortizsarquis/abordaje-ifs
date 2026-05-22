@@ -623,3 +623,180 @@ Resueltos los 5 críticos + 1 media de seguridad + 4 bajas. Quedan 2 bajas
 estructurales en backlog (splits sin cambio funcional) y 2 pendientes
 históricos sin urgencia (comentarios de autoría dentro de observaciones,
 managers/jerarquías). El proyecto está estable, seguro y documentado.
+
+---
+
+# Sesión 2026-05-21 — UX mobile + auditorías + timezone
+
+Sesión larga con varios bloques:
+
+## Bloque 1 — Kanban mobile
+
+- **Long-press 400 ms** en `TareaCard` para activar drag en touch. Antes el
+  drag arrancaba con cualquier movimiento >6px → scrollear con dedo sobre
+  una card movía la card sin querer. Patrón idéntico al que usa el calendar.
+  Feedback visual: `.long-press-armed` (scale 1.02 + shadow).
+- **Columnas Kanban sin tope vertical en mobile** (`@media max-width: 720px`).
+  Cada columna toma su altura natural con todas las cards visibles (sin
+  scroll interno). Se mantiene el scroll horizontal entre columnas.
+- **Reorden de columnas con confirmación**: drop abre `ConfirmColMoveModal`
+  ("¿Mover columna X antes/después de Y?") antes de persistir.
+  Long-press 400 ms también en el header de columna para mobile.
+
+## Bloque 2 — Auditoría 1: críticos de calendar/tareas
+
+- **Color de tareas en calendar siempre lila** (`colorCalendarEvento` con
+  branch `kind === 'tarea' → CAL_COLOR_VIOLETA`). Antes heredaban tipo del
+  último contacto del prospect, lo que las pintaba verde si el prospect
+  pasaba a estado 'agendado'.
+- **`handleUpdateTarea` sincroniza state local con `googleEventId`**. Antes,
+  al crear evento Google, solo guardaba en DB y dejaba state stale → la
+  siguiente edición creaba evento duplicado en lugar de actualizar el
+  existente. Resolvió un caso real (evento del 25 huérfano + evento del 26
+  activo, ambos apuntando a la misma tarea).
+- **`handleArchiveTarea`**: archivar muta `tarea.googleEventId = null`,
+  desarchivar limpia stale + sincroniza state con el evento nuevo.
+- **`handleMoveEvent` usa `storage.updateTarea`** (no `sb.from` directo)
+  para preservar `actor_id` cuando un asistente mueve tarea via drag.
+- **Modal de confirmación al eliminar tarea**: ofrece "Solo sacar del
+  calendar" vs "Borrar tarea completa". Quita el `confirm()` nativo.
+
+## Bloque 3 — Auditoría 2: 3 agentes en paralelo
+
+Lanzados 3 subagentes para auditar: modelo de asistentes, calendar/gcal
+sync, y CRUD de tareas/prospects/`sincronizarSeguimiento`.
+
+**Críticos resueltos** (4):
+1. **Race condition en `sincronizarSeguimiento`**: lock por `prospectoId`
+   con Map de Promises encadenadas (`syncLocksRef`). Dos `handleAddContacto`
+   rápidos se serializan en lugar de duplicar eventos.
+2. **`handleAddContacto` resincroniza siempre** (no solo si hay
+   `agendadoPara`). Registrar "Rechazado" o "Contestador" ahora limpia la
+   agenda anterior del prospect.
+3. **`handleConvertirTareaAProspect`** borra el evento Google asociado a
+   la tarea antes de eliminarla. Antes quedaba huérfano.
+4. **Limpieza Google al borrar prospect** con rango amplio: `-10/+10 años`
+   (antes `-2/+5`). Y `sincronizarSeguimiento` con `+10 años` para
+   futuras agendas (antes `+6 meses`).
+
+**Medios resueltos** (~10):
+- `handleSaveAgenda` con prospect preserva el título del modal (antes
+  siempre quedaba "Cita — nombre").
+- `handleConvertirTareaAProspect` crea contacto inicial 'fecha_exacta' si
+  la tarea tenía fecha → prospect queda con historial coherente.
+- Detección de **eventos huérfanos** en `extractGcalEventsForCalendar`
+  (`isOrphan = true` si tareaId no matchea state). Modal específico
+  `OrphanEventModal` permite borrarlos desde Abordaje.
+- `handleDeleteColumna` borra eventos Google de tareas dentro antes del
+  cascade.
+- `handleMoveTarea` valida que la columna destino exista.
+- `handleMoveEvent` con rollback de Google si DB falla.
+- `handleSaveAgenda` cierra modal aunque haya error (evita duplicación).
+- **Migration**: `abordaje_tareas_columnas` ganó `actor_id` y `updated_at`.
+  ActorStar funciona en headers de columnas Kanban (asistente que
+  renombra/reordena queda marcado).
+- `principalProfile` refresca al cambiar de tab — asistente detecta
+  cuando el principal revoca `shares_calendar_with_assistant`.
+- `actorMap` procesa `actorIds` de eventos Google (`extendedProperties`)
+  → ActorStar muestra nombre real del asistente en eventos Google.
+- `invalidateProfileCache()` en `SIGNED_OUT` — relogin con user distinto
+  en la misma tab no usa cache stale.
+- `buildEventKey` estable entre piloto on/off — overrides de color custom
+  no se pierden al activar/desactivar Google Calendar.
+- Modal de eliminar agenda (`ConfirmDeleteAgendaModal`) reemplaza
+  `confirm()` nativo. Detecta serie recurrente y avisa.
+
+## Bloque 4 — Auditoría 3: DB + bajos
+
+**Migrations** aplicadas en Supabase:
+- `add_actor_id_and_updated_at_to_abordaje_tareas_columnas`.
+- `fix_search_path_is_assistant_of` (SECURITY DEFINER con
+  `search_path = public, private` para cerrar attack surface).
+- `drop_unused_calendar_sync_watches` (legacy del refactor viejo).
+
+**Frontend bajos resueltos** (5):
+- `AddColumnaModal` reemplaza el `prompt()` nativo del browser.
+- Debounce 200ms en `buscarGlobal` + lazy fetches usan `debouncedQuery`.
+- Búsqueda incluye observaciones de contactos (gestiones del historial).
+- Banner sutil "Reconectar Google Calendar" cuando `gcalApi.list` devuelve
+  skip (token expirado o revocado).
+
+## Bloque 5 — Bug crítico de `syncLocksRef`
+
+`syncLocksRef` quedó declarado en `BuscadorGlobal` en lugar de `App` por
+error de Edit. `sincronizarSeguimiento` lo referenciaba desde el scope de
+App → "Can't find variable: syncLocksRef" al registrar gestión. Movido al
+scope correcto. Pusheado urgente.
+
+## Bloque 6 — Timezone (+3hs)
+
+Bug raíz reportado: registrar agendado para las 14hs aparece como 17hs en
+lista y calendar (= 14 ARG + 3 = 17 UTC). Causa: múltiples lugares hacían
+`new Date(...).toISOString()` que convierte a UTC. Reemplazado en:
+
+- `buildGoogleEventBody`: usa nuevo helper `dateToGcalLocal(d)` que devuelve
+  `YYYY-MM-DDTHH:MM:SS` en hora local (sin Z). Combinado con `timeZone:
+  GCAL_TZ`, Google interpreta correctamente el instante en ARG.
+- `handleMoveEvent` (drag de eventos en calendar): idem en update y rollback.
+- `RegistrarGestion.confirmar`: cambió `.toISOString()` por local strings
+  directos (`${fechaIso}T${hora}`) en los 3 branches (plazo, fecha,
+  fechahora). Este era el bug principal — el flujo del prospect.
+- `handleCreateTareaEnSlot` y `sincronizarSeguimiento` rama de crear tarea
+  auto: también migrados a local strings.
+
+Caveat: agendados creados antes del fix quedan en DB con la hora
+desfasada. Para normalizar, editarlos manualmente.
+
+## Bloque 7 — UX de inputs hora / fecha
+
+Iteración larga sobre `HoraTexto`. Probadas varias versiones:
+1. Predictivo custom (auto-format `:` mid-typing) — se sentía mágico.
+2. Nativo `<input type=time>` — muestra AM/PM en browsers con locale 12hs,
+   no se puede forzar 24hs desde HTML/CSS.
+3. Custom 2 inputs (HH + MM) — funcional pero "interlineado feo".
+4. **Versión final**: 4 slots de 1 dígito cada uno (`H H : M M`),
+   visualmente unificados como un solo input con borde único. Auto-jump al
+   siguiente slot SOLO al tipear dígito (no al borrar). Select-all on
+   focus. Formato 24hs garantizado. Estilos compactos (`width: 1ch`,
+   `gap: 0`).
+
+`FechaTexto` se quedó con `<input type=date>` nativo (no tiene problema
+de 12hs y el calendar nativo del SO es útil).
+
+## Bloque 8 — UX general
+
+- **Modal al clickear evento de prospect en calendar**: en lugar de abrir
+  el panel directo, ofrece "Abrir ficha del prospect" o "Eliminar solo del
+  calendar" (vacía `agendadoPara` del contacto manteniendo el registro en
+  el historial; `deriveEstado` retrocede para que la etiqueta verde se
+  actualice sola).
+- **Modal propio al eliminar prospect** (`ConfirmDeleteProspectModal`)
+  reemplaza el `confirm()` nativo. Muestra nombre, contacto, cantidad de
+  gestiones, próxima cita. Texto neutro (sin callout rojo) por pedido del
+  user.
+- **Sticky footer en todos los modales**: `.modal` ahora es flex column
+  con header fijo arriba, body scrolleable, footer fijo abajo. Aplica
+  automáticamente a todos los modales sin tocar JSX individual.
+- **TareaModal reorganizado**: Eliminar y Archivar al fondo del body
+  (acciones secundarias). Cancelar/Convertir/Guardar en footer sticky
+  (siempre visibles). Hora usa `HoraTexto` (no nativo).
+- **Panel del prospect**: botón "Listo" verde → "Guardar" azul.
+  "Cancelar" rojo → "Cancelar" secundario (blanco con borde azul).
+  Coherente con el resto.
+- **Agendas standalone en verde** (no celeste): `extractGcalEventsForCalendar`
+  detecta `createdByAbordaje` via `abordaje_agente_id` tag de
+  `extendedProperties`. Solo eventos del calendar personal sin tag de
+  Abordaje son "external" (color de Google).
+- **Slot click respeta `slotDurationMin`**: snap con `Math.floor` y
+  `settings.slotDurationMin`. Click en cualquier pixel de una "celda
+  visual" de hora devuelve el inicio de esa celda (antes click en el
+  medio caía en X:30).
+- **z-index del modal-backdrop**: subido a 400 para garantizar que un
+  modal abierto sobre el panel lateral del prospect (z-index 200) quede
+  por delante, no detrás.
+
+## Cierre de la sesión
+~25 commits, ~6 horas de iteración. El sistema quedó sin bugs de
+timezone, sin race conditions de sync, con modales coherentes en todo el
+proyecto, y UX de inputs hora/fecha resuelto con el formato custom de 4
+slots que garantiza 24hs sin importar el browser/SO.
