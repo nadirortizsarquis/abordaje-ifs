@@ -3761,202 +3761,34 @@ function showToast(msg, opts = {}) {
   }
 }
 
-// ── INPUTS DE TEXTO TOLERANTES ─────────────────────────────────
-// FechaTexto: tipeo predictivo dd/mm/aaaa. El user tipea solo dígitos y los
-// "/" se insertan solos después del día y del mes. Si solo escribe dd/mm
-// el año se completa con el actual al perder foco. Si tipea dd/mm/aa el año
-// se asume 20aa. Click en un segmento (día/mes/año) lo selecciona entero
-// para sobrescribirlo sin tener que borrar todo.
-function FechaTexto({ valueIso, onChange, placeholder = 'dd/mm/aaaa' }) {
-  // valueIso es "yyyy-mm-dd" (date input) o ISO completo o ''
-  const [text, setText] = useState(() => valueIso ? isoToDDMMYY8(valueIso) : '');
-  const [valido, setValido] = useState(true);
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    setText(valueIso ? isoToDDMMYY8(valueIso) : '');
-    setValido(true);
-  }, [valueIso]);
-
-  // Reformatea visualmente "DDMMAAAA" → "DD/MM/AAAA" insertando barras a
-  // medida que se completan los segmentos. Tope a 8 dígitos.
-  const formatDigits = (digits) => {
-    if (!digits) return '';
-    if (digits.length <= 2) return digits;
-    if (digits.length <= 4) return digits.slice(0, 2) + '/' + digits.slice(2);
-    return digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
-  };
-
-  // Intenta parsear y emitir al padre si la fecha está completa y es válida.
-  // Si está incompleta, no emite (deja al user terminar).
-  const tryEmit = (raw) => {
-    const digits = raw.replace(/\D/g, '').slice(0, 8);
-    const display = formatDigits(digits);
-    setText(display);
-    if (digits.length === 0) {
-      onChange('');
-      setValido(true);
-      return;
-    }
-    if (digits.length >= 8) {
-      const dd = digits.slice(0, 2), mm = digits.slice(2, 4), yyyy = digits.slice(4);
-      const dateStr = `${yyyy}-${mm}-${dd}`;
-      const d = new Date(dateStr + 'T00:00:00');
-      if (!isNaN(d) && d.getDate() === parseInt(dd, 10) && d.getMonth() === parseInt(mm, 10) - 1) {
-        onChange(dateStr);
-        setValido(true);
-      } else {
-        setValido(false);
-      }
-    } else {
-      // Texto parcial: no emitir aún (el padre conserva el último valor).
-      setValido(true);
-    }
-  };
-
-  // Al perder foco / Enter: completar año si solo hay dd/mm o dd/mm/aa.
-  const commitFormat = () => {
-    let digits = text.replace(/\D/g, '');
-    if (digits.length === 0) { onChange(''); setValido(true); return; }
-    if (digits.length === 4) {
-      // dd/mm sin año → asumir año actual.
-      digits = digits + String(new Date().getFullYear());
-    } else if (digits.length === 6) {
-      // dd/mm/aa → 20aa.
-      digits = digits.slice(0, 4) + '20' + digits.slice(4);
-    } else if (digits.length < 4) {
-      setValido(false);
-      return;
-    } else if (digits.length === 5 || digits.length === 7) {
-      // Cantidad de dígitos rara — inválido.
-      setValido(false);
-      return;
-    }
-    const dd = digits.slice(0, 2), mm = digits.slice(2, 4), yyyy = digits.slice(4, 8);
-    const dateStr = `${yyyy}-${mm}-${dd}`;
-    const d = new Date(dateStr + 'T00:00:00');
-    if (!isNaN(d) && d.getDate() === parseInt(dd, 10) && d.getMonth() === parseInt(mm, 10) - 1) {
-      setText(`${dd}/${mm}/${yyyy}`);
-      onChange(dateStr);
-      setValido(true);
-    } else {
-      setValido(false);
-    }
-  };
-
-  // Al ganar foco, seleccionar TODO el texto: el primer dígito que tipee
-  // el user reemplaza la fecha vieja en lugar de insertarse en el medio.
-  // Si quieren ajustar solo un segmento (ej. cambiar el año), mueven el
-  // cursor con flechas después del focus.
-  const onFocus = (e) => {
-    const el = e.target;
-    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
-  };
-
+// ── INPUTS DE FECHA / HORA NATIVOS ────────────────────────────
+// Decisión 2026-05-21: después de varios intentos con tipeo predictivo
+// custom (auto-format "/", select-all on focus, etc.) que se sentían
+// "mágicos demás" o inconsistentes según el browser, volvimos a usar los
+// inputs HTML nativos. Ventajas: en mobile abre el picker del SO (wheel
+// iOS, calendar Android), en desktop spinner o tipeo directo, validación
+// gratis, cero código nuestro que se rompa. La interface hacia el padre
+// no cambia: onChange recibe 'YYYY-MM-DD' para fecha y 'HH:MM' para hora.
+function FechaTexto({ valueIso, onChange, placeholder = '' }) {
+  // valueIso es "yyyy-mm-dd" o ISO completo o ''. El input type=date
+  // requiere exactamente "yyyy-mm-dd".
+  const v = valueIso ? (valueIso.length >= 10 ? valueIso.slice(0, 10) : valueIso) : '';
   return (
-    <input ref={inputRef} type="text" placeholder={placeholder} value={text}
-      inputMode="numeric"
-      onChange={e => tryEmit(e.target.value)}
-      onBlur={commitFormat}
-      onFocus={onFocus}
-      onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
-      style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
+    <input type="date" value={v}
+      onChange={e => onChange(e.target.value || '')}
     />
   );
 }
 
-// HoraTexto: tipeo predictivo hh:mm. El user tipea solo dígitos y el ":" se
-// inserta solo después del segundo dígito de hora. Si solo escribe "HH" se
-// completa con ":00" al perder foco o Enter. Click sobre el segmento de hora
-// o de minutos lo selecciona entero para sobrescribirlo de un tipeo.
-function HoraTexto({ value, onChange, placeholder = 'hh:mm' }) {
-  // value es "HH:MM" o ''
-  const [text, setText] = useState(value || '');
-  const [valido, setValido] = useState(true);
-
-  useEffect(() => { setText(value || ''); setValido(true); }, [value]);
-
-  // Reformatea visualmente "HHMM" → "HH:MM" insertando ":" cuando hay 3+ dígitos.
-  const formatDigits = (digits) => {
-    if (!digits) return '';
-    if (digits.length <= 2) return digits;
-    return digits.slice(0, 2) + ':' + digits.slice(2);
-  };
-
-  // Emite al padre SOLO cuando hay 4 dígitos completos (HHMM) o cuando se
-  // limpia todo (0 dígitos). Estados intermedios (1, 2, 3 dígitos) no emiten
-  // — el padre conserva el valor previo hasta que el user termine o haga
-  // blur/Enter. Esto da tiempo al user de terminar de tipear MM sin que el
-  // sistema asuma prematuramente ":00". Al perder foco o apretar Enter,
-  // commitFormat sí parsea lo que haya y completa con ":00" si falta.
-  const tryEmit = (raw) => {
-    const digits = raw.replace(/\D/g, '').slice(0, 4);
-    setText(formatDigits(digits));
-    if (digits.length === 0) {
-      onChange(''); setValido(true); return;
-    }
-    if (digits.length < 4) {
-      // Estado intermedio: no emit. Validamos visualmente el rango.
-      if (digits.length === 1) {
-        // "3" no puede ser inicio de hora de 2 dígitos válida (30-99). Pero
-        // sí puede ser hora completa de 1 dígito (3:00). Aceptamos hasta 9.
-        setValido(parseInt(digits, 10) <= 9);
-      } else if (digits.length === 2) {
-        // 2 dígitos: validamos que sean hora válida 00-23.
-        setValido(parseInt(digits, 10) <= 23);
-      } else if (digits.length === 3) {
-        // 3 dígitos "HHM": validamos hora.
-        setValido(parseInt(digits.slice(0,2), 10) <= 23);
-      }
-      return;
-    }
-    // 4 dígitos completos: parsear y emitir.
-    const h = parseInt(digits.slice(0,2), 10);
-    const m = parseInt(digits.slice(2), 10);
-    if (h <= 23 && m <= 59) {
-      onChange(`${pad2(h)}:${pad2(m)}`);
-      setValido(true);
-    } else {
-      setValido(false);
-    }
-  };
-
-  // Al perder foco / Enter: si solo hay hora (2 dígitos), completar con :00 visual.
-  const commitFormat = () => {
-    const digits = text.replace(/\D/g, '');
-    if (digits.length === 0) { onChange(''); setValido(true); return; }
-    let h, m;
-    if (digits.length <= 2) { h = parseInt(digits, 10); m = 0; }
-    else if (digits.length === 3) { h = parseInt(digits[0], 10); m = parseInt(digits.slice(1), 10); }
-    else { h = parseInt(digits.slice(0,2), 10); m = parseInt(digits.slice(2), 10); }
-    if (h <= 23 && m <= 59) {
-      const hhmm = `${pad2(h)}:${pad2(m)}`;
-      setText(hhmm);
-      onChange(hhmm);
-      setValido(true);
-    } else {
-      setValido(false);
-    }
-  };
-
-  // Al ganar foco, seleccionamos TODO el texto previo. Así el primer dígito
-  // que el user tipea reemplaza la hora vieja en lugar de insertarse en el
-  // medio (que era el problema reportado: "tenía 23:33, quería tipear 14 y
-  // me quedaba 1423:33"). Si quieren ajustar un solo dígito, mueven el cursor
-  // con flechas después del focus. Comportamiento estándar en inputs numéricos.
-  const onFocus = (e) => {
-    const el = e.target;
-    setTimeout(() => { try { el.select(); } catch (_) {} }, 0);
-  };
-
+// HoraTexto: usa el input nativo type=time del browser. Devuelve "HH:MM"
+// directo. Misma razón que FechaTexto: la versión custom de tipeo predictivo
+// se rompía en varios escenarios (auto-format prematuro, selección
+// inconsistente entre browsers, foco en mobile). El input nativo es robusto
+// y conocido — wheel picker en iOS, spinner en desktop.
+function HoraTexto({ value, onChange, placeholder = '' }) {
   return (
-    <input type="text" placeholder={placeholder} value={text}
-      inputMode="numeric"
-      onChange={e => tryEmit(e.target.value)}
-      onBlur={commitFormat}
-      onFocus={onFocus}
-      onKeyDown={e => { if (e.key === 'Enter') commitFormat(); }}
-      style={!valido ? { borderColor: 'var(--estado-rechazado)' } : null}
+    <input type="time" value={value || ''}
+      onChange={e => onChange(e.target.value || '')}
     />
   );
 }
