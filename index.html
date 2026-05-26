@@ -437,6 +437,19 @@
     color: var(--texto-suave);
     margin-top: 3px;
   }
+  /* Variante neutra: "Quitar recordatorio". No es una acción peligrosa
+     (la tarea queda viva en el Kanban), por eso no es roja. Gris claro
+     para distinguirla de las opciones positivas (Hoy / Mañana / Próx). */
+  .btn-quick-date.muted {
+    border-color: var(--borde, #e5e7eb);
+    background: white;
+    color: var(--texto-suave, #6b7280);
+  }
+  .btn-quick-date.muted:hover {
+    background: rgba(0,0,0,0.04);
+    border-color: var(--texto-suave, #9ca3af);
+    color: var(--texto, #1a1a2e);
+  }
 
   /* ── CALLOUT (info contextual en modales) ── */
   .help-callout {
@@ -10120,6 +10133,12 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       '09:00'
     );
   };
+  // Quitar el recordatorio: la tarea queda en el Kanban como bitácora pero
+  // sin fecha → se va el rojo de "vencida" y handleUpdateTarea borra el
+  // evento Google automáticamente (rama `merged.googleEventId && !hasFecha`).
+  const quickQuitar = () => {
+    aplicarQuickDate(null, null);
+  };
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -10146,6 +10165,12 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                   title="Recordatorio próximo lunes 9:00">
                   Próx semana<small>lun 9:00</small>
                 </button>
+                {form.fechaRecordatorio && (
+                  <button type="button" className="btn-quick-date muted" onClick={quickQuitar}
+                    title="Quitar la fecha, sacar del calendar — la tarea sigue en el Kanban">
+                    Quitar<small>recordatorio</small>
+                  </button>
+                )}
               </div>
             </>
           )}
