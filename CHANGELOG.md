@@ -868,3 +868,29 @@ Implementación en `TareaModal`:
   (`rgba(220,38,38,0.04)`), texto rojo oscuro. Hover refuerza el rojo. Se
   diferencia de los positivos sin gritar "danger" porque la acción no es
   destructiva (la tarea sigue viva).
+
+## Picker para mostrar/ocultar calendars de Google
+
+Replica el checkbox que tiene Google Calendar para ocultar calendars
+secundarios (compartidos, suscriptos) sin desuscribirlos. Pedido nacido
+de tener compartido el calendar de Federico (socio) y querer poder
+ocultarlo visualmente en Abordaje sin afectar la suscripción.
+
+Implementación en `CalendarioView`:
+- Nuevo botón "Calendarios" en la cabecera, junto a los sub-tabs Mes /
+  Semana / Hoy. Solo aparece si hay más de un calendar detectado.
+- Click → popover (`CalendarPicker`) con la lista de calendars únicos
+  derivados de los eventos cargados (`gcalEvents` con `_gcalId`/
+  `_gcalSummary`/`_gcalColor`/`_gcalPrimary` inyectados por la edge function).
+- Cada item: checkbox + cuadradito de color (el de Google) + nombre.
+  Primary primero, marcado como "principal" y deshabilitado para que el
+  user no pueda ocultarlo (sino se pierden los eventos de Abordaje).
+- Badge rojo sobre el botón con la cantidad de ocultos + opción "Mostrar
+  todos" para resetear.
+- Estado en `localStorage` key `abordaje_hidden_calendars` (Set de gcalId
+  serializado). **Por device, no por user en DB**: es preferencia visual,
+  no tiene sentido sincronizar.
+
+**No toca Google**: solo filtra los `gcalEvents` antes de pasarlos a
+`extractGcalEventsForCalendar`. El share del calendar sigue activo en
+Google. Reversible al toque con el mismo checkbox.
