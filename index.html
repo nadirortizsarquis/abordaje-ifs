@@ -417,12 +417,12 @@
     flex: 1 1 0;
     min-width: 0;
     padding: 9px 6px;
-    border: 1px solid var(--azul);
+    border: 1.5px solid var(--azul);
     background: rgba(0,152,218,0.06);
     color: var(--azul-oscuro);
     border-radius: 8px;
-    font-size: 0.78rem;
-    font-weight: 600;
+    font-size: 0.8rem;
+    font-weight: 700;
     cursor: pointer;
     transition: background 0.15s, transform 0.1s;
     text-align: center;
@@ -432,23 +432,23 @@
   .btn-quick-date:active { transform: translateY(1px); }
   .btn-quick-date small {
     display: block;
-    font-weight: 400;
+    font-weight: 500;
     font-size: 0.66rem;
     color: var(--texto-suave);
     margin-top: 3px;
   }
-  /* Variante neutra: "Quitar recordatorio". No es una acción peligrosa
-     (la tarea queda viva en el Kanban), por eso no es roja. Gris claro
-     para distinguirla de las opciones positivas (Hoy / Mañana / Próx). */
+  /* Variante "Quitar recordatorio": borde rojo sutil para que se note como
+     acción que cancela algo, sin ser un botón danger lleno (la tarea queda
+     viva en el Kanban — no es destrucción). */
   .btn-quick-date.muted {
-    border-color: var(--borde, #e5e7eb);
-    background: white;
-    color: var(--texto-suave, #6b7280);
+    border-color: var(--estado-rechazado, #dc2626);
+    background: rgba(220, 38, 38, 0.04);
+    color: var(--estado-rechazado, #b91c1c);
   }
+  .btn-quick-date.muted small { color: rgba(185, 28, 28, 0.7); }
   .btn-quick-date.muted:hover {
-    background: rgba(0,0,0,0.04);
-    border-color: var(--texto-suave, #9ca3af);
-    color: var(--texto, #1a1a2e);
+    background: rgba(220, 38, 38, 0.10);
+    border-color: var(--estado-rechazado, #b91c1c);
   }
 
   /* ── CALLOUT (info contextual en modales) ── */
