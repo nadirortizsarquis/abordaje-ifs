@@ -1884,6 +1884,108 @@
     color: var(--azul-oscuro);
   }
 
+  /* ── Calendar picker (popover de mostrar/ocultar calendars de Google) ── */
+  .cal-picker-wrap { position: relative; display: inline-block; }
+  .cal-picker-btn { display: inline-flex; align-items: center; gap: 6px; }
+  .cal-picker-btn.has-hidden { color: white; }
+  .cal-picker-badge {
+    background: var(--estado-rechazado, #dc2626);
+    color: white;
+    font-size: 0.62rem;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    min-width: 18px;
+    text-align: center;
+  }
+  .cal-picker-pop {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+    min-width: 260px;
+    max-width: 340px;
+    max-height: 60vh;
+    overflow-y: auto;
+    z-index: 50;
+    padding: 6px 0;
+    color: var(--texto);
+  }
+  .cal-picker-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .cal-picker-all {
+    background: transparent;
+    border: none;
+    color: var(--azul);
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+  .cal-picker-all:hover { text-decoration: underline; }
+  .cal-picker-list {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+  }
+  .cal-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 0.86rem;
+    transition: background 0.12s;
+  }
+  .cal-picker-item:hover { background: rgba(0, 152, 218, 0.06); }
+  .cal-picker-item.disabled { cursor: default; opacity: 0.85; }
+  .cal-picker-item.disabled:hover { background: transparent; }
+  .cal-picker-item input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 16px; height: 16px;
+    cursor: pointer;
+    accent-color: var(--azul);
+  }
+  .cal-picker-item.disabled input[type="checkbox"] { cursor: default; }
+  .cal-picker-swatch {
+    flex: 0 0 auto;
+    width: 14px; height: 14px;
+    border-radius: 4px;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+  .cal-picker-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--texto);
+  }
+  .cal-picker-tag {
+    flex: 0 0 auto;
+    font-size: 0.66rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    background: rgba(0,0,0,0.04);
+    padding: 2px 6px;
+    border-radius: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+
   /* ── VISTA SEMANA / HOY (grid de horas) ── */
   .cal-week-wrap {
     display: flex;
@@ -7855,10 +7957,61 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     return () => { cancelled = true; };
   }, [isPilot, timeMin, timeMax, gcalReloadKey, onGcalActorIdsLoaded]);
 
+  // Filtro de calendars de Google (replica el checkbox de "mostrar/ocultar
+  // calendario" que tiene Google Calendar). Es solo visual en Abordaje: no
+  // toca el share en Google, persiste por dispositivo en localStorage.
+  // El calendar primary nunca se puede ocultar (sino se pierden los eventos
+  // de Abordaje creados desde acá).
+  const [hiddenCalendars, setHiddenCalendars] = useState(() => {
+    try {
+      const stored = localStorage.getItem('abordaje_hidden_calendars');
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
+  const [showCalendarPicker, setShowCalendarPicker] = useState(false);
+
+  const toggleCalendar = useCallback((calId) => {
+    setHiddenCalendars(prev => {
+      const next = new Set(prev);
+      if (next.has(calId)) next.delete(calId);
+      else next.add(calId);
+      try { localStorage.setItem('abordaje_hidden_calendars', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+  const mostrarTodosLosCalendars = useCallback(() => {
+    setHiddenCalendars(new Set());
+    try { localStorage.removeItem('abordaje_hidden_calendars'); } catch {}
+  }, []);
+
+  // Calendars únicos detectados en los eventos de Google. Se actualiza con
+  // cada fetch. Primary primero, después alfabético.
+  const detectedCalendars = useMemo(() => {
+    const map = new Map();
+    for (const ev of (gcalEvents || [])) {
+      if (!ev._gcalId) continue;
+      if (!map.has(ev._gcalId)) {
+        map.set(ev._gcalId, {
+          id: ev._gcalId,
+          name: ev._gcalSummary || '(sin nombre)',
+          color: ev._gcalColor || '#0098DA',
+          primary: !!ev._gcalPrimary,
+        });
+      }
+    }
+    return [...map.values()].sort((a, b) => {
+      if (a.primary !== b.primary) return a.primary ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+  }, [gcalEvents]);
+
   const events = useMemo(() => {
-    if (isPilot) return extractGcalEventsForCalendar(gcalEvents, prospectos, tareasState?.items);
+    if (isPilot) {
+      const filtered = (gcalEvents || []).filter(ev => !ev._gcalId || !hiddenCalendars.has(ev._gcalId));
+      return extractGcalEventsForCalendar(filtered, prospectos, tareasState?.items);
+    }
     return extractCalendarEvents(prospectos, tareasState, agendados);
-  }, [isPilot, gcalEvents, prospectos, tareasState, agendados]);
+  }, [isPilot, gcalEvents, prospectos, tareasState, agendados, hiddenCalendars]);
   const eventsByKey = useMemo(() => eventsByDayKey(events), [events]);
 
   // Dispatcher: cada evento del calendario sabe a dónde abre cuando se clickea.
@@ -7943,6 +8096,30 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       <button className={`cal-sub-tab ${mode==='mes'?'active':''}`} onClick={() => setMode('mes')}>Mes</button>
       <button className={`cal-sub-tab ${mode==='semana'?'active':''}`} onClick={() => setMode('semana')}>Semana</button>
       <button className={`cal-sub-tab ${mode==='hoy'?'active':''}`} onClick={() => setMode('hoy')}>Hoy</button>
+      {isPilot && detectedCalendars.length > 1 && (
+        <div className="cal-picker-wrap">
+          <button type="button"
+            className={`cal-sub-tab cal-picker-btn ${hiddenCalendars.size > 0 ? 'has-hidden' : ''}`}
+            onClick={() => setShowCalendarPicker(s => !s)}
+            title="Mostrar / ocultar calendars de Google">
+            Calendarios
+            {hiddenCalendars.size > 0 && (
+              <span className="cal-picker-badge" aria-label={`${hiddenCalendars.size} ocultos`}>
+                {hiddenCalendars.size}
+              </span>
+            )}
+          </button>
+          {showCalendarPicker && (
+            <CalendarPicker
+              calendars={detectedCalendars}
+              hidden={hiddenCalendars}
+              onToggle={toggleCalendar}
+              onShowAll={mostrarTodosLosCalendars}
+              onClose={() => setShowCalendarPicker(false)}
+            />
+          )}
+        </div>
+      )}
     </div>
   );
 
@@ -8007,6 +8184,59 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       )}
       {calendarNode}
     </>
+  );
+}
+
+// ── CALENDAR PICKER ───────────────────────────────────────────
+// Popover con checkboxes para mostrar/ocultar calendars de Google. Es solo
+// visual (no toca el share de Google), persiste en localStorage por device.
+// El calendar primary no se puede ocultar — sino se pierden los eventos
+// de Abordaje (prospects/tareas) creados desde acá.
+function CalendarPicker({ calendars, hidden, onToggle, onShowAll, onClose }) {
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (!e.target.closest('.cal-picker-pop, .cal-picker-btn')) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="cal-picker-pop" role="dialog" aria-label="Calendarios">
+      <div className="cal-picker-head">
+        <span>Mostrar calendarios</span>
+        {hidden.size > 0 && (
+          <button type="button" className="cal-picker-all" onClick={onShowAll}>
+            Mostrar todos
+          </button>
+        )}
+      </div>
+      <div className="cal-picker-list">
+        {calendars.map(cal => {
+          const isHidden = hidden.has(cal.id);
+          const disabled = !!cal.primary;
+          return (
+            <label key={cal.id} className={`cal-picker-item ${disabled ? 'disabled' : ''}`}
+              title={disabled ? 'Tu calendar principal siempre está visible' : ''}>
+              <input
+                type="checkbox"
+                checked={!isHidden}
+                disabled={disabled}
+                onChange={() => onToggle(cal.id)}
+              />
+              <span className="cal-picker-swatch" style={{ background: cal.color }}></span>
+              <span className="cal-picker-name">{cal.name}</span>
+              {cal.primary && <span className="cal-picker-tag">principal</span>}
+            </label>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
