@@ -839,3 +839,32 @@ Fix CSS puro en `@media (max-width: 720px)`:
 Resultado: el nombre se trunca con "…" según el ancho disponible. Salir,
 Ajustes, ADMIN, campanita y tabs quedan siempre visibles. Aplica a
 cualquier asesor con nombre largo (no es solo para Federico).
+
+---
+
+# Sesión 2026-05-26 — Quitar recordatorio + polish quick-date
+
+## Botón "Quitar recordatorio" en TareaModal
+
+Pedido: al editar una tarea, poder sacarle la fecha sin tener que ir al
+campo de fecha y borrarla manualmente. Y de paso que se vaya el rojo de
+"vencida" en la tarjeta del Kanban y el evento del calendar.
+
+Implementación en `TareaModal`:
+- Nuevo handler `quickQuitar` que llama `aplicarQuickDate(null, null)`.
+  Reutiliza la rama existente de `handleUpdateTarea` que detecta
+  `googleEventId && !hasFecha` y borra el evento Google automáticamente.
+- 4º botón en `.quick-date-row` con clase `btn-quick-date muted`, visible
+  solo cuando `form.fechaRecordatorio` existe (sino no tiene sentido).
+- La tarea queda viva en el Kanban (sin color rojo, sin fecha), el evento
+  desaparece del calendar, la bitácora se conserva.
+
+## Polish de estilos quick-date
+
+- Los 3 botones positivos (Hoy / Mañana / Próx semana): borde 1.5px (era
+  1px), `font-weight: 700` (era 600), font-size 0.8rem (era 0.78). Más
+  prominentes pero coherentes con el resto.
+- "Quitar" con borde rojo sutil (`#dc2626`), fondo rojo claro
+  (`rgba(220,38,38,0.04)`), texto rojo oscuro. Hover refuerza el rojo. Se
+  diferencia de los positivos sin gritar "danger" porque la acción no es
+  destructiva (la tarea sigue viva).
