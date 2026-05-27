@@ -10672,6 +10672,10 @@ function CompaniaBadge({ cfg }) {
 }
 
 // Popover de selección de compañía (click derecho sobre la card).
+// Usamos createPortal a document.body porque renderizar el popover dentro
+// de la .tarea-card con position:fixed lo hace heredar el stacking context
+// del padre (que puede tener transforms del drag/long-press) y termina
+// rompiendo el layout de la card.
 function CompaniaPicker({ x, y, current, onPick, onClose }) {
   const ref = useRef(null);
   useEffect(() => {
@@ -10693,7 +10697,7 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
   const adjX = Math.min(x, window.innerWidth - w - pad);
   const adjY = Math.min(y, window.innerHeight - h - pad);
 
-  return (
+  return ReactDOM.createPortal(
     <div ref={ref} className="compania-picker"
       style={{ position: 'fixed', left: adjX, top: adjY }}
       onClick={(e) => e.stopPropagation()}>
@@ -10716,7 +10720,8 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
           <span>{c.label}</span>
         </button>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
 
