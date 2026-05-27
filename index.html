@@ -862,6 +862,61 @@
     letter-spacing: 0.5px;
   }
 
+  /* Chips de compañía dentro del TareaModal (radio behavior, 1 tildable) */
+  .compania-chips {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .compania-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1.5px solid var(--borde, #e5e7eb);
+    border-radius: 8px;
+    cursor: pointer;
+    background: white;
+    font-size: 0.78rem;
+    transition: all 0.12s;
+    user-select: none;
+  }
+  .compania-chip:hover { border-color: var(--azul, #0098DA); }
+  .compania-chip.selected {
+    border-color: var(--azul-oscuro, #3E4095);
+    background: rgba(0, 152, 218, 0.08);
+    font-weight: 600;
+  }
+  .compania-chip input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: 14px; height: 14px;
+    cursor: pointer;
+    accent-color: var(--azul-oscuro, #3E4095);
+  }
+  .compania-chip-logo {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .compania-chip-logo img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .compania-chip-text {
+    font-family: inherit;
+    font-weight: 800;
+    color: var(--azul-oscuro);
+    font-size: 0.65rem;
+    letter-spacing: 0.5px;
+  }
+  .compania-chip-label {
+    color: var(--texto);
+  }
+
   .tarea-card-obs-fecha {
     display: inline-block;
     background: rgba(62, 64, 149, 0.08);
@@ -10502,6 +10557,10 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
   }, []);
 
   const onPointerDown = (e) => {
+    // Si el popover de compañía está abierto, ignorar todos los pointer
+    // events de la card — sino, un click en el popover puede burbujear y
+    // disparar onClick→abrir TareaModal.
+    if (companiaPicker) return;
     if (readOnly) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (dragRef.current.active || pendingTouchRef.current) return;
@@ -10579,6 +10638,9 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
   };
 
   const finishDrag = (e, commit) => {
+    // Guard: si el popover de compañía está abierto, no ejecutar click de
+    // la card (evita abrir TareaModal cuando el user solo eligió compañía).
+    if (companiaPicker) return;
     const ds = dragRef.current;
     if (!ds.active) return;
     if (ds.dragging) {
@@ -10703,6 +10765,14 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
   // padre los recibe → su onPointerUp llama onClick() → abre el TareaModal,
   // que no queremos cuando el user solo elegía una compañía.
   const stop = (e) => e.stopPropagation();
+  // Stop refuerzo: en CADA button del popover, no solo en el div padre.
+  // Cuando el user clickea, el setState dispara re-render y el div padre
+  // puede desmontarse durante el bubble del evento, perdiendo el stop.
+  // Aplicar en el button asegura el stop antes del callback.
+  const pickHandler = (id) => (e) => {
+    e.stopPropagation();
+    onPick(id);
+  };
   return ReactDOM.createPortal(
     <div ref={ref} className="compania-picker"
       style={{ position: 'fixed', left: adjX, top: adjY }}
@@ -10710,14 +10780,16 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
       <div className="compania-picker-head">Asignar compañía</div>
       <button type="button"
         className={`compania-picker-item ${!current ? 'selected' : ''}`}
-        onClick={() => onPick(null)}>
+        onPointerDown={stop} onPointerUp={stop}
+        onClick={pickHandler(null)}>
         <span className="compania-picker-logo-slot">—</span>
         <span>Sin compañía</span>
       </button>
       {COMPANIAS.map(c => (
         <button key={c.id} type="button"
           className={`compania-picker-item ${current === c.id ? 'selected' : ''}`}
-          onClick={() => onPick(c.id)}>
+          onPointerDown={stop} onPointerUp={stop}
+          onClick={pickHandler(c.id)}>
           <span className="compania-picker-logo-slot">
             {c.logo
               ? <img src={c.logo} alt="" />
@@ -10739,6 +10811,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     fechaRecordatorio: tarea.fechaRecordatorio || '',
     horaRecordatorio: tarea.horaRecordatorio || '',
     observacion: tarea.observacion || '',
+    compania: tarea.compania || null,
   });
   const [nuevaEntrada, setNuevaEntrada] = useState('');
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -10769,6 +10842,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       fechaRecordatorio: form.fechaRecordatorio || null,
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
+      compania: form.compania || null,
     });
   };
 
@@ -10780,6 +10854,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       fechaRecordatorio: fecha,
       horaRecordatorio: hora,
       observacion: buildObsConBitacora().trim(),
+      compania: form.compania || null,
     });
   };
   const quickHoy = () => {
@@ -10905,6 +10980,32 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 readOnly={readOnly}
                 onChange={e => upd('observacion', e.target.value)}
                 rows={Math.min(10, Math.max(4, form.observacion.split('\n').length))} />
+            </div>
+          )}
+          {/* Selector de compañía: grid de 5 chips (radio behavior, solo uno
+              tildado). Visible siempre dentro del modal — alternativa al
+              click derecho que solo funciona en desktop. */}
+          {!readOnly && (
+            <div className="field">
+              <label>Compañía (opcional)</label>
+              <div className="compania-chips">
+                {COMPANIAS.map(c => (
+                  <label key={c.id}
+                    className={`compania-chip ${form.compania === c.id ? 'selected' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={form.compania === c.id}
+                      onChange={() => upd('compania', form.compania === c.id ? null : c.id)}
+                    />
+                    <span className="compania-chip-logo">
+                      {c.logo
+                        ? <img src={c.logo} alt={c.label} />
+                        : <span className="compania-chip-text">IFS</span>}
+                    </span>
+                    <span className="compania-chip-label">{c.label}</span>
+                  </label>
+                ))}
+              </div>
             </div>
           )}
           {/* Acciones secundarias al fondo del body (no en el footer sticky):
