@@ -894,3 +894,65 @@ Implementación en `CalendarioView`:
 **No toca Google**: solo filtra los `gcalEvents` antes de pasarlos a
 `extractGcalEventsForCalendar`. El share del calendar sigue activo en
 Google. Reversible al toque con el mismo checkbox.
+
+---
+
+# Sesión 2026-05-27 — Paleta extendida + actualización docs + compañías por tarea
+
+## Paleta extendida (8 base + 8 claros)
+
+`EVENT_COLOR_PALETTE` pasó de 8 a **16 colores**: los 8 originales saturados
+(rojo, naranja, amarillo, verde, turquesa, azul, rosa, gris) + 8 variantes
+claras del mismo tono. Render del picker en grid de 9 columnas (auto + 8
+bases en una fila, 8 claros en otra). Sirve para distinguir dos calendars
+del mismo "color" (ej. azul para el principal, azul claro para el de
+Federico) en el override por calendar o el manual por evento.
+
+## Modal de Instrucciones actualizado
+
+Pasada general al texto del modal `InstruccionesModal` para reflejar lo
+acumulado de las últimas semanas. Cambios principales:
+- Sección 3 (Etiquetas): corrige la regla de color "amarillo para llamar_*"
+  — hoy todas las tareas auto van en lila (regla `kind=tarea` gana).
+- Sección 4 (Tareas): suma input de hora custom 24hs, botón "Quitar
+  recordatorio", modal al eliminar con fecha, columnas sin tope en mobile,
+  reorden de columnas con confirmación.
+- Sección 5 (Calendario): expansión grande con modal al clickear evento
+  de prospect, eventos huérfanos, paleta extendida, subsección dedicada
+  al picker de calendarios (mostrar/ocultar + colores por calendar),
+  banner de reconexión Google.
+- Sección 9 (Atajos): búsqueda incluye gestiones, UI optimista al
+  eliminar, sticky footer en formularios.
+
+## Compañías por tarea (logo en card del Kanban)
+
+Pedido: en algunas columnas del Kanban (típicamente "Ventas pendientes")
+querer marcar a qué compañía corresponde cada tarea con el logo de la
+aseguradora. Identificación visual rápida.
+
+Implementación:
+- **Migration**: `abordaje_tareas.compania text` (nullable).
+- Constante `COMPANIAS` con 5 entradas: OLE, Investors Trust, Life Group,
+  Best Doctors, Patrimonial. Las primeras 4 con logo PNG en `static/logos/`;
+  Patrimonial sin logo propio (render como texto "PATRIMONIAL" en gradient
+  azul IFS).
+- `TareaCard`: click derecho (`onContextMenu`) abre popover con la lista
+  de compañías + "Sin compañía". Selección actualiza al toque (optimistic
+  UI) y persiste en DB en background.
+- Logo se renderiza absoluto en la esquina superior derecha de la card
+  (~18px alto, padding-right en el título para no solaparse).
+- Solo en desktop (click derecho no existe en touch; long-press ya
+  reservado para drag). Para mobile queda pendiente — opciones futuras:
+  agregar selector en `TareaModal` (al editar) o un picker en long-press
+  modificado.
+
+## Fix: popover de compañía con createPortal
+
+El popover se renderizaba dentro de la `.tarea-card` y deformaba el
+layout cuando se abría (la card crecía al alto del popover). Causa:
+algún ancestor con `transform` (drag context o grid Kanban) cambiaba el
+stacking context y el `position: fixed` no se comportaba como tal.
+
+Fix: `ReactDOM.createPortal(..., document.body)`. El popover se monta
+fuera del árbol de la card, en `document.body`, y mantiene su position
+fixed sin que ningún padre lo afecte.
