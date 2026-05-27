@@ -772,8 +772,8 @@
     position: absolute;
     top: 6px;
     right: 8px;
-    max-height: 14px;
-    max-width: 50px;
+    max-height: 18px;
+    max-width: 60px;
     object-fit: contain;
     pointer-events: none;
     z-index: 2;
@@ -797,7 +797,7 @@
   }
   /* Si la card tiene compañía, dejamos margen derecho al título para que
      no se solape con el logo. */
-  .tarea-card-titulo.has-compania { padding-right: 55px; }
+  .tarea-card-titulo.has-compania { padding-right: 68px; }
 
   /* Popover de selección de compañía (click derecho) */
   .compania-picker {
@@ -3967,7 +3967,7 @@ const COMPANIAS = [
   // Investors Trust es muy apaisado (ratio 6:1) después de recortar los
   // márgenes transparentes. Override del max-width para que se vea al alto
   // completo y aproveche el ancho.
-  { id: 'investors-trust', label: 'Investors Trust',  logo: '/logos/investors-trust.png', maxW: 40 },
+  { id: 'investors-trust', label: 'Investors Trust',  logo: '/logos/investors-trust.png', maxW: 50 },
   { id: 'life-group',      label: 'Life Group',       logo: '/logos/life-group.png' },
   { id: 'best-doctors',    label: 'Best Doctors',     logo: '/logos/best-doctors.png' },
   { id: 'patrimonial',     label: 'Patrimonial',      logo: null }, // texto, no logo
