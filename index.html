@@ -10697,10 +10697,16 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
   const adjX = Math.min(x, window.innerWidth - w - pad);
   const adjY = Math.min(y, window.innerHeight - h - pad);
 
+  // Stop propagation de TODOS los pointer/click events: aunque el popover
+  // vive en document.body via portal, en React los eventos burbujean por el
+  // árbol de componentes, no del DOM. Si dejamos que pasen, el TareaCard
+  // padre los recibe → su onPointerUp llama onClick() → abre el TareaModal,
+  // que no queremos cuando el user solo elegía una compañía.
+  const stop = (e) => e.stopPropagation();
   return ReactDOM.createPortal(
     <div ref={ref} className="compania-picker"
       style={{ position: 'fixed', left: adjX, top: adjY }}
-      onClick={(e) => e.stopPropagation()}>
+      onClick={stop} onPointerDown={stop} onPointerUp={stop} onPointerMove={stop}>
       <div className="compania-picker-head">Asignar compañía</div>
       <button type="button"
         className={`compania-picker-item ${!current ? 'selected' : ''}`}
