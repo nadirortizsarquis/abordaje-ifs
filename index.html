@@ -3962,13 +3962,12 @@ async function persistSettings(s, userId) {
 // sobre una tarjeta del Kanban abre el selector. El logo se renderiza en
 // la esquina superior derecha de la card. "Patrimonial" no tiene logo
 // propio — se renderiza como texto con tipografía IFS.
+// maxW por compañía: cada logo tiene su propio ratio y "peso visual" — los
+// overrides afinan que se vean de tamaño parecido. Default si no se setea = 60.
 const COMPANIAS = [
-  { id: 'ole',             label: 'OLE',              logo: '/logos/ole.png' },
-  // Investors Trust es muy apaisado (ratio 6:1) después de recortar los
-  // márgenes transparentes. Override del max-width para que se vea al alto
-  // completo y aproveche el ancho.
-  { id: 'investors-trust', label: 'Investors Trust',  logo: '/logos/investors-trust.png', maxW: 50 },
-  { id: 'life-group',      label: 'Life Group',       logo: '/logos/life-group.png' },
+  { id: 'ole',             label: 'OLE',              logo: '/logos/ole.png',              maxW: 40 },
+  { id: 'investors-trust', label: 'Investors Trust',  logo: '/logos/investors-trust.png',  maxW: 50 },
+  { id: 'life-group',      label: 'Life Group',       logo: '/logos/life-group.png',       maxW: 45 },
   { id: 'best-doctors',    label: 'Best Doctors',     logo: '/logos/best-doctors.png' },
   { id: 'patrimonial',     label: 'Patrimonial',      logo: null }, // texto, no logo
 ];
