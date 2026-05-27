@@ -1905,8 +1905,8 @@
     background: white;
     border-radius: 10px;
     box-shadow: 0 12px 32px rgba(0,0,0,0.18);
-    min-width: 260px;
-    max-width: 340px;
+    min-width: 320px;
+    max-width: 400px;
     max-height: 60vh;
     overflow-y: auto;
     z-index: 50;
@@ -2016,24 +2016,26 @@
   }
   .cal-color-row {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
   }
   .cal-color-label {
-    flex: 0 0 60px;
+    flex: 0 0 52px;
     font-size: 0.74rem;
     font-weight: 600;
     color: var(--texto-suave);
+    padding-top: 4px;
   }
   .cal-color-swatches {
     flex: 1 1 auto;
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
     gap: 4px;
-    flex-wrap: wrap;
   }
   .cal-color-swatch {
-    width: 22px;
-    height: 22px;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    min-width: 20px;
     border-radius: 5px;
     border: 1.5px solid rgba(0,0,0,0.15);
     cursor: pointer;
@@ -3717,17 +3719,35 @@ const ActorContext = createContext({ actors: {}, agenteId: null });
 
 // Paleta fija de 8 colores para overrides custom del calendar.
 // Cada entry: {color: texto, bg: fondo, border: borde, label: nombre humano}.
+// Paleta: 8 colores base (saturados) + 8 variantes claras. Sirve para
+// configurar overrides por evento (click derecho) o por calendar (CalendarPicker)
+// y poder distinguir entre, por ejemplo, "azul de Federico" y "azul claro mío".
+// Los ids ...Claro/ ...Suave preservan compatibilidad con la paleta vieja.
 const EVENT_COLOR_PALETTE = {
-  rojo:     { color: '#991b1b', bg: '#fee2e2', border: '#dc2626', label: 'Rojo' },
-  naranja:  { color: '#9a3412', bg: '#fed7aa', border: '#c2410c', label: 'Naranja' },
-  amarillo: { color: '#854d0e', bg: '#fef9c3', border: '#ca8a04', label: 'Amarillo' },
-  verde:    { color: '#065f46', bg: '#d1fae5', border: '#15803d', label: 'Verde' },
-  turquesa: { color: '#115e59', bg: '#ccfbf1', border: '#0d9488', label: 'Turquesa' },
-  azul:     { color: '#1e40af', bg: '#dbeafe', border: '#1d4ed8', label: 'Azul' },
-  rosa:     { color: '#9d174d', bg: '#fce7f3', border: '#db2777', label: 'Rosa' },
-  gris:     { color: '#1f2937', bg: '#e5e7eb', border: '#4b5563', label: 'Gris' },
+  rojo:           { color: '#991b1b', bg: '#fee2e2', border: '#dc2626', label: 'Rojo' },
+  naranja:        { color: '#9a3412', bg: '#fed7aa', border: '#c2410c', label: 'Naranja' },
+  amarillo:       { color: '#854d0e', bg: '#fef9c3', border: '#ca8a04', label: 'Amarillo' },
+  verde:          { color: '#065f46', bg: '#d1fae5', border: '#15803d', label: 'Verde' },
+  turquesa:       { color: '#115e59', bg: '#ccfbf1', border: '#0d9488', label: 'Turquesa' },
+  azul:           { color: '#1e40af', bg: '#dbeafe', border: '#1d4ed8', label: 'Azul' },
+  rosa:           { color: '#9d174d', bg: '#fce7f3', border: '#db2777', label: 'Rosa' },
+  gris:           { color: '#1f2937', bg: '#e5e7eb', border: '#4b5563', label: 'Gris' },
+  // Variantes claras: mismo tono, fondo más suave y texto/borde más livianos.
+  rojoClaro:      { color: '#b91c1c', bg: '#fef2f2', border: '#fca5a5', label: 'Rojo claro' },
+  naranjaClaro:   { color: '#c2410c', bg: '#fff7ed', border: '#fdba74', label: 'Naranja claro' },
+  amarilloClaro:  { color: '#a16207', bg: '#fefce8', border: '#fde047', label: 'Amarillo claro' },
+  verdeClaro:     { color: '#15803d', bg: '#f0fdf4', border: '#86efac', label: 'Verde claro' },
+  turquesaClaro:  { color: '#0d9488', bg: '#f0fdfa', border: '#5eead4', label: 'Turquesa claro' },
+  azulClaro:      { color: '#1d4ed8', bg: '#eff6ff', border: '#93c5fd', label: 'Azul claro' },
+  rosaClaro:      { color: '#be185d', bg: '#fdf2f8', border: '#f9a8d4', label: 'Rosa claro' },
+  grisClaro:      { color: '#4b5563', bg: '#f9fafb', border: '#d1d5db', label: 'Gris claro' },
 };
-const EVENT_COLOR_ORDER = ['rojo','naranja','amarillo','verde','turquesa','azul','rosa','gris'];
+// Orden visual: cada base seguido de su variante clara, agrupados por matiz.
+// Render en 2 filas (8 columnas) para que se vea limpio en el picker.
+const EVENT_COLOR_ORDER = [
+  'rojo','naranja','amarillo','verde','turquesa','azul','rosa','gris',
+  'rojoClaro','naranjaClaro','amarilloClaro','verdeClaro','turquesaClaro','azulClaro','rosaClaro','grisClaro',
+];
 
 // Construye la clave que identifica univocamente un evento del calendar para
 // guardar su override de color. Priorizamos el id semántico (prospect/tarea/
