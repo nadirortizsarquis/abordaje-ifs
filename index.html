@@ -11233,13 +11233,12 @@ function InstruccionesModal({ onClose }) {
           <Section id="etiquetas" title="3. Etiquetas de abordaje (gestiones)">
             <p>Cada vez que tenés contacto con un prospect, le ponés una <strong>etiqueta</strong> que registra el resultado y mueve el prospect al estado correcto:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-              <Li><strong>Agendado</strong> → genera una cita formal con fecha y hora. Aparece en el calendario en verde.</Li>
+              <Li><strong>Agendado</strong> → cita formal con fecha y hora. Aparece en el calendario en <strong>verde</strong>.</Li>
               <Li><strong>Contestador / Mensaje sin respuesta</strong> → quedó pendiente, sin fecha específica.</Li>
-              <Li><strong>Llamar en 15 min / por la tarde / mañana</strong> → tarea auto-generada con fecha cercana. Aparece en el calendario en amarillo.</Li>
-              <Li><strong>Llamar semana próxima / Llamar dentro de…</strong> → programa una tarea más adelante en el tiempo.</Li>
-              <Li><strong>Fecha exacta</strong> → próximo intento con día concreto.</Li>
+              <Li><strong>Llamar en 15 min / por la tarde / mañana / semana próxima / dentro de… / Fecha exacta</strong> → generan una <strong>tarea auto-generada</strong> en la columna "Abordar" con la fecha calculada. Aparecen en el Kanban (lila claro) y en el calendario (lila).</Li>
               <Li><strong>Rechazado</strong> → cierra el prospect.</Li>
             </ul>
+            <p>Regla de color en el calendario: <strong>agendas en verde, tareas en lila, eventos de tu Google Calendar personal con su color de Google</strong>. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 5).</p>
             <p>El historial completo de etiquetas se ve en el panel lateral del prospect.</p>
           </Section>
 
@@ -11247,20 +11246,38 @@ function InstruccionesModal({ onClose }) {
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Crear una tarea desde el botón <strong>+ Nueva tarea</strong> en cualquier columna.</Li>
               <Li>Tareas pueden tener fecha y hora de recordatorio: si tienen, aparecen en el calendario.</Li>
-              <Li><strong>Mover entre columnas</strong> con drag &amp; drop. En mobile, mantené presionado el card por medio segundo y arrastrá.</Li>
-              <Li>Las etiquetas de prospect que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em>.</Li>
-              <Li>Las columnas se pueden crear, renombrar y reordenar. Las que tienen distintivo (Abordar) no se pueden borrar.</Li>
+              <Li>El input de hora es <strong>formato 24hs</strong> con 4 dígitos independientes (H H : M M). Auto-jump al siguiente dígito mientras tipeás. Click en cualquier dígito lo selecciona para sobrescribir.</Li>
+              <Li>Dentro del modal de tarea, hay <strong>botones rápidos</strong> de recordatorio: Hoy / Mañana / Próx semana / <strong>Quitar</strong>. "Quitar" (rojo sutil) saca la fecha y la cita del calendar pero deja la tarea viva en el Kanban como bitácora.</Li>
+              <Li>Al <strong>eliminar</strong> una tarea con fecha, aparece un modal con dos opciones: "Solo sacar del calendar" (deja la tarea sin fecha) o "Borrar tarea completa".</Li>
+              <Li><strong>Mover entre columnas</strong> con drag &amp; drop. En mobile, mantené presionado el card por medio segundo y arrastrá. En mobile las columnas no tienen tope de altura — se ven todas las tarjetas y scrolleás la pantalla entera.</Li>
+              <Li>Las etiquetas de prospect que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em> (lila claro para distinguirlas de las manuales).</Li>
+              <Li>Las columnas se pueden crear, renombrar y reordenar (reorden con confirmación). Las protegidas (Abordar) no se pueden borrar.</Li>
             </ul>
           </Section>
 
           <Section id="calendario" title="5. Calendario y Google Calendar">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Tres vistas: <strong>Mes</strong>, <strong>Semana</strong> y <strong>Hoy</strong>. El último elegido queda guardado al refrescar.</Li>
-              <Li><strong>Click sobre un slot vacío</strong> abre el chooser "Nueva agenda / Nueva tarea".</Li>
-              <Li><strong>Drag &amp; drop sobre eventos</strong> cambia la fecha/hora (en mobile, long-press para activar).</Li>
+              <Li><strong>Click sobre un slot vacío</strong> abre el chooser "Nueva agenda / Nueva tarea". El slot snappea a tu duración por defecto configurada en Ajustes (default 60min).</Li>
+              <Li><strong>Drag &amp; drop sobre eventos</strong> cambia la fecha/hora (en mobile, long-press para activar). Si el move falla por algún motivo, el evento vuelve a su posición original.</Li>
               <Li>Eventos vencidos aparecen tenues. La línea horizontal roja marca la hora actual en vista Semana/Hoy.</Li>
-              <Li><strong>Click derecho sobre cualquier tarjeta del calendar</strong> abre la paleta para asignarle un color custom (8 colores). El color queda guardado y no toca tu Google Calendar.</Li>
+              <Li><strong>Click sobre un evento de prospect</strong> abre un mini-modal con dos opciones: "Abrir ficha del prospect" o "Eliminar solo del calendar" (saca la cita pero deja la gestión registrada en el historial).</Li>
+              <Li><strong>Eventos huérfanos del calendar</strong> (eventos Google viejos cuya tarea o prospect ya no existe): al clickearlos se abre un modal específico que permite borrarlos del calendar sin tocar nada más.</Li>
+              <Li><strong>Click derecho sobre cualquier tarjeta del calendar</strong> abre la paleta para asignarle un color custom (16 colores: 8 saturados + 8 claros). El color queda guardado y no toca tu Google Calendar.</Li>
+            </ul>
+
+            <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Botón "Calendarios"</strong> (en la barra de vistas Mes/Semana/Hoy):</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Lista los calendars de Google que tenés accesibles (tu principal + compartidos + suscriptos).</Li>
+              <Li><strong>Checkbox por calendar</strong> para mostrar/ocultar (solo visual en Abordaje, no toca el share de Google). Persiste por dispositivo. Tu calendar principal siempre queda visible.</Li>
+              <Li><strong>Botón "configurar colores"</strong> (puntos / 🎨) por calendar: elegís un color fijo para Agendas y otro para Tareas que vengan de ese calendar. Útil para diferenciar "lo de Federico" de "lo mío" de un vistazo. Configuración persistente entre dispositivos.</Li>
+            </ul>
+
+            <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Sincronización con Google:</strong></p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Si activás Google Calendar en Ajustes, los eventos viajan en ambos sentidos: lo que cargás acá aparece en tu Google y viceversa.</Li>
+              <Li>Si en algún momento se interrumpe la conexión (token expirado, revocaste el acceso desde Google), aparece un banner amarillo arriba del calendar con CTA "Reconectar" que te lleva a Ajustes.</Li>
+              <Li>Reglas de color por defecto: agendas creadas desde Abordaje en <strong>verde</strong>, tareas en <strong>lila</strong>, eventos de tu calendar personal de Google con su <strong>color de Google</strong>. Tu override manual o por calendar gana sobre estas reglas.</Li>
             </ul>
           </Section>
 
@@ -11295,9 +11312,11 @@ function InstruccionesModal({ onClose }) {
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Escape:</strong> cierra cualquier modal abierto.</Li>
               <Li>La vista actual de cada panel queda guardada localmente. Si refrescás, volvés a donde estabas.</Li>
-              <Li>Buscador global: escribí ≥2 caracteres y filtra prospectos, tareas y agendas a la vez.</Li>
+              <Li>Buscador global: escribí ≥2 caracteres y filtra prospectos, tareas, agendas <strong>y observaciones de gestiones</strong> a la vez. También busca en eventos de Google Calendar (rango -3m / +12m).</Li>
               <Li>Cambiar de pestaña entre Lista / Tareas / Calendario refresca los datos automáticamente (útil si tu asistente cargó algo en paralelo).</Li>
               <Li>En el calendar, click derecho cambia el color de la tarjeta; mover una agenda con drag actualiza la fecha y hora.</Li>
+              <Li>Al eliminar prospects / tareas / agendas, la UI responde al instante y la limpieza con Google se hace en background — no esperás 5-15 segundos.</Li>
+              <Li>Todos los formularios tienen los botones <strong>Guardar / Cancelar siempre visibles</strong> al pie, aunque el form sea largo.</Li>
             </ul>
           </Section>
 
