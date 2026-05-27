@@ -766,6 +766,102 @@
     border-color: var(--azul, #0098DA);
     background: #fff;
   }
+  /* ── Logo / badge de compañía en tarjetas del Kanban ── */
+  .tarea-card { position: relative; }
+  .tarea-card-compania {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    max-height: 18px;
+    max-width: 70px;
+    object-fit: contain;
+    pointer-events: none;
+    z-index: 2;
+  }
+  .tarea-card-compania-text {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 800;
+    color: var(--azul-oscuro, #3E4095);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    background: linear-gradient(135deg, #91D8F7 0%, #0098DA 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    pointer-events: none;
+    z-index: 2;
+  }
+  /* Si la card tiene compañía, dejamos margen derecho al título para que
+     no se solape con el logo. */
+  .tarea-card-titulo.has-compania { padding-right: 76px; }
+
+  /* Popover de selección de compañía (click derecho) */
+  .compania-picker {
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.22);
+    min-width: 220px;
+    padding: 4px 0;
+    z-index: 999;
+    border: 1px solid var(--borde, #e5e7eb);
+  }
+  .compania-picker-head {
+    padding: 8px 14px 6px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--borde);
+    margin-bottom: 4px;
+  }
+  .compania-picker-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px 14px;
+    background: white;
+    border: none;
+    font-family: inherit;
+    font-size: 0.84rem;
+    color: var(--texto);
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s;
+  }
+  .compania-picker-item:hover { background: rgba(0, 152, 218, 0.07); }
+  .compania-picker-item.selected {
+    background: rgba(0, 152, 218, 0.10);
+    font-weight: 700;
+  }
+  .compania-picker-logo-slot {
+    flex: 0 0 auto;
+    width: 40px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--texto-suave);
+    font-size: 0.72rem;
+  }
+  .compania-picker-logo-slot img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  .compania-picker-text {
+    font-family: inherit;
+    font-weight: 800;
+    color: var(--azul-oscuro);
+    font-size: 0.74rem;
+    letter-spacing: 0.5px;
+  }
+
   .tarea-card-obs-fecha {
     display: inline-block;
     background: rgba(62, 64, 149, 0.08);
@@ -3156,6 +3252,7 @@ function mapTareaFromDB(t) {
     horaRecordatorio: t.hora_recordatorio ? t.hora_recordatorio.slice(0, 5) : null,
     observacion: t.observacion || '',
     googleEventId: t.google_event_id || null,
+    compania: t.compania || null,
     actorId: t.actor_id || null,
     agenteId: t.agente_id,
     archivada: !!t.archivada,
@@ -3251,7 +3348,7 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
@@ -3482,6 +3579,7 @@ const storage = {
     if ('fechaRecordatorio' in patch) dbPatch.fecha_recordatorio = patch.fechaRecordatorio;
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
+    if ('compania' in patch) dbPatch.compania = patch.compania;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
     if (Object.keys(dbPatch).length === 0) return;
     // Solo marcamos actor cuando el cambio incluye campos user-visible. Si el
@@ -3506,7 +3604,7 @@ const storage = {
   async listTareasArchivadas() {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
     const { data, error } = await sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
@@ -3822,6 +3920,20 @@ async function persistSettings(s, userId) {
     } catch (e) { console.error('persistSettings DB:', e); }
   }
 }
+
+// ── COMPAÑÍAS (logo en tarjetas del Kanban) ────────────────────
+// Lista hardcoded de las 5 compañías que comercializa IFS. Click derecho
+// sobre una tarjeta del Kanban abre el selector. El logo se renderiza en
+// la esquina superior derecha de la card. "Patrimonial" no tiene logo
+// propio — se renderiza como texto con tipografía IFS.
+const COMPANIAS = [
+  { id: 'ole',             label: 'OLE',              logo: '/logos/ole.png' },
+  { id: 'investors-trust', label: 'Investors Trust',  logo: '/logos/investors-trust.png' },
+  { id: 'life-group',      label: 'Life Group',       logo: '/logos/life-group.png' },
+  { id: 'best-doctors',    label: 'Best Doctors',     logo: '/logos/best-doctors.png' },
+  { id: 'patrimonial',     label: 'Patrimonial',      logo: null }, // texto, no logo
+];
+const COMPANIA_BY_ID = Object.fromEntries(COMPANIAS.map(c => [c.id, c]));
 
 // ── TIPOS DE GESTIÓN (orden de grid: agendado primero, rechazado al final) ─
 const TIPOS_CONTACTO = [
@@ -6016,6 +6128,26 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
+  // Asigna (o quita, pasando null) la compañía de una tarea. Solo afecta
+  // el campo `compania` — la lógica del Kanban / calendar no cambia,
+  // solo cambia el badge/logo en la esquina superior derecha de la card.
+  const handleSetCompania = useCallback(async (tareaId, compania) => {
+    if (guardReadOnly()) return;
+    const prev = state.tareas.items;
+    setState(s => ({
+      ...s,
+      tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === tareaId
+        ? { ...t, compania: compania || null, updatedAt: new Date().toISOString() }
+        : t) }
+    }));
+    try {
+      await storage.updateTarea(tareaId, { compania: compania || null });
+    } catch (e) {
+      handleErr(e, 'setCompania');
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
+    }
+  }, [state.tareas, guardReadOnly]);
+
   const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
     if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
@@ -6594,6 +6726,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onRenameColumna={handleRenameColumna}
           onDeleteColumna={handleDeleteColumna}
           onMoveColumna={handleRequestMoveColumna}
+          onSetCompania={handleSetCompania}
         />
       )}
 
@@ -10075,7 +10208,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna }) {
+function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
   const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   return (
     <div className="kanban-wrap">
@@ -10093,6 +10226,7 @@ function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTa
             onMoveTarea={onMoveTarea}
             onMoveColumna={onMoveColumna}
             onEditarTarea={onEditarTarea}
+            onSetCompania={onSetCompania}
           />
         );
       })}
@@ -10103,7 +10237,7 @@ function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTa
   );
 }
 
-function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea }) {
+function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea, onSetCompania }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
@@ -10292,7 +10426,7 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} onClick={() => onEditarTarea(t)} onMoveTarea={onMoveTarea} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} onClick={() => onEditarTarea(t)} onMoveTarea={onMoveTarea} onSetCompania={onSetCompania} />)
         )}
       </div>
       {!readOnly && (agregando ? (
@@ -10312,7 +10446,15 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
   );
 }
 
-function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
+function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
+  // Popover de compañías (solo desktop, via click derecho onContextMenu).
+  // En mobile no se habilita por ahora — el long-press está reservado para drag.
+  const [companiaPicker, setCompaniaPicker] = useState(null); // {x, y} o null
+  const onContextMenu = (e) => {
+    if (readOnly || !onSetCompania) return;
+    e.preventDefault();
+    setCompaniaPicker({ x: e.clientX, y: e.clientY });
+  };
   const cardRef = useRef(null);
   const dragRef = useRef({ active: false, startX: 0, startY: 0, dragging: false, pointerId: null });
   // pendingTouchRef: fase de espera del long-press en touch. Mientras está
@@ -10461,6 +10603,8 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
   const onPointerUp = (e) => finishDrag(e, true);
   const onPointerCancel = (e) => finishDrag(e, false);
 
+  const cfgCompania = tarea.compania ? COMPANIA_BY_ID[tarea.compania] : null;
+
   return (
     <div
       ref={cardRef}
@@ -10469,11 +10613,15 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerCancel}
+      onContextMenu={onContextMenu}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
-      <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'}`}>
+      {cfgCompania && (
+        <CompaniaBadge cfg={cfgCompania} />
+      )}
+      <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'} ${cfgCompania ? 'has-compania' : ''}`}>
         <ActorStar item={tarea} />
         {tarea.titulo || '(sin título)'}
       </div>
@@ -10495,6 +10643,79 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea }) {
           </div>
         );
       })()}
+      {companiaPicker && (
+        <CompaniaPicker
+          x={companiaPicker.x}
+          y={companiaPicker.y}
+          current={tarea.compania}
+          onPick={(id) => { onSetCompania(tarea.id, id); setCompaniaPicker(null); }}
+          onClose={() => setCompaniaPicker(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// Badge con el logo de la compañía en la esquina sup. derecha de la card.
+// Para "patrimonial" no hay logo: renderizamos texto con tipografía IFS.
+function CompaniaBadge({ cfg }) {
+  if (!cfg) return null;
+  if (cfg.logo) {
+    return (
+      <img className="tarea-card-compania" src={cfg.logo} alt={cfg.label} title={cfg.label} />
+    );
+  }
+  // Sin logo (patrimonial) → texto en tipografía IFS.
+  return (
+    <span className="tarea-card-compania-text" title={cfg.label}>{cfg.label}</span>
+  );
+}
+
+// Popover de selección de compañía (click derecho sobre la card).
+function CompaniaPicker({ x, y, current, onPick, onClose }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const onDocClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) onClose();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    setTimeout(() => document.addEventListener('mousedown', onDocClick), 0);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  // Posición: ajusta para no salirse del viewport.
+  const pad = 8;
+  const w = 220, h = 280;
+  const adjX = Math.min(x, window.innerWidth - w - pad);
+  const adjY = Math.min(y, window.innerHeight - h - pad);
+
+  return (
+    <div ref={ref} className="compania-picker"
+      style={{ position: 'fixed', left: adjX, top: adjY }}
+      onClick={(e) => e.stopPropagation()}>
+      <div className="compania-picker-head">Asignar compañía</div>
+      <button type="button"
+        className={`compania-picker-item ${!current ? 'selected' : ''}`}
+        onClick={() => onPick(null)}>
+        <span className="compania-picker-logo-slot">—</span>
+        <span>Sin compañía</span>
+      </button>
+      {COMPANIAS.map(c => (
+        <button key={c.id} type="button"
+          className={`compania-picker-item ${current === c.id ? 'selected' : ''}`}
+          onClick={() => onPick(c.id)}>
+          <span className="compania-picker-logo-slot">
+            {c.logo
+              ? <img src={c.logo} alt="" />
+              : <span className="compania-picker-text">IFS</span>}
+          </span>
+          <span>{c.label}</span>
+        </button>
+      ))}
     </div>
   );
 }
