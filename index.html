@@ -1985,6 +1985,87 @@
     text-transform: uppercase;
     letter-spacing: 0.3px;
   }
+  /* Botón "configurar colores" por calendar (engrane / paleta) */
+  .cal-picker-item-wrap {
+    display: flex;
+    flex-direction: column;
+  }
+  .cal-picker-cfg {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    color: var(--texto-suave);
+    font-size: 0.9rem;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    transition: background 0.12s;
+  }
+  .cal-picker-cfg:hover { background: rgba(0,0,0,0.06); color: var(--azul); }
+  .cal-picker-cfg.open { background: rgba(0,152,218,0.12); color: var(--azul-oscuro); }
+  .cal-picker-cfg.has { color: var(--azul); }
+  /* Panel expandido con los selectores de color por calendar */
+  .cal-picker-colors {
+    background: rgba(0,0,0,0.025);
+    padding: 10px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .cal-color-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .cal-color-label {
+    flex: 0 0 60px;
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--texto-suave);
+  }
+  .cal-color-swatches {
+    flex: 1 1 auto;
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .cal-color-swatch {
+    width: 22px;
+    height: 22px;
+    border-radius: 5px;
+    border: 1.5px solid rgba(0,0,0,0.15);
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.1s, border-color 0.12s;
+  }
+  .cal-color-swatch:hover { transform: scale(1.1); }
+  .cal-color-swatch.selected {
+    border-color: var(--azul-oscuro);
+    border-width: 2.5px;
+  }
+  .cal-color-swatch.auto {
+    background: white;
+    color: var(--texto-suave);
+    font-size: 0.74rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .cal-picker-reset {
+    align-self: flex-start;
+    background: transparent;
+    border: none;
+    color: var(--estado-rechazado, #b91c1c);
+    font-size: 0.74rem;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 2px 0;
+    margin-top: 2px;
+  }
+  .cal-picker-reset:hover { text-decoration: underline; }
 
   /* ── VISTA SEMANA / HOY (grid de horas) ── */
   .cal-week-wrap {
@@ -3664,7 +3745,11 @@ function buildEventKey(e) {
   return null;
 }
 
-const EventColorContext = createContext({ colors: {}, setColor: async () => {} });
+const EventColorContext = createContext({
+  colors: {},           // overrides manuales por event-key (click derecho)
+  setColor: async () => {},
+  calendarColors: {},   // overrides por calendar de Google (kind agenda/tarea)
+});
 
 function formatActorTimestamp(ts) {
   if (!ts) return null;
@@ -3692,7 +3777,13 @@ const DEFAULT_SETTINGS = {
   workEndHour: 19,
   workEndMin: 0,
   slotDurationMin: 60,
-  includeWeekends: true
+  includeWeekends: true,
+  // Overrides de color por calendar de Google. Estructura:
+  //   { [gcalId]: { agenda: 'paletteId', tarea: 'paletteId' } }
+  // Cuando un evento pertenece a un calendar configurado acá, su color
+  // viene de la paleta en lugar de las reglas automáticas por tipo. El
+  // override manual (click derecho) sigue ganando sobre esto.
+  calendarColors: {}
 };
 function loadSettings() {
   try {
@@ -5052,6 +5143,35 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     () => calcularNotificaciones(state, isPilot, notifDismissed),
     [state, tick, isPilot, notifDismissed]
   );
+
+  // Override de color por calendar de Google. Se persiste en abordaje_settings
+  // (sigue al user entre dispositivos). Estructura:
+  //   { [gcalId]: { agenda: 'paletteId', tarea: 'paletteId' } }
+  // Si `kind` es null, borra ese campo. Si los 2 quedan vacíos, borra el cal.
+  const handleSetCalendarColor = useCallback(async (gcalId, kind, paletteId) => {
+    setSettings(prev => {
+      const calColors = { ...(prev.calendarColors || {}) };
+      const cur = { ...(calColors[gcalId] || {}) };
+      if (paletteId) cur[kind] = paletteId;
+      else delete cur[kind];
+      if (Object.keys(cur).length === 0) delete calColors[gcalId];
+      else calColors[gcalId] = cur;
+      const next = { ...prev, calendarColors: calColors };
+      persistSettings(next, user?.id);
+      return next;
+    });
+  }, [user?.id]);
+
+  // Resetea todos los overrides de color de UN calendar (botón Restablecer).
+  const handleResetCalendarColors = useCallback(async (gcalId) => {
+    setSettings(prev => {
+      const calColors = { ...(prev.calendarColors || {}) };
+      delete calColors[gcalId];
+      const next = { ...prev, calendarColors: calColors };
+      persistSettings(next, user?.id);
+      return next;
+    });
+  }, [user?.id]);
   const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
   const [settings, setSettings] = useState(() => loadSettings());
   const [showAddModal, setShowAddModal] = useState(false);
@@ -6337,7 +6457,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
   return (
     <ActorContext.Provider value={{ actors: actorMap, agenteId: agente?.id }}>
-    <EventColorContext.Provider value={{ colors: state.eventColors || {}, setColor: handleSetEventColor }}>
+    <EventColorContext.Provider value={{
+      colors: state.eventColors || {},
+      setColor: handleSetEventColor,
+      calendarColors: settings.calendarColors || {},
+    }}>
       <HeaderActions
         user={user}
         agente={agente}
@@ -6481,6 +6605,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSelectProspectoEvent={(ev) => setPendingProspectAgenda(ev)}
             onGcalActorIdsLoaded={handleGcalActorIdsLoaded}
             onOpenSettings={() => setShowSettings(true)}
+            calendarColors={settings.calendarColors || {}}
+            onSetCalendarColor={handleSetCalendarColor}
+            onResetCalendarColors={handleResetCalendarColors}
             onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
@@ -7840,9 +7967,8 @@ function deriveColorsFromGcalHex(hex) {
   return { color, bg, border: hex };
 }
 
-function colorCalendarEvento(e, colorsMap) {
-  // Override custom seteado por el usuario via click derecho. Tiene prioridad
-  // sobre cualquier regla automática.
+function colorCalendarEvento(e, colorsMap, calendarColors) {
+  // 1. Override manual (click derecho) — máxima prioridad.
   let overrideId = null;
   if (colorsMap) {
     const k = buildEventKey(e);
@@ -7851,7 +7977,21 @@ function colorCalendarEvento(e, colorsMap) {
   if (overrideId && EVENT_COLOR_PALETTE[overrideId]) {
     return EVENT_COLOR_PALETTE[overrideId];
   }
-  // Eventos externos de Google (no creados desde Abordaje): usar el color del
+  // 2. Override por calendar de Google (configurado en CalendarPicker).
+  //    Cada calendar puede definir un color para "agendas" (kind=agenda/prospecto)
+  //    y otro para "tareas" (kind=tarea). Gana sobre las reglas automáticas
+  //    pero queda debajo del override manual de evento puntual.
+  const gcalId = e?.googleEvent?._gcalId;
+  if (gcalId && calendarColors && calendarColors[gcalId]) {
+    const cfg = calendarColors[gcalId];
+    if (e.kind === 'tarea' && cfg.tarea && EVENT_COLOR_PALETTE[cfg.tarea]) {
+      return EVENT_COLOR_PALETTE[cfg.tarea];
+    }
+    if ((e.kind === 'prospecto' || e.kind === 'agenda') && cfg.agenda && EVENT_COLOR_PALETTE[cfg.agenda]) {
+      return EVENT_COLOR_PALETTE[cfg.agenda];
+    }
+  }
+  // 3. Eventos externos de Google (no creados desde Abordaje): usar el color del
   // calendario de origen para que match con lo que el user ve en Google Calendar.
   if (e?.isExternalGcal && e.gcalColor) {
     const c = deriveColorsFromGcalHex(e.gcalColor);
@@ -7910,7 +8050,7 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings, calendarColors, onSetCalendarColor, onResetCalendarColors }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
@@ -8116,6 +8256,9 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
               onToggle={toggleCalendar}
               onShowAll={mostrarTodosLosCalendars}
               onClose={() => setShowCalendarPicker(false)}
+              calendarColors={calendarColors || {}}
+              onSetCalendarColor={onSetCalendarColor}
+              onResetCalendarColors={onResetCalendarColors}
             />
           )}
         </div>
@@ -8188,11 +8331,14 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
 }
 
 // ── CALENDAR PICKER ───────────────────────────────────────────
-// Popover con checkboxes para mostrar/ocultar calendars de Google. Es solo
-// visual (no toca el share de Google), persiste en localStorage por device.
-// El calendar primary no se puede ocultar — sino se pierden los eventos
-// de Abordaje (prospects/tareas) creados desde acá.
-function CalendarPicker({ calendars, hidden, onToggle, onShowAll, onClose }) {
+// Popover con: (a) checkboxes para mostrar/ocultar calendars de Google
+// (visual, no toca el share, persiste localStorage por device); (b) opción
+// de configurar colores fijos por calendar para Agendas y Tareas (persiste
+// en profiles.abordaje_settings, sigue al user entre devices). El calendar
+// primary no se puede ocultar — sino se pierden los eventos de Abordaje.
+function CalendarPicker({ calendars, hidden, onToggle, onShowAll, onClose,
+                          calendarColors, onSetCalendarColor, onResetCalendarColors }) {
+  const [expandedId, setExpandedId] = useState(null);
   useEffect(() => {
     const onDocClick = (e) => {
       if (!e.target.closest('.cal-picker-pop, .cal-picker-btn')) onClose();
@@ -8209,7 +8355,7 @@ function CalendarPicker({ calendars, hidden, onToggle, onShowAll, onClose }) {
   return (
     <div className="cal-picker-pop" role="dialog" aria-label="Calendarios">
       <div className="cal-picker-head">
-        <span>Mostrar calendarios</span>
+        <span>Calendarios</span>
         {hidden.size > 0 && (
           <button type="button" className="cal-picker-all" onClick={onShowAll}>
             Mostrar todos
@@ -8220,19 +8366,72 @@ function CalendarPicker({ calendars, hidden, onToggle, onShowAll, onClose }) {
         {calendars.map(cal => {
           const isHidden = hidden.has(cal.id);
           const disabled = !!cal.primary;
+          const isExpanded = expandedId === cal.id;
+          const cfg = (calendarColors && calendarColors[cal.id]) || {};
+          const hasOverride = !!(cfg.agenda || cfg.tarea);
           return (
-            <label key={cal.id} className={`cal-picker-item ${disabled ? 'disabled' : ''}`}
-              title={disabled ? 'Tu calendar principal siempre está visible' : ''}>
-              <input
-                type="checkbox"
-                checked={!isHidden}
-                disabled={disabled}
-                onChange={() => onToggle(cal.id)}
-              />
-              <span className="cal-picker-swatch" style={{ background: cal.color }}></span>
-              <span className="cal-picker-name">{cal.name}</span>
-              {cal.primary && <span className="cal-picker-tag">principal</span>}
-            </label>
+            <div key={cal.id} className="cal-picker-item-wrap">
+              <div className={`cal-picker-item ${disabled ? 'disabled' : ''}`}>
+                <input
+                  type="checkbox"
+                  checked={!isHidden}
+                  disabled={disabled}
+                  onChange={() => onToggle(cal.id)}
+                  title={disabled ? 'Tu calendar principal siempre está visible' : ''}
+                />
+                <span className="cal-picker-swatch" style={{ background: cal.color }}></span>
+                <span className="cal-picker-name">{cal.name}</span>
+                {cal.primary && <span className="cal-picker-tag">principal</span>}
+                <button type="button"
+                  className={`cal-picker-cfg ${isExpanded ? 'open' : ''} ${hasOverride ? 'has' : ''}`}
+                  onClick={() => setExpandedId(isExpanded ? null : cal.id)}
+                  title="Configurar colores fijos para este calendar"
+                  aria-label="Configurar colores">
+                  {hasOverride ? '🎨' : '⋯'}
+                </button>
+              </div>
+              {isExpanded && (
+                <div className="cal-picker-colors">
+                  <ColorSelectorRow label="Agendas" value={cfg.agenda || null}
+                    onChange={(v) => onSetCalendarColor(cal.id, 'agenda', v)} />
+                  <ColorSelectorRow label="Tareas" value={cfg.tarea || null}
+                    onChange={(v) => onSetCalendarColor(cal.id, 'tarea', v)} />
+                  {hasOverride && (
+                    <button type="button" className="cal-picker-reset"
+                      onClick={() => onResetCalendarColors(cal.id)}>
+                      Restablecer (automático)
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// Fila con selector de color: label + 8 swatches de la paleta + opción "auto".
+function ColorSelectorRow({ label, value, onChange }) {
+  return (
+    <div className="cal-color-row">
+      <span className="cal-color-label">{label}</span>
+      <div className="cal-color-swatches">
+        <button type="button"
+          className={`cal-color-swatch auto ${!value ? 'selected' : ''}`}
+          onClick={() => onChange(null)}
+          title="Automático (color por defecto)">
+          A
+        </button>
+        {EVENT_COLOR_ORDER.map(id => {
+          const pal = EVENT_COLOR_PALETTE[id];
+          return (
+            <button key={id} type="button"
+              className={`cal-color-swatch ${value === id ? 'selected' : ''}`}
+              style={{ background: pal.bg, borderColor: pal.border }}
+              onClick={() => onChange(id)}
+              title={pal.label} aria-label={pal.label} />
           );
         })}
       </div>
@@ -8472,7 +8671,7 @@ function layoutEventsInDay(eventsDayRaw, defaultDurMin) {
 }
 
 function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick, onMoveEvent, goPrev, goNext, goToday, onJumpTo, subTabs, ndays, singleDay }) {
-  const { colors: eventColors } = useContext(EventColorContext);
+  const { colors: eventColors, calendarColors: ctxCalendarColors } = useContext(EventColorContext);
   const [picker, setPicker] = useState(null);
   const [showPicker, setShowPicker] = useState(false);
   const bodyRef = useRef(null);
@@ -8819,7 +9018,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                 const dur = endMin - startMin;
                 const top = (offsetMin / 60) * HOUR_HEIGHT;
                 const height = Math.max(28, (dur / 60) * HOUR_HEIGHT - 2);
-                const cfg = colorCalendarEvento(e, eventColors);
+                const cfg = colorCalendarEvento(e, eventColors, ctxCalendarColors);
                 const evDate = new Date(e.fecha);
                 const vencido = evDate < now && !isToday(evDate);
                 const evKey = buildEventKey(e);
@@ -8897,7 +9096,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
 }
 
 function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEvent }) {
-  const { colors: eventColors } = useContext(EventColorContext);
+  const { colors: eventColors, calendarColors: ctxCalendarColors } = useContext(EventColorContext);
   const [picker, setPicker] = useState(null);
   const today = isToday(date);
   const cls = [
@@ -8916,7 +9115,7 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
     <div className={cls} onClick={onClick}>
       <span className="cal-day-num">{date.getDate()}</span>
       {visibles.map(e => {
-        const cfg = colorCalendarEvento(e, eventColors);
+        const cfg = colorCalendarEvento(e, eventColors, ctxCalendarColors);
         const fechaEv = new Date(e.fecha);
         const vencido = fechaEv < now && !isToday(fechaEv);
         const evKey = buildEventKey(e);
@@ -8960,7 +9159,7 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
 }
 
 function DayDetails({ date, events, onClose, onSelectEvent }) {
-  const { colors: eventColors } = useContext(EventColorContext);
+  const { colors: eventColors, calendarColors: ctxCalendarColors } = useContext(EventColorContext);
   const [picker, setPicker] = useState(null);
   return (
     <div className="day-details">
@@ -8977,7 +9176,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
       ) : (
         <div className="day-details-list">
           {events.map(e => {
-            const cfg = colorCalendarEvento(e, eventColors);
+            const cfg = colorCalendarEvento(e, eventColors, ctxCalendarColors);
             const tipoLabel = e.tipo ? (tipoConfig(e.tipo)?.label || e.tipo) : 'Tarea';
             const evKey = buildEventKey(e);
             const onCtxMenu = evKey ? ((ev) => {
