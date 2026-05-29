@@ -140,11 +140,18 @@
     display: flex; gap: 8px; align-items: center;
   }
   /* Fila combinada: pestañas + acciones en la misma línea, reemplazo del
-     viejo h1 + actions. La fila wrappea en mobile si no entra. */
+     viejo h1 + actions. La fila wrappea en mobile si no entra.
+     Sticky bajo el header fijo: las pestañas Lista/Tareas/Calendario
+     quedan siempre visibles al scrollear. */
   .main-head-combined {
     display: flex; align-items: center; justify-content: space-between;
     gap: 12px; flex-wrap: wrap;
     margin-bottom: 14px;
+    position: sticky;
+    top: calc(var(--header-h) + env(safe-area-inset-top, 0px));
+    background: var(--bg);
+    padding: 8px 0;
+    z-index: 50;
   }
   .main-head-combined .view-tabs { margin-bottom: 0; }
 
