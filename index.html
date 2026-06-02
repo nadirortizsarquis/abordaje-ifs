@@ -3171,6 +3171,32 @@
   @media (max-width: 480px) {
     .cal-hours-col { font-size: 0.58rem; }
   }
+
+  /* ── Scrollbar custom para la matriz de pagos de mantenimiento ──
+     La matriz puede tener N agentes y necesita scroll horizontal cómodo
+     para cargar pagos sin pelearse con una scrollbar de 6px. */
+  .mp-scroll-x {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: auto;             /* Firefox */
+    scrollbar-color: #6366f1 #e8ecf7;  /* Firefox */
+  }
+  .mp-scroll-x::-webkit-scrollbar {
+    height: 16px;
+  }
+  .mp-scroll-x::-webkit-scrollbar-track {
+    background: #e8ecf7;
+    border-radius: 8px;
+    margin: 0 4px;
+  }
+  .mp-scroll-x::-webkit-scrollbar-thumb {
+    background: linear-gradient(90deg, #3E4095 0%, #0098DA 100%);
+    border-radius: 8px;
+    border: 3px solid #e8ecf7;
+  }
+  .mp-scroll-x::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(90deg, #2d2f7a 0%, #0080b8 100%);
+  }
 </style>
 </head>
 <body>
@@ -10127,6 +10153,672 @@ function UsuariosSection({ currentUser, onViewAs }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// PAGOS DE MANTENIMIENTO — panel admin
+// Matriz mes × agente. Cada celda guarda (monto, fecha_pago) en
+// abordaje_maintenance_payments. Genera PDF con branding IFS.
+// ─────────────────────────────────────────────────────────────────────────
+const MESES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+function MantenimientoSection({ onOpenPanel }) {
+  return (
+    <section style={adminSectionStyle}>
+      <h3 style={adminSectionTitleStyle}>💳 Pagos de mantenimiento</h3>
+      <p style={adminSectionDescStyle}>
+        Registrá el pago mensual del mantenimiento del sistema por agente. Generá el reporte
+        en PDF con los agentes que selecciones.
+      </p>
+      <div style={{ marginTop: 14 }}>
+        <button onClick={onOpenPanel} style={adminBtnPrimary}>Abrir panel de pagos</button>
+      </div>
+    </section>
+  );
+}
+
+// Exporta el reporte de pagos de mantenimiento (resumen anual) en una sola
+// página A4 apaisada con branding IFS. Solo incluye los agentes tildados.
+async function exportarPagosMantenimientoPDF({ year, agentes, agentesIncluidos, pagos }) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert('jsPDF library no cargada'); return; }
+  const { jsPDF } = window.jspdf;
+  const incluidos = agentes.filter(a => agentesIncluidos[a.id]);
+  if (incluidos.length === 0) {
+    alert('No hay agentes tildados para incluir en el reporte.');
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+
+  // Logo IFS (SVG → PNG, alta resolución para que no se vea borroso ampliado)
+  let logo = null;
+  try { logo = await loadIFSLogoPNG(2400); } catch (e) { console.error('logo:', e); }
+
+  // Paleta IFS
+  const NAVY   = [30, 27, 75];        // #1e1b4b
+  const CELESTE = [145, 216, 247];    // #91D8F7
+
+  const HEADER_H = 22;    // alto banda navy
+  const HEADER_LINE = 0.7; // alto línea celeste debajo del header
+  const FOOTER_H = 12;     // alto banda azul del footer
+  const FOOTER_LINE = 0.7; // alto línea celeste arriba del footer
+
+  const drawHeader = () => {
+    // Banda navy
+    doc.setFillColor(...NAVY);
+    doc.rect(0, 0, pageW, HEADER_H, 'F');
+    // Línea celeste fina debajo del header
+    doc.setFillColor(...CELESTE);
+    doc.rect(0, HEADER_H, pageW, HEADER_LINE, 'F');
+
+    if (logo) {
+      const aspect = logo.width / logo.height;
+      const logoH = 17, logoW = logoH * aspect;
+      // Centrado verticalmente en la banda
+      const logoY = (HEADER_H - logoH) / 2;
+      doc.addImage(logo.dataURL, 'PNG', 10, logoY, logoW, logoH);
+    } else {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(16);
+      doc.setTextColor(...CELESTE);
+      doc.text('IFS', 12, HEADER_H / 2 + 2);
+    }
+    // Línea 2: título del reporte (a la derecha, centrado vertical en banda)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.setTextColor(255, 255, 255);
+    doc.text(`Reporte de pagos de mantenimiento · Año ${year}`, pageW - 12, HEADER_H / 2 + 2, { align: 'right' });
+    // La fecha de generación va abajo en el footer, no aquí.
+
+    // Subtítulo "Detalle por agente", alineado al borde izquierdo de la tabla
+    // (margin left = 10mm), entre el header y la tabla.
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...NAVY);
+    doc.text('Detalle por agente', 10, HEADER_H + HEADER_LINE + 11);
+  };
+
+  // Fecha de generación con formato fecha + hora (se reusa en el footer)
+  const fechaGenerado = new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+
+  const drawFooter = () => {
+    const footerTop = pageH - FOOTER_H;
+    // Línea celeste arriba del footer
+    doc.setFillColor(...CELESTE);
+    doc.rect(0, footerTop - FOOTER_LINE, pageW, FOOTER_LINE, 'F');
+    // Banda navy
+    doc.setFillColor(...NAVY);
+    doc.rect(0, footerTop, pageW, FOOTER_H, 'F');
+
+    doc.setFontSize(8);
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'normal');
+    const textY = footerTop + FOOTER_H / 2 + 1.2;
+    doc.text('www.broker-ifs.com', 12, textY);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Confidencial', pageW / 2, textY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Generado: ${fechaGenerado}`, pageW - 12, textY, { align: 'right' });
+  };
+
+  // Filas: 12 meses · Columnas: Mes + N agentes
+  const head = [['Mes', ...incluidos.map(a => a.display_name || a.email)]];
+  const body = MESES_ES.map((mes, idx) => {
+    const monthNum = idx + 1;
+    return [mes, ...incluidos.map(a => {
+      const p = pagos[a.id]?.[monthNum];
+      if (!p) return '—';
+      if (p.monto != null && p.monto > 0) {
+        return `USD ${Number(p.monto).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+      }
+      if (p.fecha_pago) return '✓';
+      return '—';
+    })];
+  });
+
+  // Tamaño de fuente adaptativo según cantidad de agentes (para que todo entre en 1 página)
+  const N = incluidos.length;
+  const fontSize = N > 14 ? 6.5 : N > 9 ? 7.5 : 8.5;
+  const ANCHO_MES = 26;
+
+  // Tabla: separa del header dejando espacio para el subtítulo "Detalle por agente",
+  // y respeta la banda del footer + línea celeste.
+  const TABLE_TOP = HEADER_H + HEADER_LINE + 15;
+  const TABLE_BOTTOM = FOOTER_H + FOOTER_LINE + 4;
+  // Cada fila va a tener doble línea: monto arriba (renderizado por autoTable)
+  // y fecha de pago debajo (dibujada manualmente en didDrawCell, en gris bold).
+  doc.autoTable({
+    head, body,
+    startY: TABLE_TOP,
+    margin: { left: 10, right: 10, top: TABLE_TOP, bottom: TABLE_BOTTOM },
+    styles: {
+      font: 'helvetica', fontSize,
+      cellPadding: { top: 3.2, right: 2, bottom: 5.2, left: 2 },
+      halign: 'center', valign: 'top',
+      overflow: 'linebreak',
+      minCellHeight: 11.5,
+    },
+    headStyles: {
+      fillColor: [62, 64, 149], textColor: 255,
+      fontStyle: 'bold', halign: 'center', valign: 'middle',
+      fontSize: fontSize + 0.5,
+      cellPadding: 2.5,
+      minCellHeight: 8,
+    },
+    alternateRowStyles: { fillColor: [245, 247, 252] },
+    columnStyles: {
+      0: { cellWidth: ANCHO_MES, halign: 'left', valign: 'middle', fontStyle: 'bold', fillColor: [240, 242, 247] },
+    },
+    didDrawPage: () => { drawHeader(); drawFooter(); },
+    didDrawCell: (data) => {
+      // Sólo body, sólo columnas de agente (no la columna "Mes")
+      if (data.section !== 'body') return;
+      if (data.column.index === 0) return;
+      const ag = incluidos[data.column.index - 1];
+      if (!ag) return;
+      const monthNum = data.row.index + 1;
+      const p = pagos[ag.id]?.[monthNum];
+      if (!p || !p.fecha_pago) return;
+      // Parsear YYYY-MM-DD a DD/MM/YYYY sin pasar por Date (evita timezone)
+      const m = String(p.fecha_pago).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!m) return;
+      const fechaTxt = `${m[3]}/${m[2]}/${m[1]}`;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(fontSize - 1.5);
+      doc.setTextColor(125, 130, 150); // gris azulado, simula "opacidad"
+      const cx = data.cell.x + data.cell.width / 2;
+      const cy = data.cell.y + data.cell.height - 1.8;
+      doc.text(fechaTxt, cx, cy, { align: 'center' });
+      // No hace falta restablecer color: autoTable resetea estilos por celda.
+    },
+  });
+
+  doc.save(`Pagos_Mantenimiento_${year}.pdf`);
+}
+
+// Persistencia local del set de agentes "incluidos en PDF" del panel de mantenimiento.
+// Vive en localStorage del admin para no destildar manualmente cada vez.
+const MP_INCLUIDOS_KEY = 'ifs_maintenance_pdf_incluidos';
+const _loadMpIncluidos = () => {
+  try { return JSON.parse(localStorage.getItem(MP_INCLUIDOS_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+};
+const _saveMpIncluidos = (obj) => {
+  try { localStorage.setItem(MP_INCLUIDOS_KEY, JSON.stringify(obj)); } catch (e) {}
+};
+
+function MaintenancePaymentsModal({ onClose }) {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear < 2026 ? 2026 : currentYear);
+  const [agentes, setAgentes] = useState([]);    // agentes "principales" (sin asistentes)
+  const [pagos, setPagos] = useState({});        // { [agenteId]: { [month]: { monto, fecha_pago, ... } } }
+  const [loadingAg, setLoadingAg] = useState(true);
+  const [loadingPg, setLoadingPg] = useState(true);
+  // Selección de agentes que entrarán al PDF. Persiste en localStorage.
+  const [agentesIncluidos, setAgentesIncluidos] = useState({});
+
+  // Cargar agentes (profiles), excluyendo asistentes (assistant_of_id no nulo).
+  // Ordenamiento de la matriz se hace abajo (memo) en base a meses pagados.
+  useEffect(() => {
+    let cancel = false;
+    setLoadingAg(true);
+    sb.from('profiles')
+      .select('id, email, display_name, role, assistant_of_id')
+      .is('assistant_of_id', null)
+      .order('display_name', { ascending: true })
+      .then(({ data, error }) => {
+        if (cancel) return;
+        if (error) { console.error('Error cargando agentes:', error); setLoadingAg(false); return; }
+        const list = data || [];
+        setAgentes(list);
+        // Mezclar con lo persistido: agentes ya conocidos respetan el valor
+        // guardado (incluido o no); agentes nuevos arrancan tildados.
+        const saved = _loadMpIncluidos();
+        const inc = {};
+        list.forEach(a => {
+          inc[a.id] = (saved[a.id] !== undefined) ? !!saved[a.id] : true;
+        });
+        setAgentesIncluidos(inc);
+        // Persistimos el merge para limpiar IDs viejos / sumar nuevos
+        _saveMpIncluidos(inc);
+        setLoadingAg(false);
+      });
+    return () => { cancel = true; };
+  }, []);
+
+  // Cargar pagos del año seleccionado. Re-corre al cambiar de año.
+  useEffect(() => {
+    let cancel = false;
+    setLoadingPg(true);
+    sb.from('abordaje_maintenance_payments')
+      .select('agente_id, month, monto, fecha_pago, notas')
+      .eq('year', year)
+      .then(({ data, error }) => {
+        if (cancel) return;
+        if (error) { console.error('Error cargando pagos:', error); setLoadingPg(false); return; }
+        const map = {};
+        (data || []).forEach(row => {
+          if (!map[row.agente_id]) map[row.agente_id] = {};
+          map[row.agente_id][row.month] = row;
+        });
+        setPagos(map);
+        setLoadingPg(false);
+      });
+    return () => { cancel = true; };
+  }, [year]);
+
+  // Orden de agentes: los que más meses pagaron a la izquierda.
+  // Empate → orden alfabético por display_name (que ya es el orden inicial).
+  const agentesOrdenados = React.useMemo(() => {
+    const countPagos = (id) => {
+      const m = pagos[id] || {};
+      // Cuenta meses con monto > 0 o con fecha_pago seteada
+      return Object.values(m).filter(p => (p.monto != null && p.monto > 0) || p.fecha_pago).length;
+    };
+    return [...agentes].sort((a, b) => {
+      const cb = countPagos(b.id);
+      const ca = countPagos(a.id);
+      if (cb !== ca) return cb - ca;
+      // Fallback: alfabético (preserva el orden estable original)
+      return (a.display_name || a.email || '').localeCompare(b.display_name || b.email || '');
+    });
+  }, [agentes, pagos]);
+
+  // Esc cierra el modal grande (solo si el editor no está abierto)
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape' && !editing) onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  });
+
+  const toggleAgenteIncluido = (id) => {
+    setAgentesIncluidos(prev => {
+      const next = { ...prev, [id]: !prev[id] };
+      _saveMpIncluidos(next);
+      return next;
+    });
+  };
+
+  // Años seleccionables: 2026 → currentYear + 1
+  const aniosDisponibles = [];
+  for (let y = 2026; y <= Math.max(currentYear + 1, 2027); y++) aniosDisponibles.push(y);
+
+  // Estado del editor de celda
+  const [editing, setEditing] = useState(null); // { agente, month }
+
+  const openEditor = (agente, month) => {
+    setEditing({ agente, month });
+  };
+
+  // Actualiza el state local de pagos después de guardar/borrar
+  const onCellSaved = (agenteId, month, row) => {
+    setPagos(prev => {
+      const next = { ...prev };
+      if (!next[agenteId]) next[agenteId] = {};
+      else next[agenteId] = { ...next[agenteId] };
+      if (row) next[agenteId][month] = row;
+      else delete next[agenteId][month];
+      return next;
+    });
+  };
+
+  return (
+    <div style={adminOverlayStyle} onClick={onClose}>
+      <div
+        style={{ ...adminModalStyle, maxWidth: 1180 }}
+        onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true" aria-labelledby="mp-title"
+      >
+        <header style={adminHeaderStyle}>
+          <div>
+            <div id="mp-title" style={{ fontSize: 16, fontWeight: 800, letterSpacing: '0.02em' }}>
+              Pagos de mantenimiento
+            </div>
+            <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', marginTop: 2 }}>
+              Matriz mes × agente · Solo admin
+            </div>
+          </div>
+          <button onClick={onClose} style={adminCloseBtn}>Cerrar</button>
+        </header>
+
+        <div style={{ overflow: 'auto', flex: 1, padding: '18px 24px' }}>
+          {/* Selector de año */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+            <label style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Año:
+            </label>
+            <select
+              value={year}
+              onChange={e => setYear(parseInt(e.target.value, 10))}
+              style={{ ...adminInpStyle, width: 'auto', cursor: 'pointer', fontWeight: 600 }}
+            >
+              {aniosDisponibles.map(y => (
+                <option key={y} value={y}>{y}</option>
+              ))}
+            </select>
+            <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 8 }}>
+              {loadingAg ? 'Cargando agentes…' : `${agentesOrdenados.length} agente${agentesOrdenados.length === 1 ? '' : 's'}`}
+              {!loadingAg && !loadingPg && agentesOrdenados.length > 0 && ' · orden: más meses pagados a la izquierda'}
+            </span>
+          </div>
+
+          {loadingAg || loadingPg ? (
+            <div style={{ padding: 40, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>
+              Cargando…
+            </div>
+          ) : (
+            <div className="mp-scroll-x" style={{ border: '1px solid #e5e7eb', borderRadius: 10 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 720 }}>
+                <thead>
+                  {/* Fila checkbox "incluir en PDF" */}
+                  <tr style={{ background: '#f9fafb' }}>
+                    <th style={{ padding: '8px 12px', borderBottom: '1px solid #e5e7eb', borderRight: '1px solid #e5e7eb', width: 110, fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', textAlign: 'left' }}>
+                      Incluir
+                    </th>
+                    {agentesOrdenados.map(a => (
+                      <th key={a.id} style={{ padding: '8px 10px', borderBottom: '1px solid #e5e7eb', borderRight: '1px solid #f3f4f6', textAlign: 'center', minWidth: 130 }}>
+                        <input
+                          type="checkbox"
+                          checked={!!agentesIncluidos[a.id]}
+                          onChange={() => toggleAgenteIncluido(a.id)}
+                          style={{ cursor: 'pointer', transform: 'scale(1.15)' }}
+                          aria-label={`Incluir ${a.display_name || a.email} en PDF`}
+                        />
+                      </th>
+                    ))}
+                  </tr>
+                  {/* Fila nombres de agentes */}
+                  <tr style={{ background: 'linear-gradient(135deg, #1e1b4b, #1e3a5f)', color: '#fff' }}>
+                    <th style={{ padding: '10px 12px', borderRight: '1px solid rgba(255,255,255,0.12)', textAlign: 'left', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                      Mes
+                    </th>
+                    {agentesOrdenados.map(a => (
+                      <th key={a.id} style={{ padding: '10px 10px', borderRight: '1px solid rgba(255,255,255,0.12)', textAlign: 'center', fontSize: 12, fontWeight: 700 }}>
+                        {a.display_name || a.email}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {MESES_ES.map((mes, idx) => {
+                    const monthNum = idx + 1;
+                    return (
+                      <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#1e1b4b', borderRight: '1px solid #f3f4f6', background: '#fafbfc' }}>
+                          {mes}
+                        </td>
+                        {agentesOrdenados.map(a => {
+                          const pago = pagos[a.id]?.[monthNum];
+                          const pagado = pago && ((pago.monto != null && pago.monto > 0) || pago.fecha_pago);
+                          return (
+                            <td
+                              key={a.id}
+                              onClick={() => openEditor(a, monthNum)}
+                              style={{
+                                padding: '10px 10px',
+                                borderRight: '1px solid #f3f4f6',
+                                textAlign: 'center',
+                                color: pagado ? '#1e1b4b' : '#9ca3af',
+                                fontSize: 12,
+                                fontWeight: pagado ? 600 : 400,
+                                cursor: 'pointer',
+                                transition: 'background 0.12s',
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.background = '#eef4fb'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.background = ''; }}
+                              title={pagado
+                                ? `Editar pago de ${MESES_ES[monthNum - 1]} — ${a.display_name || a.email}`
+                                : `Cargar pago de ${MESES_ES[monthNum - 1]} — ${a.display_name || a.email}`}
+                            >
+                              {pagado
+                                ? (pago.monto != null
+                                  ? `USD ${Number(pago.monto).toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`
+                                  : '✓')
+                                : '—'}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <footer style={{
+          padding: '14px 24px', borderTop: '1px solid #e5e7eb',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          background: '#fafbfc', flexShrink: 0,
+        }}>
+          <div style={{ fontSize: 11, color: '#6b7280' }}>
+            Tocá cualquier celda para cargar o editar el pago.
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button onClick={onClose} style={adminBtnGhost}>Cerrar</button>
+            <button
+              onClick={() => exportarPagosMantenimientoPDF({
+                year,
+                agentes: agentesOrdenados,
+                agentesIncluidos,
+                pagos,
+              })}
+              disabled={loadingAg || loadingPg}
+              style={{
+                ...adminBtnPrimary,
+                opacity: (loadingAg || loadingPg) ? 0.45 : 1,
+                cursor: (loadingAg || loadingPg) ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Descargar PDF
+            </button>
+          </div>
+        </footer>
+      </div>
+
+      {editing && (
+        <MaintenancePaymentEditor
+          year={year}
+          agente={editing.agente}
+          month={editing.month}
+          initial={pagos[editing.agente.id]?.[editing.month] || null}
+          onClose={() => setEditing(null)}
+          onSaved={(row) => {
+            onCellSaved(editing.agente.id, editing.month, row);
+            setEditing(null);
+          }}
+          onDeleted={() => {
+            onCellSaved(editing.agente.id, editing.month, null);
+            setEditing(null);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// Editor de una celda (mes × agente). Upsert/Delete a abordaje_maintenance_payments.
+function MaintenancePaymentEditor({ year, agente, month, initial, onClose, onSaved, onDeleted }) {
+  // Fecha de hoy en formato YYYY-MM-DD (sin timezone shift)
+  const todayISO = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
+  const [monto, setMonto] = useState(initial?.monto != null ? String(initial.monto) : '');
+  // Default = fecha actual para carga rápida (sólo si no había uno previo guardado)
+  const [fechaPago, setFechaPago] = useState(initial?.fecha_pago || todayISO());
+  const [notas, setNotas] = useState(initial?.notas || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Esc cierra
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); onClose(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  // Focus en monto al montar
+  const montoRef = React.useRef(null);
+  useEffect(() => { montoRef.current?.focus(); }, []);
+
+  const yaExiste = !!(initial && (initial.monto != null || initial.fecha_pago));
+
+  const guardar = async () => {
+    setError('');
+    const montoNum = monto.trim() === '' ? null : Number(monto.replace(',', '.'));
+    if (monto.trim() !== '' && (Number.isNaN(montoNum) || montoNum < 0)) {
+      setError('Monto inválido'); return;
+    }
+    if (montoNum == null && !fechaPago) {
+      setError('Cargá al menos un monto o una fecha de pago.'); return;
+    }
+    setSaving(true);
+    const payload = {
+      agente_id: agente.id,
+      year, month,
+      monto: montoNum,
+      fecha_pago: fechaPago || null,
+      notas: notas.trim() || null,
+      updated_at: new Date().toISOString(),
+    };
+    const { data, error: err } = await sb
+      .from('abordaje_maintenance_payments')
+      .upsert(payload, { onConflict: 'agente_id,year,month' })
+      .select()
+      .single();
+    setSaving(false);
+    if (err) { setError('Error al guardar: ' + err.message); return; }
+    onSaved(data);
+  };
+
+  const borrar = async () => {
+    if (!window.confirm('¿Borrar este pago?')) return;
+    setSaving(true);
+    const { error: err } = await sb
+      .from('abordaje_maintenance_payments')
+      .delete()
+      .match({ agente_id: agente.id, year, month });
+    setSaving(false);
+    if (err) { setError('Error al borrar: ' + err.message); return; }
+    onDeleted();
+  };
+
+  const editorOverlayStyle = {
+    ...adminOverlayStyle,
+    zIndex: 1100,
+    alignItems: 'center',
+    padding: '24px',
+    background: 'rgba(15, 17, 41, 0.55)',
+  };
+  const editorModalStyle = {
+    width: '100%', maxWidth: 380,
+    background: '#fff', borderRadius: 14,
+    boxShadow: '0 24px 60px rgba(0,0,0,0.42)',
+    overflow: 'hidden',
+    display: 'flex', flexDirection: 'column',
+  };
+
+  return (
+    <div style={editorOverlayStyle} onClick={onClose}>
+      <div style={editorModalStyle} onClick={e => e.stopPropagation()}
+        role="dialog" aria-modal="true">
+        <header style={{
+          padding: '14px 18px', background: 'linear-gradient(135deg, #1e1b4b, #1e3a5f)',
+          color: '#fff',
+        }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', textTransform: 'uppercase', letterSpacing: '0.06em', fontWeight: 600 }}>
+            {MESES_ES[month - 1]} {year}
+          </div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginTop: 2 }}>
+            {agente.display_name || agente.email}
+          </div>
+        </header>
+
+        <div style={{ padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Monto (USD)
+            </span>
+            <input
+              ref={montoRef}
+              type="number"
+              inputMode="decimal"
+              step="0.01"
+              min="0"
+              value={monto}
+              onChange={e => setMonto(e.target.value)}
+              placeholder="0.00"
+              style={adminInpStyle}
+              onKeyDown={(e) => { if (e.key === 'Enter') guardar(); }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Fecha de pago
+            </span>
+            <input
+              type="date"
+              value={fechaPago}
+              onChange={e => setFechaPago(e.target.value)}
+              style={adminInpStyle}
+              onKeyDown={(e) => { if (e.key === 'Enter') guardar(); }}
+            />
+          </label>
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              Notas (opcional)
+            </span>
+            <input
+              type="text"
+              value={notas}
+              onChange={e => setNotas(e.target.value)}
+              placeholder="Ej: pagó tarde, transferencia, etc."
+              style={adminInpStyle}
+            />
+          </label>
+
+          {error && (
+            <div style={{ fontSize: 12, color: '#b91c1c', background: '#fef2f2', border: '1px solid #fecaca', padding: '8px 10px', borderRadius: 6 }}>
+              {error}
+            </div>
+          )}
+        </div>
+
+        <footer style={{
+          padding: '12px 18px', borderTop: '1px solid #f3f4f6',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          background: '#fafbfc',
+        }}>
+          <div>
+            {yaExiste && (
+              <button onClick={borrar} disabled={saving} style={adminBtnDanger}>
+                Borrar
+              </button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={onClose} disabled={saving} style={adminBtnGhost}>Cancelar</button>
+            <button onClick={guardar} disabled={saving} style={adminBtnPrimary}>
+              {saving ? 'Guardando…' : 'Guardar'}
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
+
 function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
@@ -10164,6 +10856,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
   };
 
   const esAdmin = agente?.role === 'admin';
+  const [showMaintenance, setShowMaintenance] = useState(false);
   return (
     <div style={adminOverlayStyle} onClick={onCancel}>
       <div style={adminModalStyle} onClick={e => e.stopPropagation()}
@@ -10246,8 +10939,10 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
           />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
+          {esAdmin && <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />}
         </div>
       </div>
+      {showMaintenance && <MaintenancePaymentsModal onClose={() => setShowMaintenance(false)} />}
     </div>
   );
 }
