@@ -10410,31 +10410,28 @@ function MaintenancePaymentsModal({ onClose }) {
     return () => { cancel = true; };
   }, [year]);
 
-  // Orden de agentes: los que más meses pagaron a la izquierda.
-  // Empate → orden alfabético por display_name (que ya es el orden inicial).
+  // Orden de agentes (de izquierda a derecha):
+  // 1) los que más meses pagaron
+  // 2) en empate, los tildados (incluidos en PDF) antes que los no tildados
+  // 3) en empate, alfabético por display_name/email
   const agentesOrdenados = React.useMemo(() => {
     const countPagos = (id) => {
       const m = pagos[id] || {};
-      // Cuenta meses con monto > 0 o con fecha_pago seteada
       return Object.values(m).filter(p => (p.monto != null && p.monto > 0) || p.fecha_pago).length;
     };
     return [...agentes].sort((a, b) => {
       const cb = countPagos(b.id);
       const ca = countPagos(a.id);
       if (cb !== ca) return cb - ca;
-      // Fallback: alfabético (preserva el orden estable original)
+      const ib = agentesIncluidos[b.id] ? 1 : 0;
+      const ia = agentesIncluidos[a.id] ? 1 : 0;
+      if (ib !== ia) return ib - ia;
       return (a.display_name || a.email || '').localeCompare(b.display_name || b.email || '');
     });
-  }, [agentes, pagos]);
+  }, [agentes, pagos, agentesIncluidos]);
 
-  // Esc cierra el modal grande (solo si el editor no está abierto)
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === 'Escape' && !editing) onClose();
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  });
+  // Nota: a propósito NO cerramos el modal grande con Escape.
+  // Solo el sub-editor (MaintenancePaymentEditor) cierra con Esc.
 
   const toggleAgenteIncluido = (id) => {
     setAgentesIncluidos(prev => {
