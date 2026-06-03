@@ -1519,6 +1519,15 @@
   }
   .filter-bar-toggle-caret { font-size: 0.7rem; color: var(--texto-suave); transition: transform 0.15s; }
   .filter-bar-toggle.is-open .filter-bar-toggle-caret { transform: rotate(180deg); }
+  /* Solapa Archivo: usa el mismo look base del filter-bar-toggle.
+     Cuando está activa (vistaLista === 'archivo') invertimos colores
+     para que sea claro que estamos viendo el archivo y no la lista. */
+  .filter-bar-archivo.is-active {
+    background: var(--azul-oscuro);
+    border-color: var(--azul-oscuro);
+    color: white;
+  }
+  .filter-bar-archivo.is-active:hover { color: white; }
   .filter-bar-header {
     display: flex; align-items: center; gap: 12px;
     flex-wrap: wrap;
@@ -1634,8 +1643,29 @@
      Estado va pegado al Teléfono y separado del Detalle con un borde
      punteado (ver regla más arriba) para que no se amontone con la
      observación. Timeline sin width: toma todo el ancho que sobra. */
+  table.prospectos col.col-w-check     { width: 38px; }
   table.prospectos col.col-w-nombre    { width: 180px; }
   table.prospectos col.col-w-tel       { width: 120px; }
+  /* Columna de selección bulk (solo aparece en la vista Archivo).
+     El click en la celda no debe disparar la apertura del prospect. */
+  table.prospectos th.col-check,
+  table.prospectos td.col-check {
+    width: 38px;
+    text-align: center;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+  table.prospectos td.col-check input[type="checkbox"],
+  table.prospectos th.col-check input[type="checkbox"] {
+    cursor: pointer;
+    transform: scale(1.15);
+    accent-color: var(--azul);
+  }
+  /* Fila seleccionada: leve tint azul pero sin pisar el tint de estado. */
+  table.prospectos tr.fila-clickeable.is-selected {
+    background: rgba(0,152,218,0.06);
+    box-shadow: inset 3px 0 0 var(--azul);
+  }
   table.prospectos col.col-w-detalle   { width: 220px; }
   table.prospectos col.col-w-estado    { width: 115px; }
   table.prospectos col.col-w-referente { width: 90px; }
@@ -3292,6 +3322,7 @@ function mapProspectoFromDB(p, contactosTodos) {
     updatedAt: p.updated_at,
     proximoContacto: p.proximo_contacto,
     estado: p.estado || 'nuevo',
+    archivado: !!p.archivado,
     contactos: (contactosTodos || [])
       .filter(c => c.prospecto_id === p.id)
       .map(mapContactoFromDB)
@@ -3414,7 +3445,7 @@ const storage = {
     // Columnas explícitas (no select('*')): consumimos menos ancho de banda y
     // documentamos qué necesita cada mapper. Si se agrega una columna nueva al
     // schema y se quiere visible en el frontend, actualizar el select aquí.
-    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, created_at, updated_at';
+    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, archivado, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
     const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
@@ -3536,6 +3567,7 @@ const storage = {
       const v = patch.proximoContacto;
       dbPatch.proximo_contacto = v ? (v.includes('T') ? v.split('T')[0] : v) : null;
     }
+    if ('archivado' in patch) dbPatch.archivado = !!patch.archivado;
     if (Object.keys(dbPatch).length === 0) return;
     const user = await auth.getUser();
     if (user?.id) dbPatch.actor_id = user.id;
@@ -5437,6 +5469,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [filterFecha, setFilterFecha] = useState('todos');
   const [filterEtiqueta, setFilterEtiqueta] = useState([]); // array de tipo.id ó 'sin_etiqueta'
   const [ordenFecha, setOrdenFecha] = useState('ninguno'); // 'asc' | 'desc' | 'ninguno'
+  // Solapa dentro de la vista Lista: 'abordaje' (default, prospects activos)
+  // o 'archivo' (prospects archivados). No persiste — al recargar arranca en 'abordaje'.
+  const [vistaLista, setVistaLista] = useState('abordaje');
+  // Selección bulk en la solapa Archivo (Set de ids). Se limpia al cambiar de
+  // solapa o al ejecutar bulk desarchivar.
+  const [archivoSel, setArchivoSel] = useState(() => new Set());
+  useEffect(() => {
+    // Al salir de Archivo, limpiamos la selección para no arrastrar checkeados
+    // a una próxima visita.
+    if (vistaLista !== 'archivo' && archivoSel.size > 0) setArchivoSel(new Set());
+  }, [vistaLista]);
 
   // Carga inicial desde Supabase. Si hay viewAs, filtra por su id.
   useEffect(() => {
@@ -5528,6 +5571,51 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     const prospect = state.prospectos.find(p => p.id === id);
     if (!prospect) return;
     setPendingDeleteProspect(prospect);
+  };
+
+  // Archivar / desarchivar un prospect. Optimistic update — el flag no
+  // afecta tareas, recordatorios ni eventos del calendar; sólo lo oculta
+  // de la lista de Abordaje y lo deja accesible desde la solapa Archivo.
+  const handleArchive = async (id, archivar = true) => {
+    if (guardReadOnly()) return;
+    const prev = state.prospectos;
+    setState(s => ({
+      ...s,
+      prospectos: s.prospectos.map(p =>
+        p.id === id ? { ...p, archivado: !!archivar, updatedAt: new Date().toISOString() } : p
+      )
+    }));
+    setSelectedId(null);
+    showToast(archivar ? 'Prospect archivado' : 'Prospect desarchivado');
+    try {
+      await storage.updateProspecto(id, { archivado: !!archivar });
+    } catch (e) {
+      handleErr(e, archivar ? 'archiveProspecto' : 'unarchiveProspecto');
+      setState(s => ({ ...s, prospectos: prev }));
+    }
+  };
+
+  // Bulk desarchivar (acción desde la solapa Archivo). Manda los updates en
+  // paralelo. Si algo falla, rollback completo y toast de error.
+  const handleBulkUnarchive = async (ids) => {
+    if (guardReadOnly()) return;
+    const idSet = new Set(ids);
+    if (idSet.size === 0) return;
+    const prev = state.prospectos;
+    setState(s => ({
+      ...s,
+      prospectos: s.prospectos.map(p =>
+        idSet.has(p.id) ? { ...p, archivado: false, updatedAt: new Date().toISOString() } : p
+      )
+    }));
+    setArchivoSel(new Set());
+    showToast(idSet.size === 1 ? 'Prospect desarchivado' : `${idSet.size} prospects desarchivados`);
+    try {
+      await Promise.all(Array.from(idSet).map(id => storage.updateProspecto(id, { archivado: false })));
+    } catch (e) {
+      handleErr(e, 'bulkUnarchive');
+      setState(s => ({ ...s, prospectos: prev }));
+    }
   };
 
   const executeDeleteProspect = async (id) => {
@@ -6748,41 +6836,108 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         state.prospectos.length === 0 ? (
           <EmptyState onAdd={() => setShowAddModal(true)} />
         ) : (
-          <>
-            <FilterBar
-              filterEstado={filterEstado}
-              setFilterEstado={setFilterEstado}
-              filterFecha={filterFecha}
-              setFilterFecha={setFilterFecha}
-              filterEtiqueta={filterEtiqueta}
-              setFilterEtiqueta={setFilterEtiqueta}
-              ordenFecha={ordenFecha}
-              setOrdenFecha={setOrdenFecha}
-              mostrandoCount={filtrados.length}
-              totalCount={state.prospectos.length}
-              extraActions={
-                <>
-                  <button className="btn-export" onClick={() => exportarProspectosExcel(state.prospectos)} title="Descargar lista en Excel">Excel</button>
-                  <button className="btn-export" onClick={() => exportarProspectosPDF(state.prospectos, user)} title="Descargar lista en PDF">PDF</button>
-                  {!readOnly && (
-                    <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Nuevo prospecto</button>
-                  )}
-                </>
-              }
-            />
-            {filtrados.length === 0 ? (
-              <div className="empty">
-                <div className="empty-title">Ningún prospecto coincide con los filtros</div>
-                <div className="empty-text">Ajustá los filtros o limpiálos para ver toda la lista.</div>
-                <button className="btn-secondary"
-                  onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); setFilterEtiqueta([]); setOrdenFecha('ninguno'); }}>
-                  Limpiar filtros
-                </button>
-              </div>
-            ) : (
-              <ProspectosTable prospectos={filtrados} onSelect={setSelectedId} />
-            )}
-          </>
+          (() => {
+            // Filtrado por archivado solo aplica a la vista Lista. Calendario
+            // y Tareas siguen viendo todo (los archivados conservan sus
+            // recordatorios, citas y tarjetas tal como están).
+            const prospectosVista = state.prospectos.filter(p =>
+              vistaLista === 'archivo' ? p.archivado : !p.archivado
+            );
+            const filtradosVista = aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha);
+            const archivadosCount = state.prospectos.filter(p => p.archivado).length;
+            const enArchivo = vistaLista === 'archivo';
+            return (
+              <>
+                <FilterBar
+                  filterEstado={filterEstado}
+                  setFilterEstado={setFilterEstado}
+                  filterFecha={filterFecha}
+                  setFilterFecha={setFilterFecha}
+                  filterEtiqueta={filterEtiqueta}
+                  setFilterEtiqueta={setFilterEtiqueta}
+                  ordenFecha={ordenFecha}
+                  setOrdenFecha={setOrdenFecha}
+                  mostrandoCount={filtradosVista.length}
+                  totalCount={prospectosVista.length}
+                  vistaLista={vistaLista}
+                  setVistaLista={setVistaLista}
+                  archivadosCount={archivadosCount}
+                  extraActions={
+                    <>
+                      {!enArchivo && (
+                        <>
+                          <button className="btn-export" onClick={() => exportarProspectosExcel(prospectosVista)} title="Descargar lista en Excel">Excel</button>
+                          <button className="btn-export" onClick={() => exportarProspectosPDF(prospectosVista, user)} title="Descargar lista en PDF">PDF</button>
+                          {!readOnly && (
+                            <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Nuevo prospecto</button>
+                          )}
+                        </>
+                      )}
+                      {enArchivo && archivoSel.size > 0 && (
+                        <button
+                          className="btn-primary"
+                          onClick={() => handleBulkUnarchive(Array.from(archivoSel))}
+                          title="Mover los prospects seleccionados de vuelta a la lista de Abordaje"
+                        >
+                          {archivoSel.size === 1 ? 'Desarchivar' : `Desarchivar ${archivoSel.size}`}
+                        </button>
+                      )}
+                    </>
+                  }
+                />
+                {filtradosVista.length === 0 ? (
+                  <div className="empty">
+                    <div className="empty-title">
+                      {enArchivo
+                        ? (archivadosCount === 0 ? 'No hay prospects archivados' : 'Ningún archivo coincide con los filtros')
+                        : 'Ningún prospecto coincide con los filtros'}
+                    </div>
+                    <div className="empty-text">
+                      {enArchivo && archivadosCount === 0
+                        ? 'Archivá prospects desde su tarjeta para liberar la lista sin perder la información.'
+                        : 'Ajustá los filtros o limpiálos para ver toda la lista.'}
+                    </div>
+                    {!(enArchivo && archivadosCount === 0) && (
+                      <button className="btn-secondary"
+                        onClick={() => { setFilterEstado('todos'); setFilterFecha('todos'); setFilterEtiqueta([]); setOrdenFecha('ninguno'); }}>
+                        Limpiar filtros
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <ProspectosTable
+                    prospectos={filtradosVista}
+                    onSelect={setSelectedId}
+                    selectable={enArchivo}
+                    selectedIds={enArchivo ? archivoSel : null}
+                    onToggleSelect={enArchivo ? (id) => {
+                      setArchivoSel(prev => {
+                        const next = new Set(prev);
+                        if (next.has(id)) next.delete(id); else next.add(id);
+                        return next;
+                      });
+                    } : null}
+                    onToggleAll={enArchivo ? () => {
+                      setArchivoSel(prev => {
+                        const visiblesIds = filtradosVista.map(p => p.id);
+                        const allSelected = visiblesIds.every(id => prev.has(id));
+                        if (allSelected) {
+                          // Limpiar solo los visibles (preservar selección de otros filtros)
+                          const next = new Set(prev);
+                          visiblesIds.forEach(id => next.delete(id));
+                          return next;
+                        } else {
+                          const next = new Set(prev);
+                          visiblesIds.forEach(id => next.add(id));
+                          return next;
+                        }
+                      });
+                    } : null}
+                  />
+                )}
+              </>
+            );
+          })()
         )
       )}
 
@@ -6931,6 +7086,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           prospect={pendingDeleteProspect}
           onCancel={() => setPendingDeleteProspect(null)}
           onConfirm={() => executeDeleteProspect(pendingDeleteProspect.id)}
+          onArchive={pendingDeleteProspect.archivado ? null : () => {
+            const id = pendingDeleteProspect.id;
+            setPendingDeleteProspect(null);
+            handleArchive(id, true);
+          }}
         />
       )}
 
@@ -7001,6 +7161,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onClose={() => setSelectedId(null)}
           onUpdate={(patch) => upsertProspecto(selectedProspecto.id, patch)}
           onDelete={() => handleDelete(selectedProspecto.id)}
+          onArchive={(archivar) => handleArchive(selectedProspecto.id, archivar)}
           onAddContacto={(c) => handleAddContacto(selectedProspecto.id, c)}
           onEditContacto={(cid, patch) => handleEditContacto(selectedProspecto.id, cid, patch)}
           onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
@@ -7105,7 +7266,7 @@ function EmptyState({ onAdd }) {
 // Por default los filtros van plegados — ocupan menos espacio en pantalla.
 // Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
 // toggle muestra un badge con la cantidad activos y queda destacado.
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null }) {
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0 }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
   const filtrosCount =
     (filterEstado !== 'todos' ? 1 : 0)
@@ -7125,6 +7286,18 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
           {hayFiltros && <span className="filter-bar-toggle-badge">{filtrosCount}</span>}
           <span className="filter-bar-toggle-caret" aria-hidden="true">▾</span>
         </button>
+        {/* Solapa "Archivo": muestra los prospects que el agente archivó.
+            Solo se renderiza cuando el caller pasa setVistaLista (es decir,
+            en la vista Lista; no se muestra en Calendario). */}
+        {setVistaLista && (
+          <button type="button"
+            className={`filter-bar-toggle filter-bar-archivo${vistaLista === 'archivo' ? ' is-active' : ''}`}
+            onClick={() => setVistaLista(vistaLista === 'archivo' ? 'abordaje' : 'archivo')}
+            aria-pressed={vistaLista === 'archivo'}
+            title={vistaLista === 'archivo' ? 'Volver a la lista de Abordaje' : 'Ver prospects archivados'}>
+            <span>{vistaLista === 'archivo' ? 'Volver a Abordaje' : 'Archivo'}</span>
+          </button>
+        )}
         {hayFiltros && (
           <button className="btn-mini"
             onClick={() => {
@@ -7241,11 +7414,24 @@ function MultiSelectEtiqueta({ value, onChange }) {
 }
 
 // ── TABLA ──────────────────────────────────────────────────────
-function ProspectosTable({ prospectos, onSelect }) {
+function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds = null, onToggleSelect = null, onToggleAll = null }) {
+  // Cantidad de items seleccionados visibles (para el master checkbox)
+  const totalVisibles = prospectos.length;
+  const selCount = selectable && selectedIds
+    ? prospectos.filter(p => selectedIds.has(p.id)).length
+    : 0;
+  const allSelected = selectable && totalVisibles > 0 && selCount === totalVisibles;
+  const someSelected = selectable && selCount > 0 && selCount < totalVisibles;
+  const masterRef = React.useRef(null);
+  useEffect(() => {
+    if (masterRef.current) masterRef.current.indeterminate = !!someSelected;
+  }, [someSelected]);
+
   return (
     <div className="table-wrap">
       <table className="prospectos">
         <colgroup>
+          {selectable && <col className="col-w-check" />}
           <col className="col-w-nombre" />
           <col className="col-w-tel" />
           <col className="col-w-estado" />
@@ -7256,6 +7442,18 @@ function ProspectosTable({ prospectos, onSelect }) {
         </colgroup>
         <thead>
           <tr>
+            {selectable && (
+              <th className="col-check" title="Seleccionar todos">
+                <input
+                  ref={masterRef}
+                  type="checkbox"
+                  checked={!!allSelected}
+                  onChange={() => onToggleAll && onToggleAll()}
+                  aria-label="Seleccionar todos"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              </th>
+            )}
             <th>Nombre</th>
             <th className="col-telefono">Teléfono</th>
             <th className="col-estado-h">Estado</th>
@@ -7267,7 +7465,14 @@ function ProspectosTable({ prospectos, onSelect }) {
         </thead>
         <tbody>
           {prospectos.map(p => (
-            <FilaProspecto key={p.id} prospecto={p} onClick={() => onSelect(p.id)} />
+            <FilaProspecto
+              key={p.id}
+              prospecto={p}
+              onClick={() => onSelect(p.id)}
+              selectable={selectable}
+              selected={selectable && selectedIds ? selectedIds.has(p.id) : false}
+              onToggleSelect={onToggleSelect}
+            />
           ))}
         </tbody>
       </table>
@@ -7275,7 +7480,7 @@ function ProspectosTable({ prospectos, onSelect }) {
   );
 }
 
-function FilaProspecto({ prospecto, onClick }) {
+function FilaProspecto({ prospecto, onClick, selectable = false, selected = false, onToggleSelect = null }) {
   const estado = deriveEstado(prospecto);
   const meta = ESTADO_META[estado];
   // Si el próximo contacto está agendado a más de 3 meses, el row no es urgente:
@@ -7289,7 +7494,18 @@ function FilaProspecto({ prospecto, onClick }) {
     if (prox > enTresMeses) tint = 'tint-futuro-lejos';
   }
   return (
-    <tr className={`fila-clickeable ${tint}`} onClick={onClick}>
+    <tr className={`fila-clickeable ${tint}${selected ? ' is-selected' : ''}`} onClick={onClick}>
+      {selectable && (
+        <td className="col-check" onClick={(e) => { e.stopPropagation(); onToggleSelect && onToggleSelect(prospecto.id); }}>
+          <input
+            type="checkbox"
+            checked={!!selected}
+            onChange={() => onToggleSelect && onToggleSelect(prospecto.id)}
+            onClick={(e) => e.stopPropagation()}
+            aria-label={`Seleccionar ${prospecto.nombre || 'prospect'}`}
+          />
+        </td>
+      )}
       <td className="col-nombre">
         <ActorStar item={prospecto} />
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
@@ -7367,7 +7583,7 @@ function TimelineCell({ contactos }) {
 }
 
 // ── PANEL LATERAL (gestión arriba, datos abajo, historial abajo) ─
-function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onAddContacto, onEditContacto, onDeleteContacto }) {
+function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
@@ -7410,7 +7626,18 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
         </div>
 
         {!readOnly && (
-          <div className="panel-section" style={{display:'flex', justifyContent:'flex-end'}}>
+          <div className="panel-section" style={{display:'flex', justifyContent:'flex-end', gap: 8, flexWrap: 'wrap'}}>
+            {onArchive && (
+              <button
+                className="btn-danger"
+                onClick={() => onArchive(!prospecto.archivado)}
+                title={prospecto.archivado
+                  ? 'Volver este prospect a la lista de Abordaje'
+                  : 'Mover este prospect al archivo (mantiene tareas y citas)'}
+              >
+                {prospecto.archivado ? 'Desarchivar' : 'Archivar'}
+              </button>
+            )}
             <button className="btn-danger" onClick={onDelete}>Eliminar prospecto</button>
           </div>
         )}
@@ -11823,7 +12050,7 @@ function ConfirmColMoveModal({ movingName, targetName, position, onCancel, onCon
 // Reemplaza el confirm() nativo del browser por un modal acorde al diseño.
 // Muestra contexto del prospect (nombre, gestiones, próxima cita) para que
 // el user no borre por accidente uno con historial cargado.
-function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm }) {
+function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm, onArchive }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', onKey);
@@ -11866,10 +12093,23 @@ function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm }) {
           <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: '0', lineHeight: 1.5 }}>
             Esta acción no se puede deshacer. Se elimina el prospect, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
           </p>
+          {onArchive && (
+            <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', margin: '10px 0 0', lineHeight: 1.5, fontStyle: 'italic' }}>
+              Si solo querés sacarlo de la lista sin perder la información, usá <strong>Archivar</strong>:
+              queda guardado en la solapa Archivo con sus tareas, recordatorios y citas intactos.
+            </p>
+          )}
         </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar prospect</button>
+        <div className="modal-footer" style={{ justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            {onArchive && (
+              <button className="btn-secondary" onClick={onArchive}>Archivar</button>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+            <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar prospect</button>
+          </div>
         </div>
       </div>
     </div>
@@ -12227,19 +12467,29 @@ function InstruccionesModal({ onClose }) {
           <Section id="arranque" title="1. Primer arranque · Vistas principales">
             <p>La app tiene tres pestañas centrales en la barra de pestañas:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-              <Li><strong>Lista de abordaje:</strong> tu pool de prospectos. Acá ves nombre, teléfono, referente, detalle, próximas gestiones y el estado actual.</Li>
+              <Li><strong>Lista de abordaje:</strong> tu pool de prospectos. Acá ves nombre, teléfono, referente, detalle, próximas gestiones y el estado actual. La pestaña incluye dos solapas: <strong>Abordaje</strong> (los prospects activos) y <strong>Archivo</strong> (los archivados — ver sección 2).</Li>
               <Li><strong>Tareas:</strong> tablero Kanban con columnas (Abordar / Pendiente / etc.) para organizar pendientes que no son una llamada formal pero querés tener anotados.</Li>
               <Li><strong>Calendario:</strong> vista Mes / Semana / Hoy con todos los eventos (citas, tareas con fecha, agendas standalone).</Li>
             </ul>
             <p>La búsqueda global del header encuentra prospectos, tareas y agendas por nombre, teléfono o título.</p>
           </Section>
 
-          <Section id="prospects" title="2. Crear y gestionar prospectos">
+          <Section id="prospects" title="2. Crear, gestionar y archivar prospects">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Botón <strong>+ Nuevo prospect</strong> arriba a la derecha de la Lista: cargás nombre y datos de contacto. Solo el nombre es obligatorio.</Li>
               <Li>Al hacer click en un prospect se abre un <strong>panel lateral</strong> con sus datos completos, historial de gestiones, observaciones y el botón para registrar una nueva gestión.</Li>
               <Li>El campo <strong>Detalle</strong> es la descripción corta. El campo <strong>Observaciones</strong> es libre y largo: usalo para contexto de la conversación, recordatorios, etc.</Li>
               <Li>Filtrá la lista por estado (chip de arriba) o por fecha de próximo contacto.</Li>
+            </ul>
+
+            <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Archivar prospects (liberar espacio sin perder información)</strong></p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>En la Lista hay dos solapas al lado de Filtros: <strong>Abordaje</strong> y <strong>Archivo</strong>. La primera muestra los prospects activos; la segunda los archivados.</Li>
+              <Li>Para archivar un prospect, abrilo y tocá el botón <strong>Archivar</strong> que está al lado de "Eliminar prospecto". Sale de la lista de Abordaje y queda guardado en la solapa Archivo.</Li>
+              <Li>También podés archivar desde el popup de eliminar: al tocar "Eliminar prospecto" aparece un botón extra <strong>Archivar</strong> a la izquierda. Útil cuando arrancaste a borrar y preferís solo guardarlo.</Li>
+              <Li><strong>El archivo NO afecta tareas, recordatorios ni eventos del calendar:</strong> si el prospect tenía una cita agendada, un recordatorio o una tarjeta en el Kanban, todo eso sigue apareciendo en sus vistas correspondientes con normalidad. Archivar solo limpia la Lista de Abordaje.</Li>
+              <Li>Para volver a verlo en la lista activa, abrilo desde la solapa <strong>Archivo</strong> y tocá <strong>Desarchivar</strong>.</Li>
+              <Li><strong>Desarchivar varios a la vez:</strong> dentro de la solapa Archivo aparece una columna de checkbox al inicio de cada fila. Tildá los prospects que quieras (o usá el checkbox del header para tildar todos los visibles) y arriba aparece un botón <strong>"Desarchivar N"</strong> al lado de Filtros. Tocálo y todos vuelven a Abordaje de un saque.</Li>
             </ul>
           </Section>
 
