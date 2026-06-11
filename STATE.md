@@ -1,6 +1,6 @@
 # Planificador de Abordaje IFS — Estado actual
 
-Estado vigente al 2026-05-21. Para la historia completa del proyecto y las
+Estado vigente al 2026-06-11. Para la historia completa del proyecto y las
 fases de migración ver `CHANGELOG.md`.
 
 ## Stack
@@ -36,6 +36,12 @@ fases de migración ver `CHANGELOG.md`.
   con el resto del diseño (eliminar prospect, eliminar tarea, eliminar
   agenda, reordenar columna, agregar columna).
 - Footer sticky en todos los modales (Guardar/Cancelar siempre visibles).
+- Compañía por tarea: click derecho en card del Kanban asigna aseguradora,
+  logo en la esquina de la card (solo desktop; mobile pendiente).
+- Pestañas Lista/Tareas/Calendario sticky bajo el header al scrollear.
+- Solapa "Archivo" en Lista: archivar prospects sin perder info.
+- Admin: panel de pagos de mantenimiento mes × agente con export PDF;
+  FAB "Abrir Claude Desktop" para mega-admin.
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
@@ -49,15 +55,20 @@ fases de migración ver `CHANGELOG.md`.
   puede operar también sobre el Google Calendar personal del principal.
 
 ## Edge Functions
+Código fuente versionado en `supabase/functions/` desde 2026-06-11
+(idéntico al remoto). Modificar siempre el archivo local y deployar;
+detalle en `supabase/README.md`.
+
 | Función | Versión | Propósito |
 |---|---|---|
-| `gcal-events` | v11 | Calendar de Google (list/create/update/delete/listCalendars/unlink). Soporta DWD, OAuth user-level y modo asistente. |
-| `gcal-oauth-init` | v1 | Inicia flujo OAuth para gmail externos. Firma state con HMAC. |
-| `gcal-oauth-callback` | v1 | Recibe code de Google, guarda refresh_token, redirige a la app. |
-| `create-user` | v9 | Alta de usuarios (admin). |
-| `delete-user` | v7 | Baja de usuarios (megaadmin only). |
-| `update-user-email` | v4 | Cambio de email (admin). |
-| `update-user-password` | v6 | Cambio de password (admin). |
+| `gcal-events` | v12 | Calendar de Google (list/create/update/delete/listCalendars/unlink). Soporta DWD, OAuth user-level y modo asistente. |
+| `gcal-events-admin` | v2 | Acceso admin al calendar de cualquier user (auth por service-role, sin JWT). Para MCP/Claude. |
+| `gcal-oauth-init` | v2 | Inicia flujo OAuth para gmail externos. Firma state con HMAC. |
+| `gcal-oauth-callback` | v2 | Recibe code de Google, guarda refresh_token, redirige a la app. |
+| `create-user` | v10 | Alta de usuarios (admin). |
+| `delete-user` | v8 | Baja de usuarios (megaadmin only). |
+| `update-user-email` | v5 | Cambio de email (admin). |
+| `update-user-password` | v7 | Cambio de password (admin). |
 
 Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 
@@ -139,11 +150,34 @@ agente/admin/asistente.
   comentarios con autor/timestamp). Fase 3D conceptual.
 - Managers/niveles jerárquicos. Descartado por riesgo de filtración RLS.
 
+## Backups de la base de datos (desde 2026-06-11)
+- **Qué**: dump semanal de Supabase (schemas `public`, `private`, `comisiones`,
+  `patrimoniales`, `auth`, `supabase_migrations`) comprimido a
+  `iCloud Drive → IFS/Backups Abordaje DB/ifs-db_YYYY-MM-DD.sql.gz`.
+  Retención: 90 días. Log en `backup.log` de esa carpeta.
+- **Cómo**: `scripts/backup-db.sh` (fuente en el repo; la copia que ejecuta
+  launchd vive en `~/bin/abordaje-backup-db.sh` — si se edita la del repo,
+  re-copiarla ahí). Programado con launchd
+  (`~/Library/LaunchAgents/com.ifs.abordaje-db-backup.plist`), lunes 10:00;
+  si la Mac está dormida corre al despertar.
+- **Credenciales**: password de la DB en el Keychain de macOS, item
+  `"Abordaje DB Backup"` (account `abordaje`). `pg_dump` instalado vía
+  `brew install libpq` (`/opt/homebrew/opt/libpq/bin/pg_dump`). Conexión por
+  session pooler IPv4 (`aws-1-sa-east-1.pooler.supabase.com:5432`).
+- **Nota TCC/macOS**: launchd solo tiene permiso sobre la carpeta iCloud para
+  bash/cp/cat/rm (no gzip/find) — por eso el script trabaja en staging local
+  y copia el .gz final con `cp`. No "simplificar" el script revirtiendo esto.
+- **Restaurar**: `gunzip -c ifs-db_FECHA.sql.gz | psql "<DB_URL con password>"`
+  contra un proyecto limpio (o pedirle a Claude que lo haga). Correr el backup
+  a mano: `bash ~/bin/abordaje-backup-db.sh`.
+
 ## Cómo retomar en otra sesión
 1. Leé este STATE.md primero.
 2. Para detalle histórico de cada fase, `CHANGELOG.md`.
 3. El index.html del frontend es la única fuente del cliente.
-4. Las edge functions live en Supabase remoto; se gestionan via MCP o
-   `supabase functions deploy`.
-5. Migrations recientes en `supabase/migrations/` (las viejas viven solo
-   en el remoto de Supabase).
+4. Las edge functions están versionadas en `supabase/functions/` (fuente);
+   se deployan via MCP o `supabase functions deploy`. Nunca editar solo
+   el remoto.
+5. Migrations recientes en `supabase/migrations/`; el schema completo está
+   en `supabase/schema_baseline.sql` (las migrations viejas viven solo en
+   el remoto de Supabase).

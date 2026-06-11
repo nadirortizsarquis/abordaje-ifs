@@ -956,3 +956,73 @@ stacking context y el `position: fixed` no se comportaba como tal.
 Fix: `ReactDOM.createPortal(..., document.body)`. El popover se monta
 fuera del árbol de la card, en `document.body`, y mantiene su position
 fixed sin que ningún padre lo afecte.
+
+---
+
+# Sesiones 2026-05-29 a 2026-06-03 (reconstruido desde git log)
+
+Entradas no registradas en su momento; detalle en los commits.
+
+- **2026-05-29** — UX: pestañas Lista/Tareas/Calendario sticky bajo el
+  header al scrollear.
+- **2026-06-02** — Admin: FAB flotante "Abrir Claude Desktop" para
+  mega-admin · panel de pagos de mantenimiento mes × agente con export
+  PDF · fix: ordenar tildados antes que no-tildados, no cerrar panel
+  con Escape.
+- **2026-06-03** — Lista: solapa "Archivo" para archivar prospects sin
+  perder info.
+
+---
+
+# Sesión 2026-06-11 — Auditoría general + Paquete 1 ("que no se pierda nada")
+
+## Auditoría general del proyecto
+
+Auditoría de solo lectura con 4 agentes en paralelo (seguridad, calidad de
+código, performance, repo/deploy) + advisors oficiales de Supabase.
+Resultado: lógica interna de calidad alta (RLS, rollbacks, timezone,
+cleanups), sin secretos en el repo ni vectores XSS. Los hallazgos
+importantes son operativos/estructurales, organizados en 5 paquetes:
+
+1. **Que no se pierda nada** (ejecutado en esta sesión, ver abajo).
+2. **Producción estable**: pinear CDNs (Babel carga *latest*), Cache-Control
+   no-cache + APP_VERSION, fix TDZ de `tick` (~línea 5379), paginación de
+   queries (Supabase trunca a 1.000 filas en silencio — `contactos` rompe
+   primero), smoke test pre-push.
+3. **Performance**: precompilar Babel en build de Railway (hoy compila
+   ~470 KB de JSX en cada carga), doble fetch de gcal al entrar a
+   Calendario, rango +10 años en sync de gestiones, RLS initplan
+   (42 policies re-evalúan auth.uid() por fila).
+4. **Pulido UX/código**: doble-submit en modales diarios, errores
+   silenciosos de carga, "prospect"/"prospecto" mezclados en copy, 6
+   confirm() nativos restantes, ~120 líneas de código muerto, htmlFor
+   en labels, focus trap en modales.
+5. **Refactor estructural**: App (~2.034 líneas) → custom hooks
+   (`useGcalSync`, `useProspectos`, `useTareasKanban`, `useNotificaciones`,
+   `useSettings`); eventual split del single-file con build step.
+
+Hallazgos de seguridad puntuales pendientes: cualquier admin puede resetear
+password/email del megaadmin (falta guard en `update-user-password`/`-email`),
+CORS `*` en edge functions, comparación no constante del service-role en
+`gcal-events-admin`, Leaked Password Protection apagada.
+
+## Paquete 1 ejecutado
+
+- **Backup semanal automático de la DB**: `scripts/backup-db.sh` (pg_dump
+  vía session pooler, password en Keychain) → iCloud
+  `IFS/Backups Abordaje DB/`, retención 90 días, launchd lunes 10:00.
+  Primer backup verificado (40 tablas, integridad OK). Detalle y nota
+  TCC/macOS en STATE.md.
+- **Edge functions versionadas**: las 8 funciones descargadas del remoto
+  a `supabase/functions/` (incluida `gcal-events-admin`, que no estaba
+  documentada). Convención nueva: editar local → deployar.
+- **Schema baseline**: `supabase/schema_baseline.sql` (schema-only de
+  public/private/comisiones/patrimoniales, 16 tablas + 47 policies) —
+  reemplaza la historia de migrations viejas que solo vivía en el remoto.
+- **`.gcp-sa-key.json` local borrado**: la clave DWD vive como secret
+  `GOOGLE_SA_KEY` en Supabase (verificado); la copia en iCloud era
+  redundante y nunca estuvo commiteada.
+- **Docs al día**: STATE.md (estado 2026-06-11, features de junio, tabla
+  de edge functions con versiones reales, sección Backups) y
+  `supabase/README.md` (referencia rota a NOTAS-GCAL-REFACTOR.md
+  reemplazada por el baseline).
