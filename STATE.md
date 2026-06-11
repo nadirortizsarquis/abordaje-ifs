@@ -151,15 +151,18 @@ agente/admin/asistente.
 - Managers/niveles jerárquicos. Descartado por riesgo de filtración RLS.
 
 ## Backups de la base de datos (desde 2026-06-11)
-- **Qué**: dump semanal de Supabase (schemas `public`, `private`, `comisiones`,
+- **Contexto**: el proyecto Supabase está en plan **Free** (verificado
+  2026-06-11) — Supabase NO hace backups propios. Este backup es la única
+  copia de la data; no desactivarlo sin reemplazo.
+- **Qué**: dump diario de Supabase (schemas `public`, `private`, `comisiones`,
   `patrimoniales`, `auth`, `supabase_migrations`) comprimido a
   `iCloud Drive → IFS/Backups Abordaje DB/ifs-db_YYYY-MM-DD.sql.gz`.
   Retención: 90 días. Log en `backup.log` de esa carpeta.
 - **Cómo**: `scripts/backup-db.sh` (fuente en el repo; la copia que ejecuta
   launchd vive en `~/bin/abordaje-backup-db.sh` — si se edita la del repo,
   re-copiarla ahí). Programado con launchd
-  (`~/Library/LaunchAgents/com.ifs.abordaje-db-backup.plist`), lunes 10:00;
-  si la Mac está dormida corre al despertar.
+  (`~/Library/LaunchAgents/com.ifs.abordaje-db-backup.plist`), todos los
+  días 10:00; si la Mac está dormida corre al despertar.
 - **Credenciales**: password de la DB en el Keychain de macOS, item
   `"Abordaje DB Backup"` (account `abordaje`). `pg_dump` instalado vía
   `brew install libpq` (`/opt/homebrew/opt/libpq/bin/pg_dump`). Conexión por
