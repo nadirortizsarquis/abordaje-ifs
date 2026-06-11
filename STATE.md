@@ -12,6 +12,7 @@ fases de migración ver `CHANGELOG.md`.
   user-level para gmail externos.
 - **Deploy**: Railway, auto-deploy en push a `main` del repo
   `nadirortizsarquis/abordaje-ifs`.
+- **URL de producción**: https://abordaje.broker-ifs.com
 
 ## Features activas
 - Lista de abordaje (prospectos) con filtros por estado y fecha.
