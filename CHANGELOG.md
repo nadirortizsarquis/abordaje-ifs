@@ -1057,3 +1057,30 @@ user con los volúmenes actuales de datos.
   pineada): compila el bloque text/babel y falla si hay error de sintaxis.
   Hook pre-push local instalado; procedimiento de rollback documentado en
   STATE.md.
+
+---
+
+# Sesión 2026-06-11 (cont. 2) — Paquete 3: performance
+
+Probado por Nadir en local contra la base real antes del push: arranque
+notablemente más rápido, todas las vistas idénticas, consola limpia.
+
+- **Precompilación en build** (`scripts/build.mjs`): npm run build compila
+  el bloque JSX con @babel/standalone 7.29.7 + presets react/env (la misma
+  config que aplicaba el browser → JS resultante idéntico) y sirve
+  public/index.html sin Babel CDN. El browser se ahorra ~3 MB de descarga
+  de Babel y 1,5-15 s de compilación EN CADA visita. El index.html del repo
+  no cambia de formato (single-file, editable, corre sin build).
+  @babel/standalone pasó de devDependencies a dependencies para garantizar
+  que Railway lo tenga en el build.
+- **Fix doble fetch de Google Calendar**: el refresh por cambio de pestaña
+  bumpeaba gcalReloadKey justo cuando CalendarioView recién montaba y ya
+  fetcheaba por su cuenta → dos invocaciones idénticas de gcal-events por
+  cada entrada a la pestaña. Ahora el bump se saltea al entrar a calendario.
+- **Cache stale-while-revalidate del calendario** (`_gcalViewCache`, Map a
+  nivel módulo, key timeMin|timeMax): al volver a la pestaña Calendario (o a
+  una semana ya visitada) los eventos se pintan al instante desde el cache
+  mientras el fetch a Google refresca en background. Se invalida si la edge
+  function responde skip (token revocado). Antes: calendario vacío durante
+  el round-trip completo a Google en cada entrada.
+- APP_VERSION → 2026-06-11.2.

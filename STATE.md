@@ -43,6 +43,9 @@ fases de migración ver `CHANGELOG.md`.
 - Solapa "Archivo" en Lista: archivar prospects sin perder info.
 - Admin: panel de pagos de mantenimiento mes × agente con export PDF;
   FAB "Abrir Claude Desktop" para mega-admin.
+- Calendario con cache stale-while-revalidate (`_gcalViewCache`): al volver
+  a la pestaña pinta al instante los eventos de la última visita y refresca
+  Google en background.
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
@@ -152,6 +155,13 @@ agente/admin/asistente.
 - Managers/niveles jerárquicos. Descartado por riesgo de filtración RLS.
 
 ## Deploy y validación (desde 2026-06-11)
+- **Build con precompilación** (`scripts/build.mjs`): `npm run build` extrae
+  el bloque JSX de index.html, lo compila con @babel/standalone 7.29.7
+  (presets react+env — la misma config que aplicaba el browser) y escribe
+  `public/index.html` SIN Babel CDN. El index.html del repo sigue siendo
+  single-file editable y funciona sin build (conserva su script de Babel);
+  lo que se sirve es el artefacto precompilado. Para probar local:
+  `npm run build && npm start` (rebuildear tras cada edición).
 - **CDNs pineados a versión exacta** en index.html (React 18.3.1, Babel
   standalone 7.29.7, supabase-js 2.108.1). Un release nuevo de esas libs ya
   no puede romper producción solo; para actualizar, cambiar la versión a

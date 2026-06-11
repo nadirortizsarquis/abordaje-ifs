@@ -3269,7 +3269,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-11';
+const APP_VERSION = '2026-06-11.2';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -5542,7 +5542,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       try {
         const s = await storage.loadState(viewAs?.id);
         if (!cancel) setState(s);
-        if (isPilot) bumpGcal();
+        // No bumpear al ENTRAR a calendario: CalendarioView recién se montó
+        // y ya fetchea Google por su cuenta — el bump duplicaba ese fetch.
+        if (isPilot && view !== 'calendario') bumpGcal();
         // Si soy asistente, también refrescamos el profile del principal
         // — pudo haber cambiado shares_calendar_with_assistant o gcal_enabled
         // mientras yo navegaba.
@@ -8525,6 +8527,14 @@ function formatLargeDate(d) {
 }
 
 // ── CALENDARIO VIEW ───────────────────────────────────────────
+// Cache de eventos de Google por rango (key `timeMin|timeMax`). Vive a nivel
+// módulo para sobrevivir al desmontaje de CalendarioView al cambiar de
+// pestaña: al volver al calendario se pintan AL INSTANTE los eventos de la
+// última vez, y el fetch a Google los refresca en silencio en background
+// (stale-while-revalidate). Sin esto, cada entrada a la pestaña mostraba
+// un calendario vacío durante el round-trip completo a Google.
+const _gcalViewCache = new Map();
+
 function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings, calendarColors, onSetCalendarColor, onResetCalendarColors }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
@@ -8541,7 +8551,15 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
   useEffect(() => {
     if (!isPilot) return;
     let cancelled = false;
-    setGcalLoading(true);
+    const cacheKey = `${timeMin}|${timeMax}`;
+    const cached = _gcalViewCache.get(cacheKey);
+    if (cached) {
+      // Hay datos de una visita anterior: pintarlos ya, sin spinner. El
+      // fetch de abajo corre igual y refresca en silencio.
+      setGcalEvents(cached);
+    } else {
+      setGcalLoading(true);
+    }
     gcalApi.list(timeMin, timeMax)
       .then(evts => {
         if (cancelled) return;
@@ -8551,10 +8569,12 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
         if (evts === null) {
           setGcalDisconnected(true);
           setGcalEvents([]);
+          _gcalViewCache.delete(cacheKey);
           return;
         }
         setGcalDisconnected(false);
         setGcalEvents(evts);
+        _gcalViewCache.set(cacheKey, evts);
         // Propaga al padre los actor_ids encontrados en los eventos de Google
         // — App los necesita para que ActorStar muestre el nombre real del
         // asistente (en lugar del fallback "asistente") cuando creó el evento.
