@@ -150,6 +150,25 @@ agente/admin/asistente.
   comentarios con autor/timestamp). Fase 3D conceptual.
 - Managers/niveles jerárquicos. Descartado por riesgo de filtración RLS.
 
+## Deploy y validación (desde 2026-06-11)
+- **CDNs pineados a versión exacta** en index.html (React 18.3.1, Babel
+  standalone 7.29.7, supabase-js 2.108.1). Un release nuevo de esas libs ya
+  no puede romper producción solo; para actualizar, cambiar la versión a
+  mano y probar.
+- **`APP_VERSION`** (constante en index.html, visible en el footer del
+  login). Bumpear en cada deploy — sirve para saber qué versión ve un user.
+- **Cache**: `serve.json` manda `Cache-Control: no-cache` para index.html →
+  el browser revalida en cada carga y los deploys impactan al instante.
+- **Smoke test**: `npm run check` compila el bloque JSX con el mismo Babel
+  del browser; atrapa errores de sintaxis (pantalla blanca) antes de
+  pushear. Hook local `.git/hooks/pre-push` lo corre automático (el hook
+  no se versiona: reinstalar con `printf '#!/bin/sh\nnpm run check\n' >
+  .git/hooks/pre-push && chmod +x .git/hooks/pre-push`).
+- **Rollback si un push rompe producción**: `git revert HEAD && git push`
+  (o en Railway: Deployments → redeploy del deploy anterior).
+- **Límite de 1000 filas**: el helper `selectAllRows()` en index.html pagina
+  todas las queries de listas — no volver a queries directas sin .range().
+
 ## Backups de la base de datos (desde 2026-06-11)
 - **Contexto**: el proyecto Supabase está en plan **Free** (verificado
   2026-06-11) — Supabase NO hace backups propios. Este backup es la única

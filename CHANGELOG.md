@@ -1026,3 +1026,34 @@ CORS `*` en edge functions, comparación no constante del service-role en
   de edge functions con versiones reales, sección Backups) y
   `supabase/README.md` (referencia rota a NOTAS-GCAL-REFACTOR.md
   reemplazada por el baseline).
+
+---
+
+# Sesión 2026-06-11 (cont.) — Paquete 2: producción estable
+
+Cinco cambios quirúrgicos en index.html + infra de validación. Verificado:
+`npm run check` OK (JSX compila con el Babel real), build local servido y
+header de cache confirmado con curl. Sin cambios de comportamiento para el
+user con los volúmenes actuales de datos.
+
+- **CDNs pineados**: react/react-dom 18.3.1, @babel/standalone 7.29.7,
+  supabase-js 2.108.1 (las versiones exactas que producción servía hoy —
+  cero cambio de runtime). Antes Babel cargaba *latest* en cada visita:
+  un release con breaking change rompía producción sin tocar nada.
+- **Fix TDZ de `tick`**: el useMemo de notificaciones usaba `tick` en deps
+  ~50 líneas antes de su declaración. Funcionaba solo porque preset-env
+  convierte const→var. Movido arriba; deja el código listo para un futuro
+  build step sin preset-env.
+- **`selectAllRows()`**: helper de paginación en la capa de datos. Supabase
+  trunca a 1.000 filas sin error; las 6 queries de loadState +
+  listTareasArchivadas ahora paginan con .range() hasta agotar. Con <1.000
+  filas hace exactamente 1 request (comportamiento idéntico al actual).
+- **`APP_VERSION`** ('2026-06-11') visible en el footer del login.
+  Convención: bumpear en cada deploy.
+- **Cache-Control no-cache** para index.html vía `serve.json` (el build lo
+  copia a public/). Antes el caching heurístico podía servir versiones
+  viejas días después de un deploy.
+- **`npm run check`** (scripts/check.mjs + devDependency @babel/standalone
+  pineada): compila el bloque text/babel y falla si hay error de sintaxis.
+  Hook pre-push local instalado; procedimiento de rollback documentado en
+  STATE.md.

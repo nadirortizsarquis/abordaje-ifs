@@ -3254,16 +3254,22 @@
 </div>
 
 <!-- ─────────────────── React + Babel + Supabase + Export libs ─────────────────── -->
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<!-- Versiones pineadas exactas (2026-06-11): un release nuevo de estas libs ya no
+     puede romper produccion sin un cambio deliberado aca. Babel sin version
+     cargaba "latest" en cada visita. -->
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.108.1/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 
 <!-- ─────────────────── CAPA DE DATOS (Supabase) ─────────────────── -->
 <script>
+// Versión visible de la app (footer del login). Bumpear en cada deploy:
+// permite saber qué versión está viendo un user cuando reporta un problema.
+const APP_VERSION = '2026-06-11';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -3432,6 +3438,22 @@ const auth = {
 };
 
 // ── Storage Supabase ───────────────────────────────────────────
+// Supabase/PostgREST trunca cada request a 1000 filas SIN avisar (Max Rows).
+// Este helper pagina con .range() hasta agotar la tabla, para que las listas
+// (sobre todo contactos/gestiones, que crecen sin tope) nunca se corten en
+// silencio. buildQuery debe devolver una query NUEVA en cada llamada.
+// Devuelve { data, error } con la misma forma que una query simple.
+async function selectAllRows(buildQuery, pageSize = 1000) {
+  let all = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) return { data: from === 0 ? null : all, error };
+    all = all.concat(data || []);
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: all, error: null };
+}
+
 const storage = {
   async loadState(targetAgenteId) {
     const user = await auth.getUser();
@@ -3452,14 +3474,14 @@ const storage = {
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
-      sb.from('abordaje_prospectos').select(PROSPECTO_COLS).eq('agente_id', agenteId).order('created_at', { ascending: false }),
-      sb.from('abordaje_prospecto_contactos').select(CONTACTO_COLS).eq('agente_id', agenteId).order('created_at'),
-      sb.from('abordaje_tareas_columnas').select(COLUMNA_COLS).eq('agente_id', agenteId).order('orden'),
+      selectAllRows(() => sb.from('abordaje_prospectos').select(PROSPECTO_COLS).eq('agente_id', agenteId).order('created_at', { ascending: false })),
+      selectAllRows(() => sb.from('abordaje_prospecto_contactos').select(CONTACTO_COLS).eq('agente_id', agenteId).order('created_at')),
+      selectAllRows(() => sb.from('abordaje_tareas_columnas').select(COLUMNA_COLS).eq('agente_id', agenteId).order('orden')),
       // Excluimos archivadas del state principal — el buscador con "Incluir
       // archivadas" hace un fetch separado on-demand cuando el user lo activa.
-      sb.from('abordaje_tareas').select(TAREA_COLS).eq('agente_id', agenteId).eq('archivada', false).order('created_at'),
-      sb.from('abordaje_agendados').select(AGENDADO_COLS).eq('agente_id', agenteId).order('fecha'),
-      sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId)
+      selectAllRows(() => sb.from('abordaje_tareas').select(TAREA_COLS).eq('agente_id', agenteId).eq('archivada', false).order('created_at')),
+      selectAllRows(() => sb.from('abordaje_agendados').select(AGENDADO_COLS).eq('agente_id', agenteId).order('fecha')),
+      selectAllRows(() => sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId))
     ]);
 
     [prosRes, conRes, colRes, tarRes, agnRes, evcRes].forEach(r => {
@@ -3706,11 +3728,11 @@ const storage = {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
     const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
-    const { data, error } = await sb.from('abordaje_tareas')
+    const { data, error } = await selectAllRows(() => sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
       .eq('archivada', true)
-      .order('updated_at', { ascending: false });
+      .order('updated_at', { ascending: false }));
     if (error) { console.error('listTareasArchivadas:', error.message); return []; }
     return (data || []).map(mapTareaFromDB);
   },
@@ -5344,6 +5366,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Tick cada 60s para que las urgencias de notificaciones se recalculen
   // (ej. "Llamar en 15min" → cuando pasen los 15 min pasa de "Hoy" a "Vencido"
   // sin necesidad de recargar la página).
+  // DEBE declararse antes del useMemo de notificaciones que lo usa en deps
+  // (con const, usarlo antes de declarar es ReferenceError por TDZ).
+  const [tick, setTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setTick(t => t + 1), 60 * 1000);
     return () => clearInterval(id);
@@ -5421,7 +5446,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [nuevaAgendaSlot, setNuevaAgendaSlot] = useState(null);
   // Edición de agendas standalone (click en evento del calendar sin prospect)
   const [agendaEditando, setAgendaEditando] = useState(null);
-  const [tick, setTick] = useState(0);  // re-render cada 60s para recalcular urgencias
   const [tareaEditando, setTareaEditando] = useState(null);
   const [convertirTareaId, setConvertirTareaId] = useState(null);
   // Estado del modal de confirmación de reorden de columnas. Cuando el user
@@ -13048,7 +13072,7 @@ function LoginScreen({ onLoggedIn }) {
       </button>
       <div className="login-footer">
         <div className="login-footer-l">www.broker-ifs.com</div>
-        <div className="login-footer-r">Planificador de Abordaje</div>
+        <div className="login-footer-r">Planificador de Abordaje · v{APP_VERSION}</div>
       </div>
     </div>
   );

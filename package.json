@@ -4,11 +4,15 @@
   "private": true,
   "description": "Planificador de Abordaje IFS — Gestión de prospectos y agenda comercial (Supabase)",
   "scripts": {
-    "build": "mkdir -p public && cp index.html public/index.html && cp -R static/. public/",
-    "start": "serve public -l ${PORT:-3000} --no-clipboard"
+    "build": "mkdir -p public && cp index.html public/index.html && cp serve.json public/serve.json && cp -R static/. public/",
+    "start": "serve public -l ${PORT:-3000} --no-clipboard",
+    "check": "node scripts/check.mjs"
   },
   "dependencies": {
     "serve": "^14.2.0"
+  },
+  "devDependencies": {
+    "@babel/standalone": "7.29.7"
   },
   "engines": {
     "node": ">=18"
