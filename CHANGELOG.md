@@ -1183,3 +1183,20 @@ relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
   relevamiento quedaba tapado por el notch. Fix: `env(safe-area-inset-*)`
   en el head (top/left/right) y en el padding inferior del body (barrita
   del home), solo en el media query mobile. APP_VERSION → 2026-06-12.4.
+
+---
+
+# Sesión 2026-06-12 (cont. 4) — Instrucciones al día
+
+- Nueva sección **"3. Relevamiento de necesidades (formulario 8+1)"** en el
+  modal de Instrucciones (cómo abrirlo, los 8 bloques + nota libre, switch
+  de moneda, autosave, chips de avance, edad automática, PDF, uso mobile).
+  Secciones siguientes renumeradas 4-11; referencia cruzada "(ver sección
+  5)" → "(ver sección 6)" actualizada.
+- Sección Etiquetas: nota de que las gestiones del historial se editan o
+  eliminan con confirmación por modal.
+- Sección Calendario: ítem sobre la carga instantánea al volver a la
+  pestaña (cache + refresh en background).
+- Sección Atajos: tres ítems nuevos — botones "Guardando…" sin duplicados,
+  aviso de carga parcial, y versión visible en el login para reportes.
+- APP_VERSION → 2026-06-12.5.

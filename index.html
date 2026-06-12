@@ -3388,7 +3388,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-12.4';
+const APP_VERSION = '2026-06-12.5';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -13191,7 +13191,21 @@ function InstruccionesModal({ onClose }) {
             </ul>
           </Section>
 
-          <Section id="etiquetas" title="3. Etiquetas de abordaje (gestiones)">
+          <Section id="relevamiento" title="3. Relevamiento de necesidades (formulario 8+1)">
+            <p>Herramienta para relevar la situación del cliente en la reunión (o después), basada en el formulario <strong>"8+1"</strong> de relevamiento de necesidades. Queda guardado en la ficha del prospecto y es el insumo para armar la propuesta.</p>
+            <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
+              <Li>Abrí la ficha del prospecto → sección <strong>Relevamiento de necesidades</strong> → botón <strong>Iniciar relevamiento</strong> (dice "Abrir relevamiento" si ya tiene datos). Se abre a pantalla casi completa.</Li>
+              <Li><strong>8 bloques:</strong> grupo familiar, gastos de educación (por hijo y etapa), mantenimiento, vivienda, otras necesidades, ingresos y pensión, seguros de vida existentes e información adicional. Al final, el <strong>+1: nota libre</strong> para todo lo que no entre en ningún bloque.</Li>
+              <Li><strong>Switch ARS / USD</strong> arriba a la derecha: define la moneda de todos los costos del relevamiento de ese cliente.</Li>
+              <Li><strong>Se guarda solo</strong> al salir de cada campo — no hay botón Guardar. Podés cerrarlo a medio completar y retomarlo otro día, desde cualquier dispositivo.</Li>
+              <Li>No hace falta completarlo entero ni en orden: cada bloque muestra un chip <strong>"Con datos" / "Vacío"</strong> y el contador de arriba dice cuántos bloques relevaste.</Li>
+              <Li>En grupo familiar, la <strong>edad se calcula sola</strong> a partir de la fecha de nacimiento.</Li>
+              <Li><strong>Descargar PDF</strong> (arriba a la derecha del relevamiento): genera el relevamiento completo con membrete IFS — para llevarlo a la reunión, archivarlo o compartirlo con el equipo. Solo imprime los bloques con datos.</Li>
+              <Li>En el celular se abre a pantalla completa, con campos grandes — pensado para ir completándolo durante la reunión misma.</Li>
+            </ul>
+          </Section>
+
+          <Section id="etiquetas" title="4. Etiquetas de abordaje (gestiones)">
             <p>Cada vez que tenés contacto con un prospecto, le ponés una <strong>etiqueta</strong> que registra el resultado y mueve el prospecto al estado correcto:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Agendado</strong> → cita formal con fecha y hora. Aparece en el calendario en <strong>verde</strong>.</Li>
@@ -13199,11 +13213,11 @@ function InstruccionesModal({ onClose }) {
               <Li><strong>Llamar en 15 min / por la tarde / mañana / semana próxima / dentro de… / Fecha exacta</strong> → generan una <strong>tarea auto-generada</strong> en la columna "Abordar" con la fecha calculada. Aparecen en el Kanban (lila claro) y en el calendario (lila).</Li>
               <Li><strong>Rechazado</strong> → cierra el prospecto.</Li>
             </ul>
-            <p>Regla de color en el calendario: <strong>agendas en verde, tareas en lila, eventos de tu Google Calendar personal con su color de Google</strong>. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 5).</p>
-            <p>El historial completo de etiquetas se ve en el panel lateral del prospecto.</p>
+            <p>Regla de color en el calendario: <strong>agendas en verde, tareas en lila, eventos de tu Google Calendar personal con su color de Google</strong>. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 6).</p>
+            <p>El historial completo de etiquetas se ve en el panel lateral del prospecto. Cada gestión del historial se puede <strong>editar o eliminar</strong> (la eliminación pide confirmación en un modal).</p>
           </Section>
 
-          <Section id="tareas" title="4. Tareas y columnas (Kanban)">
+          <Section id="tareas" title="5. Tareas y columnas (Kanban)">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Crear una tarea desde el botón <strong>+ Nueva tarea</strong> en cualquier columna.</Li>
               <Li>Tareas pueden tener fecha y hora de recordatorio: si tienen, aparecen en el calendario.</Li>
@@ -13222,7 +13236,7 @@ function InstruccionesModal({ onClose }) {
             </ul>
           </Section>
 
-          <Section id="calendario" title="5. Calendario y Google Calendar">
+          <Section id="calendario" title="6. Calendario y Google Calendar">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Tres vistas: <strong>Mes</strong>, <strong>Semana</strong> y <strong>Hoy</strong>. El último elegido queda guardado al refrescar.</Li>
               <Li><strong>Click sobre un slot vacío</strong> abre el chooser "Nueva agenda / Nueva tarea". El slot snappea a tu duración por defecto configurada en Ajustes (default 60min).</Li>
@@ -13231,6 +13245,7 @@ function InstruccionesModal({ onClose }) {
               <Li><strong>Click sobre un evento de prospecto</strong> abre un mini-modal con dos opciones: "Abrir ficha del prospecto" o "Eliminar solo del calendar" (saca la cita pero deja la gestión registrada en el historial).</Li>
               <Li><strong>Eventos huérfanos del calendar</strong> (eventos Google viejos cuya tarea o prospecto ya no existe): al clickearlos se abre un modal específico que permite borrarlos del calendar sin tocar nada más.</Li>
               <Li><strong>Click derecho sobre cualquier tarjeta del calendar</strong> abre la paleta para asignarle un color custom (16 colores: 8 saturados + 8 claros). El color queda guardado y no toca tu Google Calendar.</Li>
+              <Li>Al volver a la pestaña Calendario (o a una semana ya visitada) los eventos <strong>aparecen al instante</strong>: se muestran los últimos conocidos y se actualizan solos en segundo plano contra Google.</Li>
             </ul>
 
             <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Botón "Calendarios"</strong> (en la barra de vistas Mes/Semana/Hoy):</p>
@@ -13248,12 +13263,12 @@ function InstruccionesModal({ onClose }) {
             </ul>
           </Section>
 
-          <Section id="notificaciones" title="6. Notificaciones">
+          <Section id="notificaciones" title="7. Notificaciones">
             <p>La campanita del header lista los contactos y agendas vencidas o de hoy. Click sobre un ítem te lleva directo al prospecto o tarea correspondiente.</p>
             <p>El contador rojo marca cuántos items urgentes hay (vencidos + de hoy).</p>
           </Section>
 
-          <Section id="asistente" title="7. Gestión con asistente">
+          <Section id="asistente" title="8. Gestión con asistente">
             <p>Si compartís tu cuenta con una asistente, podés asignarla en <strong>Ajustes → Usuarios → Es asistente de</strong>. Cuando ella entra al sistema, opera <strong>sobre tu workspace</strong>: ve tu lista de prospectos, tu Kanban y tu calendario, y todo lo que carga queda con tu agente_id.</p>
             <p>Para que veas qué tocó ella:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
@@ -13264,7 +13279,7 @@ function InstruccionesModal({ onClose }) {
             <p><strong>Google Calendar compartido:</strong> en <strong>Ajustes → Google Calendar</strong>, si tenés asistente asignada, aparece un toggle "Compartir mi Google Calendar con mi asistente". Si lo activás, ella ve y puede modificar todos los eventos de tu Google Calendar personal (no solo lo de Abordaje) cuando trabaja como tu asistente. Si lo apagás, solo ve lo que se carga desde Abordaje.</p>
           </Section>
 
-          <Section id="ajustes" title="8. Ajustes personales">
+          <Section id="ajustes" title="9. Ajustes personales">
             <p>En <strong>Ajustes</strong> (engranaje del header) configurás:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Horario laboral:</strong> rango horario por defecto del calendario.</Li>
@@ -13275,7 +13290,7 @@ function InstruccionesModal({ onClose }) {
             </ul>
           </Section>
 
-          <Section id="atajos" title="9. Atajos y recomendaciones">
+          <Section id="atajos" title="10. Atajos y recomendaciones">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Escape:</strong> cierra cualquier modal abierto.</Li>
               <Li>La vista actual de cada panel queda guardada localmente. Si refrescás, volvés a donde estabas.</Li>
@@ -13284,10 +13299,13 @@ function InstruccionesModal({ onClose }) {
               <Li>En el calendar, click derecho cambia el color de la tarjeta; mover una agenda con drag actualiza la fecha y hora.</Li>
               <Li>Al eliminar prospectos / tareas / agendas, la UI responde al instante y la limpieza con Google se hace en background — no esperás 5-15 segundos.</Li>
               <Li>Todos los formularios tienen los botones <strong>Guardar / Cancelar siempre visibles</strong> al pie, aunque el form sea largo.</Li>
+              <Li>Los botones Guardar se <strong>bloquean mientras guardan</strong> ("Guardando…") — tocar dos veces o apretar Enter dos veces no crea duplicados.</Li>
+              <Li>Si por internet inestable una parte de los datos no carga, aparece el aviso <strong>"No se pudieron cargar todos los datos — recargá la página"</strong>. No te asustes: nada se borró, recargá y listo.</Li>
+              <Li>Abajo a la derecha de la pantalla de login se ve la <strong>versión de la app</strong> (ej: v2026-06-12). Si reportás un problema, mencionala — ayuda a saber si estás viendo la última versión.</Li>
             </ul>
           </Section>
 
-          <Section id="instalar-mobile" title="10. Instalar en el celular (iOS / Android)">
+          <Section id="instalar-mobile" title="11. Instalar en el celular (iOS / Android)">
             <p>Podés usar Abordaje como una app instalada en el teléfono. Eso te da dos ventajas: <strong>el ícono queda en la pantalla de inicio</strong> y la sesión <strong>permanece abierta por meses</strong> (no tenés que loguearte cada vez — el FaceID / desbloqueo del celu hace de "candado").</p>
 
             <p style={{ marginTop: 10, marginBottom: 4 }}><strong>iPhone / iPad (Safari)</strong></p>
