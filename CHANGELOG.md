@@ -1174,3 +1174,12 @@ relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
   espaciados, quizás layout más cercano al folleto original de Life).
   La v1 es funcional para que los agentes empiecen a usarla.
 - APP_VERSION → 2026-06-12.3.
+
+---
+
+# Sesión 2026-06-12 (cont. 3) — Safe areas del modal de relevamiento en mobile
+
+- En PWA standalone (iOS, viewport-fit=cover) el header del modal de
+  relevamiento quedaba tapado por el notch. Fix: `env(safe-area-inset-*)`
+  en el head (top/left/right) y en el padding inferior del body (barrita
+  del home), solo en el media query mobile. APP_VERSION → 2026-06-12.4.

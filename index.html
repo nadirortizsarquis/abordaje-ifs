@@ -1389,7 +1389,17 @@
     .relev-row > .relev-span-mobile { grid-column: 1 / -1; }
     .relev-modal-backdrop { padding: 0; }
     .relev-modal { width: 100%; height: 100%; border-radius: 0; }
-    .relev-modal-body { padding: 12px 12px 22px; }
+    /* PWA con viewport-fit=cover: el contenido corre por debajo del notch y
+       de la barrita del home — el header y el final del form respetan las
+       zonas seguras del dispositivo. */
+    .relev-modal-head {
+      padding-top: calc(14px + env(safe-area-inset-top, 0px));
+      padding-left: max(16px, env(safe-area-inset-left, 0px));
+      padding-right: max(16px, env(safe-area-inset-right, 0px));
+    }
+    .relev-modal-body {
+      padding: 12px 12px calc(22px + env(safe-area-inset-bottom, 0px));
+    }
     .relev-pair { grid-template-columns: 1fr; gap: 0; }
     .relev-pair .relev-sect { margin-bottom: 12px; }
   }
@@ -3378,7 +3388,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-12.3';
+const APP_VERSION = '2026-06-12.4';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
