@@ -71,8 +71,8 @@ detalle en `supabase/README.md`.
 | `gcal-oauth-callback` | v2 | Recibe code de Google, guarda refresh_token, redirige a la app. |
 | `create-user` | v10 | Alta de usuarios (admin). |
 | `delete-user` | v8 | Baja de usuarios (megaadmin only). |
-| `update-user-email` | v5 | Cambio de email (admin). |
-| `update-user-password` | v7 | Cambio de password (admin). |
+| `update-user-email` | v6 | Cambio de email (admin). Guard: solo el megaadmin puede cambiar el email de otro admin. |
+| `update-user-password` | v8 | Cambio de password (admin). Guard: solo el megaadmin puede cambiar el password de otro admin. |
 
 Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 

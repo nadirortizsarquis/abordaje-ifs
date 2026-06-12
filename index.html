@@ -3269,7 +3269,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-11.2';
+const APP_VERSION = '2026-06-12';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -3484,8 +3484,12 @@ const storage = {
       selectAllRows(() => sb.from('abordaje_event_colors').select('event_key,color').eq('agente_id', agenteId))
     ]);
 
+    // Si alguna query falló, lo registramos Y lo marcamos en el state que
+    // devolvemos (cargaParcial) para que la UI avise — antes el user veía
+    // listas vacías en silencio y podía creer que perdió datos.
+    let cargaParcial = false;
     [prosRes, conRes, colRes, tarRes, agnRes, evcRes].forEach(r => {
-      if (r.error) console.error('loadState:', r.error.message);
+      if (r.error) { console.error('loadState:', r.error.message); cargaParcial = true; }
     });
 
     const eventColors = {};
@@ -3517,6 +3521,7 @@ const storage = {
 
     return {
       version: 2,
+      cargaParcial,
       prospectos: (prosRes.data || []).map(p => mapProspectoFromDB(p, conRes.data || [])),
       agendados: (agnRes.data || []).map(mapAgendadoFromDB),
       tareas: {
@@ -3899,32 +3904,10 @@ function buildGoogleEventBody({ startIso, durationMin = 60, summary, description
   return body;
 }
 
-// Helper: factory de prospecto en memoria (para handlers que necesitan un objeto antes de persistir)
-function newProspecto(input) {
-  return {
-    id: null, // se asigna en createProspecto
-    nombre: input.nombre || '',
-    telefono: input.telefono || '',
-    preferenciaContacto: input.preferenciaContacto || '',
-    detalle: input.detalle || '',
-    referente: input.referente || '',
-    observaciones: input.observaciones || '',
-    agenteId: null,
-    createdAt: null,
-    updatedAt: null,
-    contactos: [],
-    proximoContacto: null,
-    estado: 'nuevo'
-  };
-}
-
 // Calendario: usa storage por debajo
 const calendarApi = {
   async agendar(prospectoId, fechaISO, nota) {
     return await storage.createAgendado(prospectoId, fechaISO, nota);
-  },
-  async remover(id) {
-    return await storage.deleteAgendado(id);
   }
 };
 </script>
@@ -4145,23 +4128,6 @@ function describeProximo(iso) {
 }
 
 // ── PARSERS FLEXIBLES ──────────────────────────────────────────
-// Acepta dd/mm/aa, dd/mm/aaaa, d/m/aa, dd-mm-yyyy, dd.mm.aa, etc.
-function parseFechaFlex(input) {
-  if (!input) return null;
-  const s = String(input).trim();
-  if (!s) return null;
-  const parts = s.split(/[^\d]+/).filter(p => p.length > 0);
-  if (parts.length < 2) return null;
-  let [d, m, y] = parts.map(p => parseInt(p, 10));
-  if (!d || !m) return null;
-  if (y === undefined || isNaN(y)) y = new Date().getFullYear();
-  else if (y < 100) y = 2000 + y;
-  if (d < 1 || d > 31 || m < 1 || m > 12 || y < 1900 || y > 2200) return null;
-  const date = new Date(y, m-1, d);
-  if (date.getFullYear() !== y || date.getMonth() !== m-1 || date.getDate() !== d) return null;
-  return date;
-}
-
 // Acepta "9", "9:30", "930", "1430", "14:30", "14.30"
 function parseHoraFlex(input) {
   if (!input) return null;
@@ -4180,19 +4146,6 @@ function parseHoraFlex(input) {
 
 function dateToDDMMYY(d) {
   return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${String(d.getFullYear()).slice(-2)}`;
-}
-function isoToDDMMYY(iso) {
-  if (!iso) return '';
-  return dateToDDMMYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
-}
-// Variantes con año completo (4 dígitos) — necesarias para FechaTexto que
-// ahora usa formato dd/mm/aaaa para el tipeo predictivo segmentado.
-function dateToDDMMYYYY(d) {
-  return `${pad2(d.getDate())}/${pad2(d.getMonth()+1)}/${d.getFullYear()}`;
-}
-function isoToDDMMYY8(iso) {
-  if (!iso) return '';
-  return dateToDDMMYYYY(new Date(iso + (iso.length === 10 ? 'T00:00:00' : '')));
 }
 function dateToYMD(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
@@ -4447,34 +4400,6 @@ function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = 
 }
 
 // ── TAREAS HELPERS ──────────────────────────────────────────────
-function newTarea({ columnaId, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
-  const now = new Date().toISOString();
-  return {
-    id: 't_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
-    columnaId,
-    titulo: titulo || '',
-    fechaRecordatorio,
-    horaRecordatorio,
-    observacion: observacion || '',
-    createdAt: now,
-    updatedAt: now,
-  };
-}
-
-function newColumna(titulo) {
-  return {
-    id: 'col_' + Date.now() + '_' + Math.random().toString(36).slice(2,6),
-    titulo: titulo || 'Nueva columna',
-    orden: 999,
-  };
-}
-
-function reordenarColumnas(columnas) {
-  return [...columnas]
-    .sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999))
-    .map((c, i) => ({ ...c, orden: i }));
-}
-
 // ── EXPORT EXCEL / PDF ─────────────────────────────────────────
 // Logo IFS inline (mismo que login/header) — usado para renderizar en PDF
 const IFS_LOGO_SVG = `<?xml version="1.0" encoding="UTF-8"?>
@@ -5459,6 +5384,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Modal de confirmación al eliminar un prospect (reemplaza el confirm()
   // nativo del browser por un modal acorde al diseño del proyecto).
   const [pendingDeleteProspect, setPendingDeleteProspect] = useState(null);
+  // Confirmación al eliminar una gestión del historial (reemplaza el
+  // confirm() nativo). Guarda { prospectoId, contactoId }.
+  const [pendingDeleteContacto, setPendingDeleteContacto] = useState(null);
   // Evento huérfano del calendar (un evento Google con abordaje_tarea_id o
   // abordaje_prospect_id que no coincide con el state actual — típicamente
   // residuos de bugs viejos de sync). Al clickearlo, en lugar de abrir el
@@ -5513,6 +5441,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       try {
         const s = await storage.loadState(viewAs?.id);
         if (!cancel) setState(s);
+        if (s.cargaParcial) showToast('No se pudieron cargar todos los datos — recargá la página', { duration: 6000 });
       } catch (e) {
         console.error('loadState:', e);
         showToast('Error al cargar datos: ' + (e.message || e), { duration: 5000 });
@@ -5542,6 +5471,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       try {
         const s = await storage.loadState(viewAs?.id);
         if (!cancel) setState(s);
+        if (s.cargaParcial) showToast('No se pudieron cargar todos los datos — recargá la página', { duration: 6000 });
         // No bumpear al ENTRAR a calendario: CalendarioView recién se montó
         // y ya fetchea Google por su cuenta — el bump duplicaba ese fetch.
         if (isPilot && view !== 'calendario') bumpGcal();
@@ -5612,7 +5542,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )
     }));
     setSelectedId(null);
-    showToast(archivar ? 'Prospect archivado' : 'Prospect desarchivado');
+    showToast(archivar ? 'Prospecto archivado' : 'Prospecto desarchivado');
     try {
       await storage.updateProspecto(id, { archivado: !!archivar });
     } catch (e) {
@@ -5635,7 +5565,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )
     }));
     setArchivoSel(new Set());
-    showToast(idSet.size === 1 ? 'Prospect desarchivado' : `${idSet.size} prospects desarchivados`);
+    showToast(idSet.size === 1 ? 'Prospecto desarchivado' : `${idSet.size} prospectos desarchivados`);
     try {
       await Promise.all(Array.from(idSet).map(id => storage.updateProspecto(id, { archivado: false })));
     } catch (e) {
@@ -5787,7 +5717,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             // Si el caller pasó un título explícito (típicamente "Nueva agenda"
             // desde el calendar con form.titulo lleno), lo usamos en lugar del
             // default. Sino, "Cita — <nombre>".
-            summary: opts.summaryOverride || `Cita — ${prospect?.nombre || 'prospect'}`,
+            summary: opts.summaryOverride || `Cita — ${prospect?.nombre || 'prospecto'}`,
             description: contactoActivo.observacion || '',
             prospectId: prospectoId,
           }));
@@ -5939,7 +5869,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (guardReadOnly()) return;
     // opts.skipConfirm: para callers que ya confirmaron via modal propio
     // (ej. eliminar agenda desde el calendar). Evita doble confirmación.
-    if (!opts.skipConfirm && !confirm('¿Eliminar este registro de gestión?')) return;
+    // opts.confirmed: viene del modal ConfirmDeleteContactoModal.
+    if (!opts.skipConfirm && !opts.confirmed) {
+      setPendingDeleteContacto({ prospectoId, contactoId });
+      return;
+    }
     try {
       const prevState = state;
       const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
@@ -6053,7 +5987,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const handleMoveEvent = async (e, newStartIso) => {
     if (guardReadOnly()) return;
     if (e.kind === 'prospecto') {
-      showToast('Esta cita viene del prospect — editala desde su ficha', { duration: 3500 });
+      showToast('Esta cita viene del prospecto — editala desde su ficha', { duration: 3500 });
       return;
     }
     try {
@@ -7120,6 +7054,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         />
       )}
 
+      {pendingDeleteContacto && (
+        <ConfirmDeleteContactoModal
+          onCancel={() => setPendingDeleteContacto(null)}
+          onConfirm={() => {
+            const { prospectoId, contactoId } = pendingDeleteContacto;
+            setPendingDeleteContacto(null);
+            handleDeleteContacto(prospectoId, contactoId, { confirmed: true });
+          }}
+        />
+      )}
+
       {pendingDeleteTarea && (
         <ConfirmDeleteTareaModal
           tarea={pendingDeleteTarea}
@@ -7528,7 +7473,7 @@ function FilaProspecto({ prospecto, onClick, selectable = false, selected = fals
             checked={!!selected}
             onChange={() => onToggleSelect && onToggleSelect(prospecto.id)}
             onClick={(e) => e.stopPropagation()}
-            aria-label={`Seleccionar ${prospecto.nombre || 'prospect'}`}
+            aria-label={`Seleccionar ${prospecto.nombre || 'prospecto'}`}
           />
         </td>
       )}
@@ -7658,8 +7603,8 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
                 className="btn-danger"
                 onClick={() => onArchive(!prospecto.archivado)}
                 title={prospecto.archivado
-                  ? 'Volver este prospect a la lista de Abordaje'
-                  : 'Mover este prospect al archivo (mantiene tareas y citas)'}
+                  ? 'Volver este prospecto a la lista de Abordaje'
+                  : 'Mover este prospecto al archivo (mantiene tareas y citas)'}
               >
                 {prospecto.archivado ? 'Desarchivar' : 'Archivar'}
               </button>
@@ -8090,6 +8035,8 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
     detalle: '', referente: '', observaciones: ''
   });
   const [errors, setErrors] = useState({});
+  // Evita duplicados por doble Enter / doble tap mientras el save corre.
+  const [saving, setSaving] = useState(false);
   const slotLabel = slotInfo
     ? (() => {
         const d = slotInfo.date;
@@ -8101,17 +8048,19 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
   const upd = (k, v) => setForm(f => ({...f, [k]: v}));
 
   const submit = () => {
+    if (saving) return;
     const errs = {};
     if (!form.nombre.trim()) errs.nombre = 'Ingresá un nombre';
     if (Object.keys(errs).length > 0) { setErrors(errs); return; }
-    onSave({
+    setSaving(true);
+    Promise.resolve(onSave({
       nombre: form.nombre.trim(),
       telefono: form.telefono.trim(),
       preferenciaContacto: form.preferenciaContacto,
       detalle: form.detalle.trim(),
       referente: form.referente.trim(),
       observaciones: form.observaciones.trim()
-    });
+    })).finally(() => setSaving(false));
   };
 
   useEffect(() => {
@@ -8183,7 +8132,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
         </div>
         <div className="modal-footer">
           <button type="button" className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button type="submit" className="btn-primary">Guardar</button>
+          <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>
         </div>
       </form>
     </div>
@@ -8377,7 +8326,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     if (prospectoId) {
       kind = 'prospecto';
       const p = prospectos.find(x => x.id === prospectoId);
-      prospectoNombre = p?.nombre || '(prospect eliminado)';
+      prospectoNombre = p?.nombre || '(prospecto eliminado)';
       // Si el prospect ya no existe, es huérfano.
       if (!p) isOrphan = true;
     } else if (tareaId) {
@@ -9550,7 +9499,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                       // (i.e. evento no arrastrable como prospect, o no hay onMoveEvent).
                       if (!onMoveEvent || isProspect) onSelectEvent(e);
                     }}
-                    title={isProspect && onMoveEvent ? 'Cita agendada desde prospect — editala desde su ficha' : undefined}
+                    title={isProspect && onMoveEvent ? 'Cita agendada desde prospecto — editala desde su ficha' : undefined}
                   >
                     <div className="cal-event-inner">
                       <div className="event-time">{formatHHMM(e.fecha)} · {dur}min</div>
@@ -11770,6 +11719,8 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     compania: tarea.compania || null,
   });
   const [nuevaEntrada, setNuevaEntrada] = useState('');
+  // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
+  const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
 
   useEffect(() => {
@@ -11792,14 +11743,16 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
   };
 
   const guardar = () => {
-    onSave({
+    if (saving) return;
+    setSaving(true);
+    Promise.resolve(onSave({
       titulo: form.titulo.trim(),
       columnaId: form.columnaId,
       fechaRecordatorio: form.fechaRecordatorio || null,
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
-    });
+    })).finally(() => setSaving(false));
   };
 
   // Quick-date: setea fecha/hora y guarda en un solo tap.
@@ -11976,9 +11929,9 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
         </div>
         <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {!readOnly && <button type="button" className="btn-secondary" onClick={onConvertir}>Convertir a prospect</button>}
+            {!readOnly && <button type="button" className="btn-secondary" onClick={onConvertir}>Convertir a prospecto</button>}
             <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
-            {!readOnly && <button type="submit" className="btn-primary">Guardar</button>}
+            {!readOnly && <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>}
           </div>
         </div>
       </form>
@@ -12010,7 +11963,7 @@ function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="convertir-tarea-title">
         <div className="modal-header">
-          <h3 id="convertir-tarea-title">Convertir tarea a prospect</h3>
+          <h3 id="convertir-tarea-title">Convertir tarea a prospecto</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -12090,6 +12043,42 @@ function ConfirmColMoveModal({ movingName, targetName, position, onCancel, onCon
   );
 }
 
+// ── MODAL: CONFIRMAR ELIMINAR GESTIÓN ─────────────────────────
+// Reemplaza el confirm() nativo al eliminar un registro del historial.
+function ConfirmDeleteContactoModal({ onCancel, onConfirm }) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onCancel();
+      if (e.key === 'Enter') onConfirm();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel, onConfirm]);
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-contacto-title" style={{ maxWidth: 420 }}>
+        <div className="modal-header">
+          <h3 id="confirm-del-contacto-title">Eliminar gestión</h3>
+          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 6px', lineHeight: 1.5 }}>
+            ¿Eliminar este registro de gestión del historial?
+          </p>
+          <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0' }}>
+            Esta acción no se puede deshacer.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── MODAL: CONFIRMAR ELIMINAR PROSPECT ────────────────────────
 // Reemplaza el confirm() nativo del browser por un modal acorde al diseño.
 // Muestra contexto del prospect (nombre, gestiones, próxima cita) para que
@@ -12110,7 +12099,7 @@ function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm, onArchive }
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-prosp-title" style={{ maxWidth: 460 }}>
         <div className="modal-header">
-          <h3 id="confirm-del-prosp-title">Eliminar prospect</h3>
+          <h3 id="confirm-del-prosp-title">Eliminar prospecto</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
@@ -12135,7 +12124,7 @@ function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm, onArchive }
             </div>
           )}
           <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: '0', lineHeight: 1.5 }}>
-            Esta acción no se puede deshacer. Se elimina el prospect, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
+            Esta acción no se puede deshacer. Se elimina el prospecto, su historial completo de gestiones y la cita asociada del calendar (si la tiene).
           </p>
           {onArchive && (
             <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', margin: '10px 0 0', lineHeight: 1.5, fontStyle: 'italic' }}>
@@ -12152,7 +12141,7 @@ function ConfirmDeleteProspectModal({ prospect, onCancel, onConfirm, onArchive }
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-            <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar prospect</button>
+            <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar prospecto</button>
           </div>
         </div>
       </div>
@@ -12263,7 +12252,7 @@ function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalend
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <button type="button" className="btn-primary" onClick={onOpenProspect}
               style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
-              <strong style={{ display: 'block', marginBottom: 3 }}>Abrir ficha del prospect</strong>
+              <strong style={{ display: 'block', marginBottom: 3 }}>Abrir ficha del prospecto</strong>
               <span style={{ fontSize: '0.78rem', opacity: 0.92, fontWeight: 400 }}>
                 Si querés eliminar la gestión del historial, hacelo desde ahí. Eso también borra la agenda del calendar.
               </span>
@@ -12398,7 +12387,7 @@ function OrphanEventModal({ event, onCancel, onDelete }) {
   const titulo = event?.googleEvent?.summary || event?.label || '(sin título)';
   const motivo = event?.tareaId
     ? 'La tarea asociada ya no existe o apunta a otro evento.'
-    : 'El prospect asociado ya no existe.';
+    : 'El prospecto asociado ya no existe.';
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
@@ -12511,42 +12500,42 @@ function InstruccionesModal({ onClose }) {
           <Section id="arranque" title="1. Primer arranque · Vistas principales">
             <p>La app tiene tres pestañas centrales en la barra de pestañas:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-              <Li><strong>Lista de abordaje:</strong> tu pool de prospectos. Acá ves nombre, teléfono, referente, detalle, próximas gestiones y el estado actual. La pestaña incluye dos solapas: <strong>Abordaje</strong> (los prospects activos) y <strong>Archivo</strong> (los archivados — ver sección 2).</Li>
+              <Li><strong>Lista de abordaje:</strong> tu pool de prospectos. Acá ves nombre, teléfono, referente, detalle, próximas gestiones y el estado actual. La pestaña incluye dos solapas: <strong>Abordaje</strong> (los prospectos activos) y <strong>Archivo</strong> (los archivados — ver sección 2).</Li>
               <Li><strong>Tareas:</strong> tablero Kanban con columnas (Abordar / Pendiente / etc.) para organizar pendientes que no son una llamada formal pero querés tener anotados.</Li>
               <Li><strong>Calendario:</strong> vista Mes / Semana / Hoy con todos los eventos (citas, tareas con fecha, agendas standalone).</Li>
             </ul>
             <p>La búsqueda global del header encuentra prospectos, tareas y agendas por nombre, teléfono o título.</p>
           </Section>
 
-          <Section id="prospects" title="2. Crear, gestionar y archivar prospects">
+          <Section id="prospects" title="2. Crear, gestionar y archivar prospectos">
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-              <Li>Botón <strong>+ Nuevo prospect</strong> arriba a la derecha de la Lista: cargás nombre y datos de contacto. Solo el nombre es obligatorio.</Li>
-              <Li>Al hacer click en un prospect se abre un <strong>panel lateral</strong> con sus datos completos, historial de gestiones, observaciones y el botón para registrar una nueva gestión.</Li>
+              <Li>Botón <strong>+ Nuevo prospecto</strong> arriba a la derecha de la Lista: cargás nombre y datos de contacto. Solo el nombre es obligatorio.</Li>
+              <Li>Al hacer click en un prospecto se abre un <strong>panel lateral</strong> con sus datos completos, historial de gestiones, observaciones y el botón para registrar una nueva gestión.</Li>
               <Li>El campo <strong>Detalle</strong> es la descripción corta. El campo <strong>Observaciones</strong> es libre y largo: usalo para contexto de la conversación, recordatorios, etc.</Li>
               <Li>Filtrá la lista por estado (chip de arriba) o por fecha de próximo contacto.</Li>
             </ul>
 
-            <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Archivar prospects (liberar espacio sin perder información)</strong></p>
+            <p style={{ marginTop: 12, marginBottom: 4 }}><strong>Archivar prospectos (liberar espacio sin perder información)</strong></p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
-              <Li>En la Lista hay dos solapas al lado de Filtros: <strong>Abordaje</strong> y <strong>Archivo</strong>. La primera muestra los prospects activos; la segunda los archivados.</Li>
-              <Li>Para archivar un prospect, abrilo y tocá el botón <strong>Archivar</strong> que está al lado de "Eliminar prospecto". Sale de la lista de Abordaje y queda guardado en la solapa Archivo.</Li>
+              <Li>En la Lista hay dos solapas al lado de Filtros: <strong>Abordaje</strong> y <strong>Archivo</strong>. La primera muestra los prospectos activos; la segunda los archivados.</Li>
+              <Li>Para archivar un prospecto, abrilo y tocá el botón <strong>Archivar</strong> que está al lado de "Eliminar prospecto". Sale de la lista de Abordaje y queda guardado en la solapa Archivo.</Li>
               <Li>También podés archivar desde el popup de eliminar: al tocar "Eliminar prospecto" aparece un botón extra <strong>Archivar</strong> a la izquierda. Útil cuando arrancaste a borrar y preferís solo guardarlo.</Li>
-              <Li><strong>El archivo NO afecta tareas, recordatorios ni eventos del calendar:</strong> si el prospect tenía una cita agendada, un recordatorio o una tarjeta en el Kanban, todo eso sigue apareciendo en sus vistas correspondientes con normalidad. Archivar solo limpia la Lista de Abordaje.</Li>
+              <Li><strong>El archivo NO afecta tareas, recordatorios ni eventos del calendar:</strong> si el prospecto tenía una cita agendada, un recordatorio o una tarjeta en el Kanban, todo eso sigue apareciendo en sus vistas correspondientes con normalidad. Archivar solo limpia la Lista de Abordaje.</Li>
               <Li>Para volver a verlo en la lista activa, abrilo desde la solapa <strong>Archivo</strong> y tocá <strong>Desarchivar</strong>.</Li>
-              <Li><strong>Desarchivar varios a la vez:</strong> dentro de la solapa Archivo aparece una columna de checkbox al inicio de cada fila. Tildá los prospects que quieras (o usá el checkbox del header para tildar todos los visibles) y arriba aparece un botón <strong>"Desarchivar N"</strong> al lado de Filtros. Tocálo y todos vuelven a Abordaje de un saque.</Li>
+              <Li><strong>Desarchivar varios a la vez:</strong> dentro de la solapa Archivo aparece una columna de checkbox al inicio de cada fila. Tildá los prospectos que quieras (o usá el checkbox del header para tildar todos los visibles) y arriba aparece un botón <strong>"Desarchivar N"</strong> al lado de Filtros. Tocálo y todos vuelven a Abordaje de un saque.</Li>
             </ul>
           </Section>
 
           <Section id="etiquetas" title="3. Etiquetas de abordaje (gestiones)">
-            <p>Cada vez que tenés contacto con un prospect, le ponés una <strong>etiqueta</strong> que registra el resultado y mueve el prospect al estado correcto:</p>
+            <p>Cada vez que tenés contacto con un prospecto, le ponés una <strong>etiqueta</strong> que registra el resultado y mueve el prospecto al estado correcto:</p>
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Agendado</strong> → cita formal con fecha y hora. Aparece en el calendario en <strong>verde</strong>.</Li>
               <Li><strong>Contestador / Mensaje sin respuesta</strong> → quedó pendiente, sin fecha específica.</Li>
               <Li><strong>Llamar en 15 min / por la tarde / mañana / semana próxima / dentro de… / Fecha exacta</strong> → generan una <strong>tarea auto-generada</strong> en la columna "Abordar" con la fecha calculada. Aparecen en el Kanban (lila claro) y en el calendario (lila).</Li>
-              <Li><strong>Rechazado</strong> → cierra el prospect.</Li>
+              <Li><strong>Rechazado</strong> → cierra el prospecto.</Li>
             </ul>
             <p>Regla de color en el calendario: <strong>agendas en verde, tareas en lila, eventos de tu Google Calendar personal con su color de Google</strong>. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 5).</p>
-            <p>El historial completo de etiquetas se ve en el panel lateral del prospect.</p>
+            <p>El historial completo de etiquetas se ve en el panel lateral del prospecto.</p>
           </Section>
 
           <Section id="tareas" title="4. Tareas y columnas (Kanban)">
@@ -12557,7 +12546,7 @@ function InstruccionesModal({ onClose }) {
               <Li>Dentro del modal de tarea, hay <strong>botones rápidos</strong> de recordatorio: Hoy / Mañana / Próx semana / <strong>Quitar</strong>. "Quitar" (rojo sutil) saca la fecha y la cita del calendar pero deja la tarea viva en el Kanban como bitácora.</Li>
               <Li>Al <strong>eliminar</strong> una tarea con fecha, aparece un modal con dos opciones: "Solo sacar del calendar" (deja la tarea sin fecha) o "Borrar tarea completa".</Li>
               <Li><strong>Mover entre columnas</strong> con drag &amp; drop. En mobile, mantené presionado el card por medio segundo y arrastrá. En mobile las columnas no tienen tope de altura — se ven todas las tarjetas y scrolleás la pantalla entera.</Li>
-              <Li>Las etiquetas de prospect que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em> (lila claro para distinguirlas de las manuales).</Li>
+              <Li>Las etiquetas de prospecto que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em> (lila claro para distinguirlas de las manuales).</Li>
               <Li>Las columnas se pueden crear, renombrar y reordenar (reorden con confirmación). Las protegidas (Abordar) no se pueden borrar.</Li>
               <Li><strong>Asignar compañía a una tarea:</strong> podés taggear cualquier tarea con una de las 5 compañías (OLE, Investors Trust, Life Group, Best Doctors, Patrimonial). El logo aparece en la esquina superior derecha de la card. Útil para identificar de un vistazo a qué aseguradora corresponde cada venta pendiente. Dos formas de asignar:
                 <ul style={{ paddingLeft: 18, marginTop: 4 }}>
@@ -12574,8 +12563,8 @@ function InstruccionesModal({ onClose }) {
               <Li><strong>Click sobre un slot vacío</strong> abre el chooser "Nueva agenda / Nueva tarea". El slot snappea a tu duración por defecto configurada en Ajustes (default 60min).</Li>
               <Li><strong>Drag &amp; drop sobre eventos</strong> cambia la fecha/hora (en mobile, long-press para activar). Si el move falla por algún motivo, el evento vuelve a su posición original.</Li>
               <Li>Eventos vencidos aparecen tenues. La línea horizontal roja marca la hora actual en vista Semana/Hoy.</Li>
-              <Li><strong>Click sobre un evento de prospect</strong> abre un mini-modal con dos opciones: "Abrir ficha del prospect" o "Eliminar solo del calendar" (saca la cita pero deja la gestión registrada en el historial).</Li>
-              <Li><strong>Eventos huérfanos del calendar</strong> (eventos Google viejos cuya tarea o prospect ya no existe): al clickearlos se abre un modal específico que permite borrarlos del calendar sin tocar nada más.</Li>
+              <Li><strong>Click sobre un evento de prospecto</strong> abre un mini-modal con dos opciones: "Abrir ficha del prospecto" o "Eliminar solo del calendar" (saca la cita pero deja la gestión registrada en el historial).</Li>
+              <Li><strong>Eventos huérfanos del calendar</strong> (eventos Google viejos cuya tarea o prospecto ya no existe): al clickearlos se abre un modal específico que permite borrarlos del calendar sin tocar nada más.</Li>
               <Li><strong>Click derecho sobre cualquier tarjeta del calendar</strong> abre la paleta para asignarle un color custom (16 colores: 8 saturados + 8 claros). El color queda guardado y no toca tu Google Calendar.</Li>
             </ul>
 
@@ -12595,7 +12584,7 @@ function InstruccionesModal({ onClose }) {
           </Section>
 
           <Section id="notificaciones" title="6. Notificaciones">
-            <p>La campanita del header lista los contactos y agendas vencidas o de hoy. Click sobre un ítem te lleva directo al prospect o tarea correspondiente.</p>
+            <p>La campanita del header lista los contactos y agendas vencidas o de hoy. Click sobre un ítem te lleva directo al prospecto o tarea correspondiente.</p>
             <p>El contador rojo marca cuántos items urgentes hay (vencidos + de hoy).</p>
           </Section>
 
@@ -12628,7 +12617,7 @@ function InstruccionesModal({ onClose }) {
               <Li>Buscador global: escribí ≥2 caracteres y filtra prospectos, tareas, agendas <strong>y observaciones de gestiones</strong> a la vez. También busca en eventos de Google Calendar (rango -3m / +12m).</Li>
               <Li>Cambiar de pestaña entre Lista / Tareas / Calendario refresca los datos automáticamente (útil si tu asistente cargó algo en paralelo).</Li>
               <Li>En el calendar, click derecho cambia el color de la tarjeta; mover una agenda con drag actualiza la fecha y hora.</Li>
-              <Li>Al eliminar prospects / tareas / agendas, la UI responde al instante y la limpieza con Google se hace en background — no esperás 5-15 segundos.</Li>
+              <Li>Al eliminar prospectos / tareas / agendas, la UI responde al instante y la limpieza con Google se hace en background — no esperás 5-15 segundos.</Li>
               <Li>Todos los formularios tienen los botones <strong>Guardar / Cancelar siempre visibles</strong> al pie, aunque el form sea largo.</Li>
             </ul>
           </Section>
@@ -12806,6 +12795,8 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
   const [titulo, setTitulo] = useState(lines[0] || '');
   const [observacion, setObservacion] = useState(lines.slice(1).join('\n'));
   const [err, setErr] = useState('');
+  // Evita updates duplicados por doble tap en Guardar.
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
@@ -12823,7 +12814,9 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
     if (!y || !m || !d || isNaN(hh) || isNaN(mm)) { setErr('Fecha u hora inválida.'); return; }
     const local = new Date(y, m - 1, d, hh, mm, 0);
     const nota = titulo.trim() + (observacion.trim() ? `\n\n${observacion.trim()}` : '');
-    onSave({ fecha: local.toISOString(), nota });
+    if (saving) return;
+    setSaving(true);
+    Promise.resolve(onSave({ fecha: local.toISOString(), nota })).finally(() => setSaving(false));
   };
 
   return (
@@ -12864,7 +12857,7 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
           {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
           <div style={{ display: 'flex', gap: 10 }}>
             <button type="button" className="btn-secondary" onClick={onCancel}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
-            {!readOnly && <button type="submit" className="btn-primary">Guardar</button>}
+            {!readOnly && <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>}
           </div>
         </div>
       </form>
@@ -13255,7 +13248,13 @@ function AppShell() {
         url.hash = '';
         window.location.replace(url.toString());
       })
-      .catch(() => {});
+      .catch(e => {
+        // Antes este catch era silencioso: un fallo de red dejaba la app
+        // montada sin perfil y sin ningún aviso.
+        if (cancel) return;
+        console.error('profile fetch:', e);
+        showToast('No se pudo cargar tu perfil — revisá la conexión y recargá', { duration: 6000 });
+      });
     return () => { cancel = true; };
   }, [user?.id]);
 

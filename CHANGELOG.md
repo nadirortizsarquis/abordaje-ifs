@@ -1084,3 +1084,44 @@ notablemente más rápido, todas las vistas idénticas, consola limpia.
   function responde skip (token revocado). Antes: calendario vacío durante
   el round-trip completo a Google en cada entrada.
 - APP_VERSION → 2026-06-11.2.
+
+---
+
+# Sesión 2026-06-12 — Paquete 4: pulido UX, copy y seguridad
+
+## Frontend (index.html)
+- **Anti doble-submit** en los 3 modales de uso diario (NuevoProspectoModal,
+  TareaModal, EditAgendaModal): estado `saving`, botón deshabilitado con
+  "Guardando…" mientras corre el save. Evita prospectos/updates duplicados
+  por doble Enter o doble tap. (NuevaAgendaModal ya lo tenía.)
+- **Copy unificado "prospecto"**: eliminado el spanglish "prospect" de todo
+  el texto visible (toasts, títulos de modales, botones, tooltips,
+  aria-labels y las ~19 menciones del modal de Instrucciones). Los nombres
+  de variables/funciones internas no se tocaron.
+- **Aviso de carga parcial**: si alguna de las 6 queries del load falla,
+  loadState marca `cargaParcial` y la UI muestra toast "No se pudieron
+  cargar todos los datos — recargá la página". Antes: listas vacías en
+  silencio. Igual para el refresh por cambio de pestaña.
+- **Profile fetch sin catch vacío**: si falla la carga del perfil en
+  AppShell ahora hay console.error + toast con instrucción de recargar.
+- **Modal propio para eliminar gestión** (`ConfirmDeleteContactoModal`):
+  reemplaza el último confirm() nativo de flujo diario. Patrón
+  `pendingDeleteContacto` + `opts.confirmed` en handleDeleteContacto.
+  Quedan confirm() nativos solo en flujos de admin (aceptado).
+- **Código muerto eliminado** (~90 líneas): newProspecto, newTarea,
+  newColumna, reordenarColumnas, parseFechaFlex, isoToDDMMYY,
+  isoToDDMMYY8, dateToDDMMYYYY y calendarApi.remover — legacy de la era
+  localStorage / inputs de tipeo predictivo. Verificado 0 referencias.
+- APP_VERSION → 2026-06-12.
+
+## Edge functions (deployadas al remoto)
+- **Guard anti-escalada** en `update-user-password` (v8) y
+  `update-user-email` (v6): un admin NO puede cambiar el password/email de
+  OTRO admin — solo el megaadmin. Cierra el hallazgo de la auditoría
+  (un admin secundario podía resetear la cuenta del megaadmin y tomar
+  control). Cambiarse a sí mismo sigue permitido.
+
+## Pendiente del paquete 4 (consciente)
+- Accesibilidad fina: htmlFor en ~59 labels, focus trap en modales,
+  alternativa de teclado para drag & drop. Baja prioridad para el equipo
+  actual.
