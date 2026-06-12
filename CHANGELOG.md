@@ -1159,3 +1159,18 @@ relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
   Agencia/Fecha" no se duplican (ya están en la ficha / el user logueado);
   terminología "agente/asesor"; Esc cierra solo el modal (guard en el panel).
 - APP_VERSION → 2026-06-12.2.
+
+---
+
+# Sesión 2026-06-12 (cont. 2) — PDF del relevamiento (v1)
+
+- Botón "Descargar PDF" en el header del modal de relevamiento →
+  `exportarRelevamientoPDF(prospecto)`: A4 vertical, header navy con logo
+  IFS (reusa `loadIFSLogoPNG`), una tabla autoTable por bloque con datos,
+  bloques vacíos listados en gris al pie, moneda elegida en los headers de
+  costo, edad calculada impresa, nota libre como párrafo, footer
+  "Confidencial" + paginado. Archivo: `IFS_Relevamiento_<nombre>_<fecha>.pdf`.
+- **Pendiente declarado por Nadir: pulir el diseño del PDF** (tipografías,
+  espaciados, quizás layout más cercano al folleto original de Life).
+  La v1 es funcional para que los agentes empiecen a usarla.
+- APP_VERSION → 2026-06-12.3.

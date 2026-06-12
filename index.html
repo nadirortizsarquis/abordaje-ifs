@@ -3378,7 +3378,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-12.2';
+const APP_VERSION = '2026-06-12.3';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -7973,6 +7973,179 @@ function RelevamientoForm({ prospecto, readOnly, onUpdate }) {
   );
 }
 
+// PDF del relevamiento completo (A4 vertical, misma estética que los otros
+// exports IFS). Solo imprime los bloques con datos; los vacíos se listan al
+// pie. La moneda elegida va en los encabezados de costo.
+async function exportarRelevamientoPDF(prospecto) {
+  if (!window.jspdf || !window.jspdf.jsPDF) { alert('jsPDF library no cargada'); return; }
+  const relev = normalizeRelev(prospecto.relevamiento);
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+  const $ = relev.moneda;
+
+  let logo = null;
+  try { logo = await loadIFSLogoPNG(1200); } catch (e) { console.error('logo IFS:', e); }
+
+  const drawHeader = () => {
+    doc.setFillColor(30, 27, 75);
+    doc.rect(0, 0, pageW, 16, 'F');
+    if (logo) {
+      const aspect = logo.width / logo.height;
+      const logoH = 10, logoW = logoH * aspect;
+      doc.addImage(logo.dataURL, 'PNG', 10, 3, logoW, logoH);
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(255, 255, 255);
+    doc.text('Relevamiento de necesidades', pageW - 12, 10, { align: 'right' });
+  };
+  const fechaGen = new Date().toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' });
+
+  drawHeader();
+  doc.setFontSize(13);
+  doc.setTextColor(62, 64, 149);
+  doc.setFont('helvetica', 'bold');
+  doc.text(prospecto.nombre || '(sin nombre)', 12, 24);
+  doc.setFontSize(8);
+  doc.setTextColor(80, 80, 100);
+  doc.setFont('helvetica', 'normal');
+  const meta = [prospecto.telefono, `Moneda: ${$}`, `Generado: ${fechaGen}`].filter(Boolean).join('   ·   ');
+  doc.text(meta, 12, 29);
+
+  let y = 35;
+  const ensure = (need = 30) => { if (y > pageH - need) { doc.addPage(); drawHeader(); y = 24; } };
+  const sectionTitle = (txt) => {
+    ensure(34);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(62, 64, 149);
+    doc.text(txt, 12, y);
+    y += 2.5;
+  };
+  const tabla = (head, body, colStyles) => {
+    doc.autoTable({
+      startY: y,
+      head: [head],
+      body,
+      margin: { left: 12, right: 12, top: 20 },
+      styles: { fontSize: 8, cellPadding: 1.6, textColor: [40, 40, 60] },
+      headStyles: { fillColor: [0, 152, 218], textColor: 255, fontSize: 7.6, fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [245, 247, 251] },
+      columnStyles: colStyles || {},
+      didDrawPage: (d) => { if (d.pageNumber > 1) drawHeader(); },
+    });
+    y = doc.lastAutoTable.finalY + 7;
+  };
+  const val = v => (v == null ? '' : String(v).trim());
+  const fNac = s => { const d = s ? parseFechaLocal(s) : null; return d && !isNaN(d) ? d.toLocaleDateString('es-AR') : val(s); };
+  const sinDatos = [];
+
+  // 1 · Grupo familiar
+  const fam = relev.grupoFamiliar.filter(relevHasData);
+  if (fam.length) {
+    sectionTitle('1 · Grupo familiar');
+    tabla(['Parentesco', 'Apellido', 'Nombre', 'Fecha nac.', 'Edad'],
+      fam.map(m => [val(m.parentesco), val(m.apellido), val(m.nombre), fNac(m.fechaNac), relevEdad(m.fechaNac)]));
+  } else sinDatos.push('Grupo familiar');
+
+  // 2 · Educación
+  const hijos = relev.educacion.filter(relevHasData);
+  if (hijos.length) {
+    sectionTitle('2 · Gastos de educación');
+    hijos.forEach((h, i) => {
+      const filas = RELEV_ETAPAS
+        .map(et => ({ et, e: (h.etapas || {})[et.key] || {} }))
+        .filter(x => relevHasData(x.e))
+        .map(x => [x.et.label, val(x.e.costo), val(x.e.cuotas), val(x.e.anios)]);
+      if (!filas.length) return;
+      ensure(34);
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(40, 40, 60);
+      doc.text(`${i + 1}º hijo${h.nombre ? ` — ${h.nombre}` : ''}`, 12, y); y += 2;
+      tabla(['Etapa', `Costo mensual (${$})`, 'Cuotas anuales', 'Años restantes'], filas);
+    });
+  } else sinDatos.push('Gastos de educación');
+
+  // 3/4 · Mantenimiento y vivienda
+  [['mantenimiento', '3 · Gastos de mantenimiento'], ['vivienda', '4 · Gastos de vivienda']].forEach(([k, titulo]) => {
+    const filas = relev[k].filter(relevHasData);
+    if (filas.length) {
+      sectionTitle(titulo);
+      tabla(['Descripción', `Costo mensual (${$})`, 'Cantidad de años'],
+        filas.map(g => [val(g.descripcion), val(g.costo), val(g.anios)]));
+    } else sinDatos.push(titulo.slice(4));
+  });
+
+  // 5 · Otras necesidades
+  const nec = RELEV_NECESIDADES
+    .map(n => ({ n, d: relev.otrasNecesidades[n.key] || {} }))
+    .filter(x => relevHasData(x.d));
+  if (nec.length) {
+    sectionTitle('5 · Otras necesidades');
+    tabla(['Necesidad', `Costo (${$})`, 'Observaciones'],
+      nec.map(x => [x.n.label, val(x.d.costo), val(x.d.obs)]),
+      { 2: { cellWidth: 80 } });
+  } else sinDatos.push('Otras necesidades');
+
+  // 6 · Ingresos y pensión
+  const ing = RELEV_PERSONAS
+    .map(p => ({ p, d: relev.ingresos[p.key] || {} }))
+    .filter(x => relevHasData(x.d));
+  if (ing.length) {
+    sectionTitle('6 · Ingresos y pensión');
+    tabla(['', `Ingreso mensual (${$})`, 'Aportes últ. 36 m.', 'Sueldo br. prom. 60 m.', 'Régimen', 'Categoría'],
+      ing.map(x => [x.p.label, val(x.d.ingreso), val(x.d.aportes36), val(x.d.sueldo60), val(x.d.regimen), val(x.d.categoria)]));
+  } else sinDatos.push('Ingresos y pensión');
+
+  // 7 · Seguros de vida existentes
+  const seg = [['Titular', relev.segurosExistentes.titular], ['Cónyuge', relev.segurosExistentes.conyuge]]
+    .filter(s => val(s[1]));
+  if (seg.length) {
+    sectionTitle('7 · Seguros de vida existentes');
+    tabla(['Asegurado', 'Descripción'], seg.map(s => [s[0], val(s[1])]), { 1: { cellWidth: 140 } });
+  } else sinDatos.push('Seguros de vida existentes');
+
+  // 8 · Información adicional
+  const ad = relev.adicional;
+  if (relevHasData(ad)) {
+    sectionTitle('8 · Información adicional');
+    tabla(['', ''], [
+      [`Prima que puede afrontar (${$})`, val(ad.prima)],
+      ['Medio de pago', val(ad.medioPago)],
+      ['Frecuencia de pago', val(ad.frecuencia)],
+      ['Próxima reunión', val(ad.proximaReunion)],
+    ].filter(r => r[1]), { 0: { fontStyle: 'bold', cellWidth: 60 } });
+  } else sinDatos.push('Información adicional');
+
+  // +1 · Nota libre
+  if (val(relev.notaLibre)) {
+    sectionTitle('+1 · Nota libre');
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(40, 40, 60);
+    const lines = doc.splitTextToSize(relev.notaLibre, pageW - 24);
+    for (const ln of lines) { ensure(14); doc.text(ln, 12, y + 3); y += 4.2; }
+    y += 5;
+  }
+
+  if (sinDatos.length) {
+    ensure(16);
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(7.5); doc.setTextColor(130, 130, 150);
+    doc.text(`Bloques sin datos: ${sinDatos.join(' · ')}`, 12, y + 2);
+  }
+
+  // Footer con paginado en todas las páginas
+  const pages = doc.getNumberOfPages();
+  for (let i = 1; i <= pages; i++) {
+    doc.setPage(i);
+    doc.setFontSize(7.5); doc.setTextColor(120, 120, 140); doc.setFont('helvetica', 'normal');
+    doc.text('www.broker-ifs.com — Confidencial', 12, pageH - 6);
+    doc.text(`Página ${i} de ${pages}`, pageW - 12, pageH - 6, { align: 'right' });
+  }
+
+  const slug = (prospecto.nombre || 'prospecto').trim().replace(/[^\wáéíóúñÁÉÍÓÚÑ]+/g, '_').slice(0, 40);
+  doc.save(`IFS_Relevamiento_${slug}_${new Date().toISOString().slice(0, 10)}.pdf`);
+}
+
 // Modal a casi pantalla completa que contiene el formulario. Va por portal a
 // document.body porque .panel-side tiene transform (la animación de slide-in)
 // y un position:fixed adentro no se comportaría como fixed.
@@ -7990,7 +8163,10 @@ function RelevamientoModal({ prospecto, readOnly, onUpdate, onClose }) {
             <h3 id="relev-modal-title">Relevamiento de necesidades</h3>
             <div className="relev-modal-sub">{prospecto.nombre || '(sin nombre)'} · se guarda solo al completar cada campo</div>
           </div>
-          <button className="relev-modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button type="button" className="btn-secondary" onClick={() => exportarRelevamientoPDF(prospecto)}>Descargar PDF</button>
+            <button className="relev-modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+          </div>
         </div>
         <div className="relev-modal-body">
           <RelevamientoForm key={prospecto.id} prospecto={prospecto} readOnly={readOnly} onUpdate={onUpdate} />

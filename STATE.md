@@ -50,7 +50,9 @@ fases de migración ver `CHANGELOG.md`.
   la ficha → modal casi pantalla completa con 8 bloques + nota libre,
   switch ARS/USD, autosave on-blur. Persiste en
   `abordaje_prospectos.relevamiento` (jsonb). Fuente: `8+1 y FF.pdf`
-  (en la carpeta del proyecto, sin trackear).
+  (en la carpeta del proyecto, sin trackear). Botón "Descargar PDF" en el
+  modal (`exportarRelevamientoPDF`) — **v1 funcional, Nadir quiere pulir
+  el diseño del PDF más adelante** (pendiente declarado 2026-06-12).
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
