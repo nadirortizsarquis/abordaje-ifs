@@ -1285,6 +1285,115 @@
     margin-bottom: 14px;
   }
 
+  /* ── Relevamiento de necesidades (formulario 8+1 en la ficha) ── */
+  .relev-top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 10px; flex-wrap: wrap; margin-bottom: 12px;
+  }
+  .relev-resumen { font-size: 0.8rem; color: var(--texto-suave); }
+  .relev-moneda { display: flex; gap: 0; border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
+  .relev-moneda button {
+    border: none; background: #fff; padding: 5px 12px; font-size: 0.75rem;
+    font-weight: 700; color: var(--texto-suave); cursor: pointer;
+  }
+  .relev-moneda button.active { background: var(--azul); color: #fff; }
+  .relev-moneda button:disabled { cursor: default; opacity: 0.7; }
+
+  /* modal a casi pantalla completa */
+  .relev-modal-backdrop {
+    position: fixed; inset: 0; background: rgba(20,22,40,0.55); z-index: 320;
+    display: flex; align-items: center; justify-content: center; padding: 18px;
+  }
+  .relev-modal {
+    background: #f6f8fb; width: min(1100px, 100%); height: min(94vh, 100%);
+    border-radius: 14px; display: flex; flex-direction: column; overflow: hidden;
+    box-shadow: 0 24px 70px rgba(10,12,40,0.4);
+  }
+  .relev-modal-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 14px 22px; background: #fff; border-bottom: 1px solid var(--borde); flex-wrap: wrap;
+  }
+  .relev-modal-head h3 { font-size: 1.02rem; color: var(--azul-oscuro); margin: 0; }
+  .relev-modal-sub { font-size: 0.78rem; color: var(--texto-suave); margin-top: 2px; }
+  .relev-modal-body { flex: 1; overflow-y: auto; padding: 18px 22px 26px; }
+  .relev-modal-close {
+    border: none; background: transparent; font-size: 1.5rem; line-height: 1;
+    color: var(--texto-suave); cursor: pointer; padding: 4px 8px; border-radius: 8px;
+  }
+  .relev-modal-close:hover { background: #f0f2f7; color: var(--texto); }
+
+  /* secciones siempre abiertas dentro del modal */
+  .relev-sect { border: 1px solid var(--borde); border-radius: 10px; margin-bottom: 12px; background: #fff; overflow: hidden; }
+  .relev-sect-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 10px 16px; background: #fafbfd; border-bottom: 1px solid var(--borde);
+  }
+  .relev-sect-title { font-size: 0.86rem; font-weight: 700; color: var(--azul-oscuro); }
+  .relev-sect-body { padding: 14px 16px 16px; }
+  .relev-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
+  .relev-pair .relev-sect { margin-bottom: 0; }
+  .relev-pair { margin-bottom: 12px; }
+  .relev-chip {
+    font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 20px;
+    background: #eef0f4; color: var(--texto-suave); flex-shrink: 0;
+  }
+  .relev-chip.filled { background: #d9f2e2; color: #1d7a45; }
+
+  /* lanzador dentro de la ficha */
+  .relev-launch { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+
+  .relev-grid { display: grid; gap: 8px; }
+  .relev-row { display: grid; gap: 6px; align-items: end; }
+  .relev-field { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .relev-field label { font-size: 0.66rem; font-weight: 600; color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.4px; }
+  .relev-field input, .relev-field select, .relev-field textarea {
+    width: 100%; padding: 7px 9px; border: 1px solid var(--borde); border-radius: 7px;
+    font-size: 0.84rem; font-family: inherit; background: #fff; color: var(--texto);
+  }
+  .relev-field textarea { resize: vertical; min-height: 54px; }
+  .relev-field input:focus, .relev-field select:focus, .relev-field textarea:focus {
+    outline: none; border-color: var(--azul); box-shadow: 0 0 0 2px rgba(0,152,218,0.12);
+  }
+  .relev-subtitle { font-size: 0.72rem; font-weight: 700; color: var(--azul-oscuro); margin: 10px 0 6px; }
+  .relev-item-card { border: 1px dashed var(--borde); border-radius: 8px; padding: 10px; margin-bottom: 8px; }
+  .relev-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .relev-del-btn {
+    border: none; background: transparent; color: #c0392b; font-size: 0.72rem;
+    font-weight: 600; cursor: pointer; padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
+  }
+  .relev-del-btn:hover { background: #fdecea; }
+  .relev-add-btn {
+    border: 1px dashed var(--azul); background: transparent; color: var(--azul);
+    font-size: 0.78rem; font-weight: 600; cursor: pointer; padding: 7px 12px;
+    border-radius: 8px; width: 100%; margin-top: 2px; font-family: inherit;
+  }
+  .relev-add-btn:hover { background: rgba(0,152,218,0.06); }
+  .relev-fixed-label { font-size: 0.78rem; font-weight: 600; color: var(--texto); }
+  .relev-hint { font-size: 0.7rem; color: var(--texto-suave); margin: 2px 0 8px; }
+
+  /* anchos de columnas por tipo de fila (desktop) */
+  .relev-row.cols-2 { grid-template-columns: 1fr 1fr; }
+  .relev-row.cols-3 { grid-template-columns: 2fr 1fr 1fr; }
+  .relev-row.cols-etapa { grid-template-columns: 1.2fr 1fr 1fr 1fr; }
+  .relev-row.cols-familiar { grid-template-columns: 1.1fr 1.2fr 1.2fr 1fr 0.8fr auto; }
+  .relev-row.cols-necesidad { grid-template-columns: 1.2fr 0.8fr 1.6fr; }
+  .relev-row.cols-gasto { grid-template-columns: 2fr 1fr 1fr auto; }
+  .relev-row.cols-ingreso { grid-template-columns: 0.9fr 1fr 1fr 1.2fr 1fr; }
+
+  @media (max-width: 768px) {
+    .relev-row.cols-2, .relev-row.cols-3, .relev-row.cols-etapa, .relev-row.cols-gasto,
+    .relev-row.cols-familiar, .relev-row.cols-necesidad, .relev-row.cols-ingreso {
+      grid-template-columns: 1fr 1fr;
+    }
+    .relev-field input, .relev-field select, .relev-field textarea { font-size: 16px; padding: 10px 11px; }
+    .relev-row > .relev-span-mobile { grid-column: 1 / -1; }
+    .relev-modal-backdrop { padding: 0; }
+    .relev-modal { width: 100%; height: 100%; border-radius: 0; }
+    .relev-modal-body { padding: 12px 12px 22px; }
+    .relev-pair { grid-template-columns: 1fr; gap: 0; }
+    .relev-pair .relev-sect { margin-bottom: 12px; }
+  }
+
   .field-inline { margin-bottom: 12px; }
   .field-inline label {
     display: block;
@@ -3269,7 +3378,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-12';
+const APP_VERSION = '2026-06-12.2';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -3322,6 +3431,7 @@ function mapProspectoFromDB(p, contactosTodos) {
     detalle: p.detalle || '',
     referente: p.referente || '',
     observaciones: p.observaciones || '',
+    relevamiento: p.relevamiento || null,
     agenteId: p.agente_id,
     actorId: p.actor_id || null,
     createdAt: p.created_at,
@@ -3467,7 +3577,7 @@ const storage = {
     // Columnas explícitas (no select('*')): consumimos menos ancho de banda y
     // documentamos qué necesita cada mapper. Si se agrega una columna nueva al
     // schema y se quiere visible en el frontend, actualizar el select aquí.
-    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, estado, proximo_contacto, agente_id, actor_id, archivado, created_at, updated_at';
+    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
     const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
@@ -3589,6 +3699,7 @@ const storage = {
     if ('detalle' in patch) dbPatch.detalle = patch.detalle;
     if ('referente' in patch) dbPatch.referente = patch.referente;
     if ('observaciones' in patch) dbPatch.observaciones = patch.observaciones;
+    if ('relevamiento' in patch) dbPatch.relevamiento = patch.relevamiento;
     if ('estado' in patch) dbPatch.estado = patch.estado;
     if ('proximoContacto' in patch) {
       const v = patch.proximoContacto;
@@ -7554,16 +7665,363 @@ function TimelineCell({ contactos }) {
 }
 
 // ── PANEL LATERAL (gestión arriba, datos abajo, historial abajo) ─
-function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
+// ── RELEVAMIENTO DE NECESIDADES (formulario "8+1" en la ficha) ──────────
+// Basado en el relevamiento de necesidades de Life ("8+1 y FF"): 8 bloques
+// + nota libre. Se guarda como JSONB en abordaje_prospectos.relevamiento
+// con autosave on-blur (mismo patrón que el resto de la ficha).
+const RELEV_ETAPAS = [
+  { key: 'jardin', label: 'Jardín / Preescolar' },
+  { key: 'primaria', label: 'Primaria' },
+  { key: 'secundaria', label: 'Secundaria' },
+  { key: 'universidad', label: 'Universidad' },
+  { key: 'posgrado', label: 'Posgrado' },
+];
+const RELEV_NECESIDADES = [
+  { key: 'criticas', label: 'Enfermedades críticas' },
+  { key: 'medicaLargoPlazo', label: 'Atención médica a largo plazo' },
+  { key: 'sucesion', label: 'Sucesión' },
+  { key: 'ultimosGastos', label: 'Últimos gastos (funeral, deudas)' },
+  { key: 'emergencias', label: 'Emergencias' },
+  { key: 'eventosEspeciales', label: 'Eventos especiales' },
+  { key: 'ahorro', label: 'Ahorro' },
+];
+const RELEV_PERSONAS = [
+  { key: 'titular', label: 'Titular' },
+  { key: 'conyuge', label: 'Cónyuge' },
+  { key: 'otros', label: 'Otros ingresos' },
+];
+
+function normalizeRelev(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  return {
+    v: 1,
+    moneda: r.moneda === 'USD' ? 'USD' : 'ARS',
+    grupoFamiliar: Array.isArray(r.grupoFamiliar) ? r.grupoFamiliar : [],
+    educacion: Array.isArray(r.educacion) ? r.educacion : [],
+    mantenimiento: Array.isArray(r.mantenimiento) ? r.mantenimiento : [],
+    vivienda: Array.isArray(r.vivienda) ? r.vivienda : [],
+    otrasNecesidades: r.otrasNecesidades || {},
+    ingresos: r.ingresos || {},
+    segurosExistentes: r.segurosExistentes || {},
+    adicional: r.adicional || {},
+    notaLibre: r.notaLibre || '',
+  };
+}
+
+// set inmutable por path (['educacion', 0, 'etapas', 'primaria', 'costo'])
+function relevSetIn(obj, path, value) {
+  if (path.length === 0) return value;
+  const [k, ...rest] = path;
+  const base = Array.isArray(obj) ? obj.slice() : { ...(obj || {}) };
+  base[k] = relevSetIn(base[k], rest, value);
+  return base;
+}
+
+function relevHasData(v) {
+  if (v == null) return false;
+  if (Array.isArray(v)) return v.some(relevHasData);
+  if (typeof v === 'object') return Object.values(v).some(relevHasData);
+  return String(v).trim() !== '';
+}
+
+const RELEV_BLOQUE_KEYS = ['grupoFamiliar', 'educacion', 'mantenimiento', 'vivienda', 'otrasNecesidades', 'ingresos', 'segurosExistentes', 'adicional'];
+function relevBloquesConDatos(raw) {
+  const r = normalizeRelev(raw);
+  return RELEV_BLOQUE_KEYS.filter(k => relevHasData(r[k])).length;
+}
+
+function relevEdad(fechaNac) {
+  if (!fechaNac) return '';
+  const d = parseFechaLocal(fechaNac);
+  if (!d || isNaN(d)) return '';
+  const hoy = new Date();
+  let e = hoy.getFullYear() - d.getFullYear();
+  if (hoy.getMonth() < d.getMonth() || (hoy.getMonth() === d.getMonth() && hoy.getDate() < d.getDate())) e--;
+  return e >= 0 && e < 130 ? String(e) : '';
+}
+
+function RelevField({ label, className, children }) {
+  return <div className={`relev-field ${className || ''}`}><label>{label}</label>{children}</div>;
+}
+
+function RelevamientoForm({ prospecto, readOnly, onUpdate }) {
+  const [relev, setRelev] = useState(() => normalizeRelev(prospecto.relevamiento));
+  const pendingRef = useRef(null);
+
+  // edit: actualiza local. persistNow=true para acciones estructurales
+  // (agregar/quitar filas, selects, moneda); el resto persiste on-blur.
+  const edit = (path, value, persistNow = false) => {
+    setRelev(prev => {
+      const next = relevSetIn(prev, path, value);
+      if (readOnly) return prev;
+      pendingRef.current = next;
+      if (persistNow) { onUpdate({ relevamiento: next }); pendingRef.current = null; }
+      return next;
+    });
+  };
+  const blur = () => {
+    if (readOnly || !pendingRef.current) return;
+    onUpdate({ relevamiento: pendingRef.current });
+    pendingRef.current = null;
+  };
+  const dis = readOnly;
+  const inp = (path, props = {}) => (
+    <input type={props.type || 'text'} value={String(relevGetIn(relev, path) ?? '')} disabled={dis}
+      placeholder={props.placeholder || ''} inputMode={props.num ? 'decimal' : undefined}
+      onChange={e => edit(path, e.target.value)} onBlur={blur} />
+  );
+
+  const bloques = [
+    { key: 'grupoFamiliar', title: '1 · Grupo familiar', filled: relevHasData(relev.grupoFamiliar) },
+    { key: 'educacion', title: '2 · Gastos de educación', filled: relevHasData(relev.educacion) },
+    { key: 'mantenimiento', title: '3 · Gastos de mantenimiento', filled: relevHasData(relev.mantenimiento) },
+    { key: 'vivienda', title: '4 · Gastos de vivienda', filled: relevHasData(relev.vivienda) },
+    { key: 'otrasNecesidades', title: '5 · Otras necesidades', filled: relevHasData(relev.otrasNecesidades) },
+    { key: 'ingresos', title: '6 · Ingresos y pensión', filled: relevHasData(relev.ingresos) },
+    { key: 'segurosExistentes', title: '7 · Seguros de vida existentes', filled: relevHasData(relev.segurosExistentes) },
+    { key: 'adicional', title: '8 · Información adicional', filled: relevHasData(relev.adicional) },
+  ];
+  const completados = bloques.filter(b => b.filled).length;
+  const $ = relev.moneda === 'USD' ? 'USD' : '$';
+
+  const renderBody = (key) => {
+    if (key === 'grupoFamiliar') return (
+      <div className="relev-grid">
+        {relev.grupoFamiliar.map((m, i) => (
+          <div className="relev-row cols-familiar" key={i}>
+            <RelevField label="Parentesco">{inp(['grupoFamiliar', i, 'parentesco'], { placeholder: 'Titular / Cónyuge / Hijo…' })}</RelevField>
+            <RelevField label="Apellido">{inp(['grupoFamiliar', i, 'apellido'])}</RelevField>
+            <RelevField label="Nombre">{inp(['grupoFamiliar', i, 'nombre'])}</RelevField>
+            <RelevField label="Fecha nac.">
+              <input type="date" value={m.fechaNac || ''} disabled={dis}
+                onChange={e => edit(['grupoFamiliar', i, 'fechaNac'], e.target.value)} onBlur={blur} />
+            </RelevField>
+            <RelevField label="Edad"><input value={relevEdad(m.fechaNac)} disabled readOnly /></RelevField>
+            {!dis && <button type="button" className="relev-del-btn" onClick={() =>
+              edit(['grupoFamiliar'], relev.grupoFamiliar.filter((_, j) => j !== i), true)}>Quitar</button>}
+          </div>
+        ))}
+        {!dis && <button type="button" className="relev-add-btn" onClick={() =>
+          edit(['grupoFamiliar'], [...relev.grupoFamiliar, { parentesco: '', apellido: '', nombre: '', fechaNac: '' }], true)}>+ Agregar integrante</button>}
+      </div>
+    );
+    if (key === 'educacion') return (
+      <div className="relev-grid">
+        <p className="relev-hint">Completá solo las etapas que apliquen para cada hijo.</p>
+        {relev.educacion.map((h, i) => (
+          <div className="relev-item-card" key={i}>
+            <div className="relev-item-head">
+              <div className="relev-field" style={{ flex: 1 }}>
+                <label>Hijo/a</label>
+                {inp(['educacion', i, 'nombre'], { placeholder: `${i + 1}º hijo — nombre` })}
+              </div>
+              {!dis && <button type="button" className="relev-del-btn" onClick={() =>
+                edit(['educacion'], relev.educacion.filter((_, j) => j !== i), true)}>Quitar</button>}
+            </div>
+            {RELEV_ETAPAS.map(et => (
+              <div className="relev-row cols-etapa" key={et.key}>
+                <div className="relev-fixed-label relev-span-mobile" style={{ alignSelf: 'center' }}>{et.label}</div>
+                <RelevField label={`Costo mensual (${$})`}>{inp(['educacion', i, 'etapas', et.key, 'costo'], { num: true })}</RelevField>
+                <RelevField label="Cuotas anuales">{inp(['educacion', i, 'etapas', et.key, 'cuotas'], { num: true })}</RelevField>
+                <RelevField label="Años restantes">{inp(['educacion', i, 'etapas', et.key, 'anios'], { num: true })}</RelevField>
+              </div>
+            ))}
+          </div>
+        ))}
+        {!dis && <button type="button" className="relev-add-btn" onClick={() =>
+          edit(['educacion'], [...relev.educacion, { nombre: '', etapas: {} }], true)}>+ Agregar hijo</button>}
+      </div>
+    );
+    if (key === 'mantenimiento' || key === 'vivienda') return (
+      <div className="relev-grid">
+        {(relev[key]).map((g, i) => (
+          <div className="relev-row cols-gasto" key={i}>
+            <RelevField label="Descripción">{inp([key, i, 'descripcion'], { placeholder: i === 0 ? 'Mantenimiento general' : '' })}</RelevField>
+            <RelevField label={`Costo mensual (${$})`}>{inp([key, i, 'costo'], { num: true })}</RelevField>
+            <RelevField label="Cantidad de años">{inp([key, i, 'anios'], { num: true })}</RelevField>
+            {!dis && <button type="button" className="relev-del-btn" onClick={() =>
+              edit([key], relev[key].filter((_, j) => j !== i), true)}>Quitar</button>}
+          </div>
+        ))}
+        {!dis && <button type="button" className="relev-add-btn" onClick={() =>
+          edit([key], [...relev[key], { descripcion: '', costo: '', anios: '' }], true)}>+ Agregar gasto</button>}
+      </div>
+    );
+    if (key === 'otrasNecesidades') return (
+      <div className="relev-grid">
+        {RELEV_NECESIDADES.map(n => (
+          <div className="relev-row cols-necesidad" key={n.key}>
+            <div className="relev-fixed-label relev-span-mobile" style={{ alignSelf: 'center' }}>{n.label}</div>
+            <RelevField label={`Costo (${$})`}>{inp(['otrasNecesidades', n.key, 'costo'], { num: true })}</RelevField>
+            <RelevField label="Observaciones" className="relev-span-mobile">{inp(['otrasNecesidades', n.key, 'obs'])}</RelevField>
+          </div>
+        ))}
+      </div>
+    );
+    if (key === 'ingresos') return (
+      <div className="relev-grid">
+        {RELEV_PERSONAS.map(p => (
+          <div key={p.key}>
+            <div className="relev-subtitle">{p.label}</div>
+            <div className="relev-row cols-ingreso">
+              <RelevField label={`Ingreso mensual (${$})`}>{inp(['ingresos', p.key, 'ingreso'], { num: true })}</RelevField>
+              <RelevField label="Aportes últ. 36 meses">{inp(['ingresos', p.key, 'aportes36'], { num: true })}</RelevField>
+              <RelevField label="Sueldo br. prom. 60 m.">{inp(['ingresos', p.key, 'sueldo60'], { num: true })}</RelevField>
+              <RelevField label="Régimen">
+                <select value={(relev.ingresos[p.key] || {}).regimen || ''} disabled={dis}
+                  onChange={e => edit(['ingresos', p.key, 'regimen'], e.target.value, true)}>
+                  <option value="">—</option>
+                  <option>Autónomo</option>
+                  <option>Relación de dependencia</option>
+                  <option>Monotributo</option>
+                </select>
+              </RelevField>
+              <RelevField label="Categoría (monotributo)">
+                <select value={(relev.ingresos[p.key] || {}).categoria || ''} disabled={dis}
+                  onChange={e => edit(['ingresos', p.key, 'categoria'], e.target.value, true)}>
+                  <option value="">—</option>
+                  <option value="AB">Aporte Básico (AB)</option>
+                  <option value="AB y A">Aporte Básico y Adicional</option>
+                  <option value="s/AB">Sin Aporte Básico (s/AB)</option>
+                </select>
+              </RelevField>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+    if (key === 'segurosExistentes') return (
+      <div className="relev-grid">
+        <RelevField label="Titular — seguros vigentes">
+          <textarea value={relev.segurosExistentes.titular || ''} disabled={dis} rows={2}
+            placeholder="Compañía, cobertura, suma asegurada…"
+            onChange={e => edit(['segurosExistentes', 'titular'], e.target.value)} onBlur={blur} />
+        </RelevField>
+        <RelevField label="Cónyuge — seguros vigentes">
+          <textarea value={relev.segurosExistentes.conyuge || ''} disabled={dis} rows={2}
+            placeholder="Compañía, cobertura, suma asegurada…"
+            onChange={e => edit(['segurosExistentes', 'conyuge'], e.target.value)} onBlur={blur} />
+        </RelevField>
+      </div>
+    );
+    if (key === 'adicional') return (
+      <div className="relev-grid">
+        <div className="relev-row cols-2">
+          <RelevField label={`Prima que puede afrontar (${$})`}>{inp(['adicional', 'prima'], { num: true })}</RelevField>
+          <RelevField label="Medio de pago">{inp(['adicional', 'medioPago'], { placeholder: 'Tarjeta, débito, transferencia…' })}</RelevField>
+        </div>
+        <div className="relev-row cols-2">
+          <RelevField label="Frecuencia de pago">
+            <select value={relev.adicional.frecuencia || ''} disabled={dis}
+              onChange={e => edit(['adicional', 'frecuencia'], e.target.value, true)}>
+              <option value="">—</option>
+              <option>Anual</option>
+              <option>Semestral</option>
+              <option>Mensual</option>
+            </select>
+          </RelevField>
+          <RelevField label="Próxima reunión">{inp(['adicional', 'proximaReunion'], { placeholder: 'ej: 15/07 16:00' })}</RelevField>
+        </div>
+      </div>
+    );
+    return null;
+  };
+
+  const byKey = {};
+  bloques.forEach(b => { byKey[b.key] = b; });
+  const sect = (b) => (
+    <div className="relev-sect" key={b.key}>
+      <div className="relev-sect-head">
+        <span className="relev-sect-title">{b.title}</span>
+        <span className={`relev-chip ${b.filled ? 'filled' : ''}`}>{b.filled ? 'Con datos' : 'Vacío'}</span>
+      </div>
+      <div className="relev-sect-body">{renderBody(b.key)}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="relev-top">
+        <span className="relev-resumen">{completados} de 8 bloques con datos</span>
+        <div className="relev-moneda" title="Moneda del relevamiento">
+          {['ARS', 'USD'].map(m => (
+            <button key={m} type="button" disabled={dis} className={relev.moneda === m ? 'active' : ''}
+              onClick={() => edit(['moneda'], m, true)}>{m}</button>
+          ))}
+        </div>
+      </div>
+      {sect(byKey.grupoFamiliar)}
+      {sect(byKey.educacion)}
+      <div className="relev-pair">{sect(byKey.mantenimiento)}{sect(byKey.vivienda)}</div>
+      {sect(byKey.otrasNecesidades)}
+      {sect(byKey.ingresos)}
+      <div className="relev-pair">{sect(byKey.segurosExistentes)}{sect(byKey.adicional)}</div>
+      <div className="relev-sect">
+        <div className="relev-sect-head">
+          <span className="relev-sect-title">+1 · Nota libre</span>
+          <span className={`relev-chip ${relevHasData(relev.notaLibre) ? 'filled' : ''}`}>{relevHasData(relev.notaLibre) ? 'Con datos' : 'Vacío'}</span>
+        </div>
+        <div className="relev-sect-body">
+          <div className="relev-field">
+            <textarea value={relev.notaLibre} disabled={dis} rows={4}
+              placeholder="Comentarios del agente, recomendados, próximos pasos…"
+              onChange={e => edit(['notaLibre'], e.target.value)} onBlur={blur} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Modal a casi pantalla completa que contiene el formulario. Va por portal a
+// document.body porque .panel-side tiene transform (la animación de slide-in)
+// y un position:fixed adentro no se comportaría como fixed.
+function RelevamientoModal({ prospecto, readOnly, onUpdate, onClose }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return ReactDOM.createPortal(
+    <div className="relev-modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="relev-modal" role="dialog" aria-modal="true" aria-labelledby="relev-modal-title">
+        <div className="relev-modal-head">
+          <div>
+            <h3 id="relev-modal-title">Relevamiento de necesidades</h3>
+            <div className="relev-modal-sub">{prospecto.nombre || '(sin nombre)'} · se guarda solo al completar cada campo</div>
+          </div>
+          <button className="relev-modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="relev-modal-body">
+          <RelevamientoForm key={prospecto.id} prospecto={prospecto} readOnly={readOnly} onUpdate={onUpdate} />
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+// get por path, tolerante a undefined intermedios
+function relevGetIn(obj, path) {
+  let cur = obj;
+  for (const k of path) { if (cur == null) return ''; cur = cur[k]; }
+  return cur;
+}
+
+function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
+  // Modal de relevamiento de necesidades (casi pantalla completa).
+  const [relevOpen, setRelevOpen] = useState(false);
+  useEffect(() => {
+    // Si el relevamiento está abierto, Esc lo cierra a él (su propio handler)
+    // y NO al panel — sin este guard se cerraban los dos juntos.
+    const onKey = (e) => { if (e.key === 'Escape' && !relevOpen) onClose(); };
     document.addEventListener('keydown', onKey);
     document.body.style.overflow = 'hidden';
     return () => {
       document.removeEventListener('keydown', onKey);
       document.body.style.overflow = '';
     };
-  }, [onClose]);
+  }, [onClose, relevOpen]);
 
   return (
     <div className="panel-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -7590,6 +8048,27 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
             onDelete={onDeleteContacto}
           />
         </div>
+
+        <div className="panel-section">
+          <h4>Relevamiento de necesidades</h4>
+          <div className="relev-launch">
+            <span className="relev-resumen">
+              {(() => { const n = relevBloquesConDatos(prospecto.relevamiento); return n === 0 ? 'Sin relevar todavía' : `${n} de 8 bloques con datos`; })()}
+            </span>
+            <button type="button" className="btn-primary" onClick={() => setRelevOpen(true)}>
+              {relevBloquesConDatos(prospecto.relevamiento) === 0 ? 'Iniciar relevamiento' : 'Abrir relevamiento'}
+            </button>
+          </div>
+        </div>
+
+        {relevOpen && (
+          <RelevamientoModal
+            prospecto={prospecto}
+            readOnly={readOnly}
+            onUpdate={onUpdate}
+            onClose={() => setRelevOpen(false)}
+          />
+        )}
 
         <div className="panel-section">
           <h4>Datos del prospecto</h4>

@@ -1125,3 +1125,37 @@ notablemente más rápido, todas las vistas idénticas, consola limpia.
 - Accesibilidad fina: htmlFor en ~59 labels, focus trap en modales,
   alternativa de teclado para drag & drop. Baja prioridad para el equipo
   actual.
+
+---
+
+# Sesión 2026-06-12 (cont.) — Relevamiento de necesidades ("8+1") en la ficha
+
+Feature pedida por las capacitaciones de agentes nuevos: formulario de
+relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
+(PDF fuente en la carpeta del proyecto, sin trackear).
+
+- **DB**: columna `abordaje_prospectos.relevamiento jsonb` (migración
+  `20260612170000`). Schema versionado en el frontend (`{ v: 1, ... }`),
+  null = nunca relevado. RLS: viaja con las policies existentes de la tabla.
+- **Capa de datos**: `relevamiento` agregado a PROSPECTO_COLS, al mapper y
+  a `updateProspecto`. La persistencia reusa `upsertProspecto` (optimistic
+  + rollback).
+- **UI**: en la ficha (entre Historial y Datos) un lanzador con resumen
+  ("X de 8 bloques con datos") y botón "Iniciar/Abrir relevamiento" → modal
+  a casi pantalla completa (min(1100px, 96vw) × 94vh, portal a body por el
+  transform del panel). Adentro, 8 bloques SIEMPRE abiertos (sin acordeón,
+  pedido de Nadir): grupo familiar (edad auto-calculada desde fecha nac.),
+  educación por hijo (5 etapas × costo/cuotas/años), mantenimiento y
+  vivienda en par, otras necesidades (las 7 del PDF), ingresos y pensión
+  (régimen/categoría como selects), seguros existentes e info adicional en
+  par, y "+1 Nota libre" al final. Switch ARS/USD arriba (las etiquetas de
+  costo muestran la moneda elegida).
+- **Autosave on-blur** con acumulador (`pendingRef`); acciones estructurales
+  (agregar/quitar filas, selects, moneda) persisten al instante. readOnly
+  (admin "Ver como") deshabilita todo.
+- **Mobile**: modal pantalla completa, filas colapsan a 2 columnas,
+  inputs 16px (evita el auto-zoom de iOS), labels largos a ancho completo.
+- Decisiones de adaptación del PDF: "Datos de contacto" y "Life Advisor/
+  Agencia/Fecha" no se duplican (ya están en la ficha / el user logueado);
+  terminología "agente/asesor"; Esc cierra solo el modal (guard en el panel).
+- APP_VERSION → 2026-06-12.2.

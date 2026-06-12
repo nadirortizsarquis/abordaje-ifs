@@ -46,6 +46,11 @@ fases de migración ver `CHANGELOG.md`.
 - Calendario con cache stale-while-revalidate (`_gcalViewCache`): al volver
   a la pestaña pinta al instante los eventos de la última visita y refresca
   Google en background.
+- Relevamiento de necesidades ("8+1" estilo Life) por prospecto: botón en
+  la ficha → modal casi pantalla completa con 8 bloques + nota libre,
+  switch ARS/USD, autosave on-blur. Persiste en
+  `abordaje_prospectos.relevamiento` (jsonb). Fuente: `8+1 y FF.pdf`
+  (en la carpeta del proyecto, sin trackear).
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
