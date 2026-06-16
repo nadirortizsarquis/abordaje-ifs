@@ -1070,7 +1070,10 @@
     font-size: 0.88rem;
     font-weight: 500;
     box-shadow: 0 8px 24px rgba(30,27,75,0.35);
-    z-index: 300;
+    /* Por encima de TODOS los modales (admin overlay z-index 1000, relev 320)
+       — el toast es feedback de acción y siempre tiene que verse, aunque el
+       modal que lo disparó siga abierto (ej. "Ajustes guardados"). */
+    z-index: 2000;
     animation: toastIn 0.22s ease;
     display: flex;
     align-items: center;
@@ -5206,6 +5209,64 @@ function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
   );
 }
 
+// ── Hook: Ajustes personales + colores por calendar ────────────
+// Extraído de App (refactor incremental paquete 5). Encapsula la carga
+// (cache local + sync con profiles.abordaje_settings), el guardado desde el
+// modal de Ajustes y los overrides de color por calendar. Mismo comportamiento
+// que antes; solo se reagrupó.
+function useSettings(user, agente) {
+  const [settings, setSettings] = useState(() => loadSettings());
+
+  // Cuando el agente llega con abordaje_settings (puede tardar un instante por
+  // la consulta a profiles), sincronizamos el state con eso. Si es null usamos
+  // el cache local (que ya se cargó en el useState inicial).
+  useEffect(() => {
+    if (agente?.abordaje_settings) {
+      const merged = { ...DEFAULT_SETTINGS, ...agente.abordaje_settings };
+      setSettings(merged);
+      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged)); } catch {}
+    }
+  }, [agente?.id]);
+
+  // Guardado desde el modal de Ajustes.
+  const saveSettings = useCallback((s) => {
+    setSettings(s);
+    persistSettings(s, user?.id);
+    showToast('Ajustes guardados');
+  }, [user?.id]);
+
+  // Override de color por calendar de Google. Se persiste en abordaje_settings
+  // (sigue al user entre dispositivos). Estructura:
+  //   { [gcalId]: { agenda: 'paletteId', tarea: 'paletteId' } }
+  // Si `kind` es null, borra ese campo. Si los 2 quedan vacíos, borra el cal.
+  const handleSetCalendarColor = useCallback(async (gcalId, kind, paletteId) => {
+    setSettings(prev => {
+      const calColors = { ...(prev.calendarColors || {}) };
+      const cur = { ...(calColors[gcalId] || {}) };
+      if (paletteId) cur[kind] = paletteId;
+      else delete cur[kind];
+      if (Object.keys(cur).length === 0) delete calColors[gcalId];
+      else calColors[gcalId] = cur;
+      const next = { ...prev, calendarColors: calColors };
+      persistSettings(next, user?.id);
+      return next;
+    });
+  }, [user?.id]);
+
+  // Resetea todos los overrides de color de UN calendar (botón Restablecer).
+  const handleResetCalendarColors = useCallback(async (gcalId) => {
+    setSettings(prev => {
+      const calColors = { ...(prev.calendarColors || {}) };
+      delete calColors[gcalId];
+      const next = { ...prev, calendarColors: calColors };
+      persistSettings(next, user?.id);
+      return next;
+    });
+  }, [user?.id]);
+
+  return { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -5398,17 +5459,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     return false;
   };
 
-  // Cuando el agente llega con abordaje_settings (puede tardar un instante por la
-  // consulta a profiles), sincronizamos el state con eso. Si es null usamos el
-  // cache local (que ya se cargó en useState inicial).
-  useEffect(() => {
-    if (agente?.abordaje_settings) {
-      const merged = { ...DEFAULT_SETTINGS, ...agente.abordaje_settings };
-      setSettings(merged);
-      try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged)); } catch {}
-    }
-  }, [agente?.id]);
-
   // Tick cada 60s para que las urgencias de notificaciones se recalculen
   // (ej. "Llamar en 15min" → cuando pasen los 15 min pasa de "Hoy" a "Vencido"
   // sin necesidad de recargar la página).
@@ -5450,36 +5500,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     [state, tick, isPilot, notifDismissed]
   );
 
-  // Override de color por calendar de Google. Se persiste en abordaje_settings
-  // (sigue al user entre dispositivos). Estructura:
-  //   { [gcalId]: { agenda: 'paletteId', tarea: 'paletteId' } }
-  // Si `kind` es null, borra ese campo. Si los 2 quedan vacíos, borra el cal.
-  const handleSetCalendarColor = useCallback(async (gcalId, kind, paletteId) => {
-    setSettings(prev => {
-      const calColors = { ...(prev.calendarColors || {}) };
-      const cur = { ...(calColors[gcalId] || {}) };
-      if (paletteId) cur[kind] = paletteId;
-      else delete cur[kind];
-      if (Object.keys(cur).length === 0) delete calColors[gcalId];
-      else calColors[gcalId] = cur;
-      const next = { ...prev, calendarColors: calColors };
-      persistSettings(next, user?.id);
-      return next;
-    });
-  }, [user?.id]);
-
-  // Resetea todos los overrides de color de UN calendar (botón Restablecer).
-  const handleResetCalendarColors = useCallback(async (gcalId) => {
-    setSettings(prev => {
-      const calColors = { ...(prev.calendarColors || {}) };
-      delete calColors[gcalId];
-      const next = { ...prev, calendarColors: calColors };
-      persistSettings(next, user?.id);
-      return next;
-    });
-  }, [user?.id]);
   const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
-  const [settings, setSettings] = useState(() => loadSettings());
+  const { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors } = useSettings(user, agente);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showInstrucciones, setShowInstrucciones] = useState(false);
@@ -7119,7 +7141,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           currentUser={user}
           onViewAs={(p) => { onViewAs(p); setShowSettings(false); }}
           onCancel={() => setShowSettings(false)}
-          onSave={(s) => { setSettings(s); persistSettings(s, user.id); showToast('Ajustes guardados'); }}
+          onSave={saveSettings}
           onToggleGcal={handleToggleGcal}
           onLinkOAuth={handleLinkOAuth}
           onUnlinkOAuth={handleUnlinkOAuth}
