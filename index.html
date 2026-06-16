@@ -3391,7 +3391,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-16';
+const APP_VERSION = '2026-06-16.2';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -5267,6 +5267,52 @@ function useSettings(user, agente) {
   return { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors };
 }
 
+// ── Hook: Notificaciones (campanita) ───────────────────────────
+// Extraído de App (refactor incremental paquete 5). Tick de 60s para que las
+// urgencias se recalculen sin recargar, dismisses persistidos por user/día, y
+// la lista derivada de notificaciones. Comportamiento idéntico al previo.
+function useNotificaciones(state, isPilot, user) {
+  // Tick cada 60s para que las urgencias de notificaciones se recalculen
+  // (ej. "Llamar en 15min" → cuando pasen los 15 min pasa de "Hoy" a "Vencido").
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Notificaciones dismisseadas hoy — persistido en localStorage por user.
+  // Map { itemKey: 'YYYY-MM-DD' }. Al cambiar de día caducan y la notificación
+  // reaparece si el evento sigue pendiente.
+  const NOTIF_DISMISS_KEY = `abordaje_notif_dismissed_${user?.id || 'anon'}`;
+  const [notifDismissed, setNotifDismissed] = useState(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem(NOTIF_DISMISS_KEY) || '{}');
+      const d = new Date();
+      const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+      const cleaned = {};
+      for (const k in raw) if (raw[k] === today) cleaned[k] = raw[k];
+      return cleaned;
+    } catch { return {}; }
+  });
+  const dismissNotif = useCallback((itemKey) => {
+    const d = new Date();
+    const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
+    setNotifDismissed(prev => {
+      const next = { ...prev, [itemKey]: today };
+      try { localStorage.setItem(NOTIF_DISMISS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [NOTIF_DISMISS_KEY]);
+
+  const notificaciones = useMemo(
+    () => calcularNotificaciones(state, isPilot, notifDismissed),
+    [state, tick, isPilot, notifDismissed]
+  );
+  const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
+
+  return { notificaciones, notifUrgentes, dismissNotif };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -5459,48 +5505,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     return false;
   };
 
-  // Tick cada 60s para que las urgencias de notificaciones se recalculen
-  // (ej. "Llamar en 15min" → cuando pasen los 15 min pasa de "Hoy" a "Vencido"
-  // sin necesidad de recargar la página).
-  // DEBE declararse antes del useMemo de notificaciones que lo usa en deps
-  // (con const, usarlo antes de declarar es ReferenceError por TDZ).
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 60 * 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  // Notificaciones dismisseadas hoy — persistido en localStorage por user.
-  // Map { itemKey: 'YYYY-MM-DD' }. Al cambiar de día, los dismisses caducan y
-  // la notificación reaparece si el evento sigue pendiente.
-  const NOTIF_DISMISS_KEY = `abordaje_notif_dismissed_${user?.id || 'anon'}`;
-  const [notifDismissed, setNotifDismissed] = useState(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem(NOTIF_DISMISS_KEY) || '{}');
-      const d = new Date();
-      const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-      // Housekeeping: descartar entries de días anteriores.
-      const cleaned = {};
-      for (const k in raw) if (raw[k] === today) cleaned[k] = raw[k];
-      return cleaned;
-    } catch { return {}; }
-  });
-  const dismissNotif = useCallback((itemKey) => {
-    const d = new Date();
-    const today = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-    setNotifDismissed(prev => {
-      const next = { ...prev, [itemKey]: today };
-      try { localStorage.setItem(NOTIF_DISMISS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, [NOTIF_DISMISS_KEY]);
-
-  const notificaciones = useMemo(
-    () => calcularNotificaciones(state, isPilot, notifDismissed),
-    [state, tick, isPilot, notifDismissed]
-  );
-
-  const notifUrgentes = notificaciones.filter(n => n.urgencia === 'vencido' || n.urgencia === 'hoy').length;
+  const { notificaciones, notifUrgentes, dismissNotif } = useNotificaciones(state, isPilot, user);
   const { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors } = useSettings(user, agente);
   const [showAddModal, setShowAddModal] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -12528,7 +12533,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
           )}
           <div className="field">
             <label>Título</label>
-            <input type="text" value={form.titulo} autoFocus={!readOnly} readOnly={readOnly}
+            <input type="text" value={form.titulo} readOnly={readOnly}
               onChange={e => upd('titulo', e.target.value)}
               placeholder="Ej: Cotización Pérez, Llamar a Juan" />
           </div>
@@ -12557,7 +12562,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
           {!readOnly && (
             <div className="field">
               <label>Nueva entrada de bitácora <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(Enter guarda · Shift+Enter nueva línea)</span></label>
-              <textarea value={nuevaEntrada}
+              <textarea value={nuevaEntrada} autoFocus={!readOnly}
                 onChange={e => setNuevaEntrada(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {

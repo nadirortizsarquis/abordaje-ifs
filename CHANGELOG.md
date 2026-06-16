@@ -1216,3 +1216,25 @@ relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
   inicio (rmSync) para no arrastrar el `public/static/` viejo, y un sanity
   check que ABORTA el build si faltan logos/íconos esperados.
 - APP_VERSION → 2026-06-16.
+
+---
+
+# Sesión 2026-06-16 (cont.) — Paquete 5: refactor de App (parcial) + mejoras UX
+
+Refactor incremental de App en custom hooks. Se hicieron los 2 hooks "isla"
+(estado no compartido); los 3 restantes (prospectos/tareas/gcal) comparten
+state/setState y sincronizarSeguimiento, así que separarlos no desacopla —
+se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.md).
+
+- **`useSettings`** (paso 1): encapsula settings, saveSettings y colores por
+  calendar (handleSetCalendarColor/ResetCalendarColors). Comportamiento idéntico.
+- **`useNotificaciones`** (paso 2): tick 60s, dismisses por user/día,
+  lista de notificaciones y notifUrgentes. Comportamiento idéntico.
+- App bajó ~140 líneas y quedó más ordenado arriba (ya no hay estados
+  declarados después de los handlers que los usan).
+- **Fix preexistente**: el toast quedaba detrás del modal de Ajustes
+  (z-index 300 < 1000 del overlay admin). Subido a 2000 — el feedback de
+  acción ahora se ve sobre cualquier modal.
+- **UX**: al abrir una tarjeta de tarea, el cursor va directo al campo
+  "Nueva entrada de bitácora" (antes al título) — más rápido para gestionar.
+- APP_VERSION → 2026-06-16.2.

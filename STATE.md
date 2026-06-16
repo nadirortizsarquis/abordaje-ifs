@@ -141,9 +141,20 @@ agente/admin/asistente.
   `actorMap` lazy load.
 
 **Backlog BAJA prioridad** (refactors sin cambio funcional, no urgentes):
-- `App` component con ~1500 líneas: split candidato en custom hooks
-  `useGcalSync`, `useAssistantContext`, `useAbordajeHandlers`. Abordar
-  cuando al modificar `App` se sienta incómodo el tamaño.
+- **Refactor de `App` en custom hooks — EN CURSO, incremental (2026-06-16).**
+  Ya extraídos y en producción: `useSettings` (ajustes + colores por calendar)
+  y `useNotificaciones` (campanita: tick 60s, dismisses, lista). Salieron
+  limpios porque su estado no lo tocaba nadie más. **Pendiente: `useGcalSync`**
+  — agruparía toda la lógica de Google Calendar (handleToggleGcal/LinkOAuth/
+  UnlinkOAuth/ToggleShareCal, `sincronizarSeguimiento` + `_syncSeguimientoBody`
+  con `syncLocksRef`, `bumpGcal`/`gcalReloadKey`, `gcalActorIds`,
+  handleSetEventColor). Es el bloque más cohesivo pero también el MÁS sensible
+  (ahí vivieron todos los bugs de TZ / race conditions / borrado en Google) y
+  sigue necesitando state/setState/isPilot/principalProfile como entradas.
+  **Hacer en sesión dedicada, en local, con prueba exhaustiva del flujo de
+  calendario antes de pushear** (Nadir avisa cuándo). Los handlers de
+  prospectos y tareas NO se extraen a hooks: comparten state/setState y
+  `sincronizarSeguimiento`, así que separarlos no desacopla nada real.
 - `UsuariosSection` ~385 líneas: split candidato en `UsuariosTable` +
   `NuevoUsuarioForm` + `UsuarioRow`. Idem.
 - Labels en inputs de forms (40 inputs con `<label>Texto</label><input/>`
