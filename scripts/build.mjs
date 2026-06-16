@@ -9,7 +9,7 @@
 // - El artefacto compilado va a public/index.html, que es lo que sirve Railway.
 //
 // Si algo falla, el build ABORTA (exit 1): nunca shippear un artefacto a medias.
-import { readFileSync, writeFileSync, mkdirSync, cpSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, cpSync, existsSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const Babel = require('@babel/standalone');
@@ -51,11 +51,25 @@ if (out.includes('text/babel') || out.includes('@babel/standalone')) {
   process.exit(1);
 }
 
-// 4. Escribir public/
+// 4. Escribir public/ — limpio de cero para no arrastrar artefactos viejos
+//    (ej. un public/static/ de un build anterior).
+rmSync(new URL('public', root), { recursive: true, force: true });
 mkdirSync(new URL('public', root), { recursive: true });
 writeFileSync(new URL('public/index.html', root), out);
 cpSync(new URL('serve.json', root), new URL('public/serve.json', root));
-cpSync(new URL('static', root), new URL('public/static', root), { recursive: true });
+// Copia el CONTENIDO de static/ a la raíz de public/ (static/logos/ole.png →
+// public/logos/ole.png), igual que el build viejo `cp -R static/. public/`.
+// El código referencia los assets desde la raíz (/logos/..., /icon-192.png),
+// NO desde /static/. Copiarlos a public/static/ rompe logos e íconos PWA.
+cpSync(new URL('static', root), new URL('public', root), { recursive: true });
+
+// Sanity: los logos de compañías tienen que existir donde el código los busca.
+for (const f of ['logos/ole.png', 'logos/life-group.png', 'icon-192.png']) {
+  if (!existsSync(new URL('public/' + f, root))) {
+    console.error(`build FALLO: falta public/${f} (assets de static/ mal copiados)`);
+    process.exit(1);
+  }
+}
 
 const kb = n => Math.round(n / 1024) + ' KB';
 console.log(`build OK: JSX ${kb(jsx.length)} → compilado ${kb(compiled.length)} · index.html final ${kb(out.length)} (sin Babel CDN)`);

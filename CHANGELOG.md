@@ -1200,3 +1200,19 @@ relevamiento de necesidades por prospecto, basado en el "8+1 y FF" de Life
 - Sección Atajos: tres ítems nuevos — botones "Guardando…" sin duplicados,
   aviso de carga parcial, y versión visible en el login para reportes.
 - APP_VERSION → 2026-06-12.5.
+
+---
+
+# Sesión 2026-06-16 — Fix: logos de compañías rotos (regresión del build paquete 3)
+
+- **Bug**: desde el paso a `scripts/build.mjs` (paquete 3), los logos de
+  compañías en las tarjetas del Kanban (OLE, Investors, Life, Best Doctors)
+  no se veían, igual que los íconos PWA. Causa: el build copiaba `static/`
+  a `public/static/`, pero el código referencia los assets desde la raíz
+  (`/logos/ole.png`, `/icon-192.png`). El build viejo (`cp -R static/. public/`)
+  los dejaba en la raíz; el nuevo los enterró en `/static/`.
+- **Fix**: `build.mjs` ahora copia el contenido de `static/` a la raíz de
+  `public/` (como el build viejo). Agregados: limpieza de `public/` al
+  inicio (rmSync) para no arrastrar el `public/static/` viejo, y un sanity
+  check que ABORTA el build si faltan logos/íconos esperados.
+- APP_VERSION → 2026-06-16.
