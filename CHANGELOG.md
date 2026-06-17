@@ -1238,3 +1238,14 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
 - **UX**: al abrir una tarjeta de tarea, el cursor va directo al campo
   "Nueva entrada de bitácora" (antes al título) — más rápido para gestionar.
 - APP_VERSION → 2026-06-16.2.
+
+---
+
+# Sesión 2026-06-17 — Ancho adaptable en monitores grandes
+
+- El contenido se limitaba a `--app-max-w: 1520px` (centrado), dejando mucho
+  margen vacío en monitores grandes. Nueva media query `min-width: 1600px`
+  sube el límite a `min(2400px, 92vw)`: aprovecha ~92% del viewport con tope
+  de 2400px. Como todo el layout (tabla, kanban, calendario, header) cuelga
+  de esa variable, se ensancha coherente. **Laptop/tablet/mobile (<1600px)
+  quedan EXACTAMENTE igual** — cero cambio funcional. APP_VERSION → 2026-06-17.

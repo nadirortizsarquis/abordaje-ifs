@@ -3112,6 +3112,14 @@
   @media (max-width: 900px) {
     .col-referente, .col-pref { display: none; }
   }
+  /* Monitores grandes: el contenido aprovecha más ancho (default 1520px).
+     Solo aplica >=1600px → laptop/tablet/mobile quedan EXACTAMENTE igual.
+     Fluido con tope: usa ~92% del viewport hasta 2400px máx (en ultra-wide
+     no estira de más). Como todo el layout cuelga de --app-max-w (tabla,
+     kanban, calendario, header), se ensancha coherente sin tocar nada más. */
+  @media (min-width: 1600px) {
+    :root { --app-max-w: min(2400px, 92vw); }
+  }
   /* Breakpoint intermedio (>720 y <=1280): el monitor es chico pero no es
      mobile. Apretamos padding del header y achicamos buscador + botón
      Instrucciones para que todo entre sin que "Salir" se desborde. */
@@ -3391,7 +3399,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-16.2';
+const APP_VERSION = '2026-06-17';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
