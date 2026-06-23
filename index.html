@@ -8968,7 +8968,9 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
   useEffect(() => {
     if (!actual) { setUrl(null); return; }
     let cancel = false;
-    sb.storage.from('ole-reportes').createSignedUrl(actual.storage_path, 3600)
+    const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+    const fname = `Reporte produccion ${nombre || 'asesor'} ${fecha}.pdf`;
+    sb.storage.from('ole-reportes').createSignedUrl(actual.storage_path, 3600, { download: fname })
       .then(({ data, error }) => { if (!cancel) setUrl(error ? null : data.signedUrl); });
     return () => { cancel = true; };
   }, [actual && actual.storage_path]);
