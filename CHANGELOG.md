@@ -1249,3 +1249,15 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
   de 2400px. Como todo el layout (tabla, kanban, calendario, header) cuelga
   de esa variable, se ensancha coherente. **Laptop/tablet/mobile (<1600px)
   quedan EXACTAMENTE igual** — cero cambio funcional. APP_VERSION → 2026-06-17.
+
+---
+
+# Sesión 2026-06-23 — Notificaciones: click marca como vista
+
+- Click en una notificación de la campanita ahora la marca como vista
+  (estilo redes sociales): navega a la tarjeta + dismiss + baja el contador
+  rojo, en un solo toque. Antes el click solo navegaba; había que usar la ✕
+  aparte. La ✕ se mantiene para descartar sin abrir. La reaparición al otro
+  día (o si el recordatorio sigue pendiente) ya la daba el dismiss con
+  caducidad diaria — sin cambios ahí. Cambio de 1 línea en onClickItem.
+- APP_VERSION → 2026-06-23.
