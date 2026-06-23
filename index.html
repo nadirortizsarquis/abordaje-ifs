@@ -5567,7 +5567,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [view, setView] = useState(() => {
     try {
       const v = localStorage.getItem('abordaje_view');
-      return ['lista','tareas','calendario'].includes(v) ? v : 'lista';
+      return ['lista','tareas','calendario','produccion'].includes(v) ? v : 'lista';
     } catch { return 'lista'; }
   });
   useEffect(() => {
@@ -6945,8 +6945,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined">
-        <ViewTabs view={view} setView={setView} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant} />
       </div>
+
+      {view === 'produccion' && !isAssistant && (
+        <ProduccionOLE
+          userId={viewAs ? viewAs.id : (agente?.id || user?.id)}
+          nombre={viewAs ? (viewAs.display_name || viewAs.email) : (agente?.display_name || user?.email)}
+          esAjeno={!!viewAs}
+        />
+      )}
 
       {view === 'lista' && (
         state.prospectos.length === 0 ? (
@@ -8840,7 +8848,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 }
 
 // ── VIEW TABS (Lista | Calendario) ────────────────────────────
-function ViewTabs({ view, setView }) {
+function ViewTabs({ view, setView, showProd }) {
   return (
     <div className="view-tabs">
       <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
@@ -8849,6 +8857,251 @@ function ViewTabs({ view, setView }) {
         onClick={() => setView('tareas')}>Tareas</button>
       <button className={`view-tab ${view === 'calendario' ? 'active' : ''}`}
         onClick={() => setView('calendario')}>Calendario</button>
+      {showProd && (
+        <button className={`view-tab ${view === 'produccion' ? 'active' : ''}`}
+          onClick={() => setView('produccion')}>Mi producción</button>
+      )}
+    </div>
+  );
+}
+
+// ── GRÁFICOS de producción (una sola persona) ─────────────────
+// Izquierda: Objetivo vs Real (apilado, total arriba). Derecha: las 3
+// componentes por separado (Activa / Pendiente / Extra).
+const _fmtMoneyFull = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
+const _fmtK = n => { n = Math.round(n || 0); return n >= 1000 ? '$' + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k' : '$' + n; };
+const _niceScale = maxV => {
+  maxV = Math.max(maxV, 1);
+  const raw = maxV / 4, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = Math.ceil(raw / mag) * mag;
+  return { step, niceMax: Math.max(Math.ceil(maxV * 1.1 / step) * step, step) };
+};
+
+// Mini-gráfico de barras genérico (cada barra con su valor arriba).
+function MiniBars({ bars, totalTop }) {
+  const W = 230, H = 196, PT = 22, PB = 26, G = 26, PR = 6; // G = gutter para etiquetas del eje
+  const cH = H - PT - PB, cW = W - G - PR;
+  const top = Math.max(...bars.map(b => b.stack ? b.stack.reduce((s, x) => s + x.val, 0) : b.val), 1);
+  const { step, niceMax } = _niceScale(top);
+  const px = v => Math.max((v / niceMax) * cH, v > 0 ? 1 : 0);
+  const n = bars.length, slot = cW / n, bw = Math.min(slot - 14, 46);
+  const ticks = []; for (let v = 0; v <= niceMax + 1; v += step) ticks.push(v);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', maxWidth: 280, display: 'block', margin: '0 auto' }}>
+      {ticks.map((v, i) => { const y = PT + cH - (v / niceMax) * cH; return (
+        <g key={i}>
+          <line x1={G} y1={y} x2={W - PR} y2={y} stroke={v === 0 ? '#cbd5e1' : '#eef0f4'} strokeWidth={v === 0 ? 1 : 0.7} />
+          <text x={G - 3} y={y - 1.5} textAnchor="end" fontSize="7.5" fill="#9ca3af">{_fmtK(v)}</text>
+        </g>); })}
+      {bars.map((b, bi) => {
+        const cx = G + slot * bi + slot / 2;
+        const stack = b.stack || [{ val: b.val, color: b.color }];
+        const tot = stack.reduce((s, x) => s + x.val, 0);
+        let yb = PT + cH;
+        return (
+          <g key={bi}>
+            {stack.map((s, si) => { const h = px(s.val); if (h <= 0) return null; const y = yb - h; yb -= h; return (
+              <rect key={si} x={cx - bw / 2} y={y} width={bw} height={h} fill={s.color}
+                rx={si === stack.length - 1 ? 3 : 0} stroke={s.border || 'none'} strokeWidth={s.border ? 0.8 : 0} />); })}
+            {tot > 0 && <text x={cx} y={PT + cH - px(tot) - 4} textAnchor="middle" fontSize="9.5" fontWeight="800" fill="#1e1b4b">{_fmtK(tot)}</text>}
+            <text x={cx} y={PT + cH + 11} textAnchor="middle" fontSize="9" fontWeight="700" fill="#6b7280">{b.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function OleChart({ chart }) {
+  if (!chart) return null;
+  const segs = [
+    { val: chart.base, color: '#6366f1' },
+    { val: chart.extra, color: '#16a34a' },
+    { val: chart.pendiente, color: '#f59e0b' },
+  ].filter(s => s.val > 0);
+  return (
+    <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 600, margin: '0 auto' }}>
+      <div style={{ flex: '1 1 0', minWidth: 200 }}>
+        <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Objetivo vs Real</div>
+        <MiniBars bars={[
+          { label: 'Objetivo', val: chart.objetivo, color: '#e2e8f0', border: '#c2cad8' },
+          { label: 'Real', stack: segs.length ? segs : [{ val: 0, color: '#6366f1' }] },
+        ]} />
+      </div>
+      <div style={{ flex: '1 1 0', minWidth: 200 }}>
+        <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Composición</div>
+        <MiniBars bars={[
+          { label: 'Activa', val: chart.base, color: '#6366f1' },
+          { label: 'Pendiente', val: chart.pendiente, color: '#f59e0b' },
+          { label: 'Extra', val: chart.extra, color: '#16a34a' },
+        ]} />
+      </div>
+    </div>
+  );
+}
+
+// ── MI PRODUCCIÓN (OLE) ───────────────────────────────────────
+// Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
+// muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
+// Asistentes NO acceden (la solapa ni se muestra para ellos).
+function ProduccionOLE({ userId, nombre, esAjeno }) {
+  const [rows, setRows]   = useState(null);
+  const [vista, setVista] = useState(null);
+  const [url, setUrl]     = useState(null);
+  const [err, setErr]     = useState(null);
+
+  useEffect(() => {
+    if (!userId) return;
+    setRows(null); setErr(null); setUrl(null); setVista(null);
+    sb.from('ole_reportes').select('*').eq('user_id', userId)
+      .then(({ data, error }) => {
+        if (error) { setErr(error.message); setRows([]); return; }
+        const orden = { anual: 0, obj1: 1, obj2: 2 };
+        const sorted = (data || []).sort((a, b) => (orden[a.vista] ?? 9) - (orden[b.vista] ?? 9));
+        setRows(sorted);
+        if (sorted.length) setVista(sorted[0].vista);
+      });
+  }, [userId]);
+
+  const actual = rows && rows.find(r => r.vista === vista);
+
+  useEffect(() => {
+    if (!actual) { setUrl(null); return; }
+    let cancel = false;
+    sb.storage.from('ole-reportes').createSignedUrl(actual.storage_path, 3600)
+      .then(({ data, error }) => { if (!cancel) setUrl(error ? null : data.signedUrl); });
+    return () => { cancel = true; };
+  }, [actual && actual.storage_path]);
+
+  const fmt$ = n => (n == null ? '—' : '$' + Math.round(n).toLocaleString('es-AR'));
+  const hace = ts => {
+    const ms = Date.now() - new Date(ts).getTime();
+    const min = Math.floor(ms / 60000);
+    if (min < 1) return 'recién';
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `hace ${h} h`;
+    const d = Math.floor(h / 24);
+    return `hace ${d} día${d === 1 ? '' : 's'}`;
+  };
+  const fechaLarga = ts => new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    + ' ' + new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
+
+  if (rows === null) return <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Cargando producción…</div>;
+  if (!rows.length) return (
+    <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>
+      {esAjeno ? `${nombre} todavía no tiene producción publicada.` : 'Todavía no hay producción publicada para vos.'}
+      {err && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{err}</div>}
+    </div>
+  );
+
+  const r = actual.resumen || {};
+  const diasViejo = (Date.now() - new Date(actual.updated_at).getTime()) / 86400000;
+  const stale = diasViejo > 10;
+  const pctColor = r.pct == null ? '#6366f1' : r.pct >= 100 ? '#16a34a' : r.pct >= 75 ? '#d97706' : '#dc2626';
+  const VL = { anual: 'Año completo', obj1: r.vistaLabel || 'Objetivo 1', obj2: r.vistaLabel || 'Objetivo 2' };
+
+  const card = (label, value, color) => (
+    <div style={{ flex: '1 1 130px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: color || '#1e1b4b', marginTop: 4 }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>
+      {esAjeno && (
+        <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 14 }}>
+          Producción de <strong>{nombre}</strong>
+        </div>
+      )}
+
+      {/* Selector de vista */}
+      {rows.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+          {rows.map(row => (
+            <button key={row.vista} onClick={() => setVista(row.vista)}
+              style={{ border: '1px solid', borderColor: vista === row.vista ? '#3E4095' : '#d1d5db',
+                background: vista === row.vista ? '#3E4095' : '#fff', color: vista === row.vista ? '#fff' : '#374151',
+                borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              {(row.resumen && row.resumen.vistaLabel) || VL[row.vista] || row.vista}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Frescura */}
+      <div style={{ fontSize: 13, color: stale ? '#92400e' : '#6b7280', background: stale ? '#fffbeb' : 'transparent',
+        border: stale ? '1px solid #fde68a' : 'none', borderRadius: 8, padding: stale ? '7px 12px' : '0', marginBottom: 14 }}>
+        {stale ? '⚠ ' : ''}Producción actualizada <strong>{hace(actual.updated_at)}</strong> — {fechaLarga(actual.updated_at)}
+        {stale ? ' (puede estar desactualizada)' : ''}
+      </div>
+
+      {/* Tarjeta resumen */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+        {card('Facturación', fmt$(r.facturacion))}
+        {card('Objetivo', fmt$(r.objetivo))}
+        {card('% Avance', r.pct == null ? '—' : r.pct + '%', pctColor)}
+        {card('Productividad', (r.productividad ?? 0) + ' pól.')}
+        {r.pendiente > 0 && card('Pendiente', fmt$(r.pendiente), '#d97706')}
+        {r.extra > 0 && card('Extra', fmt$(r.extra), '#16a34a')}
+        {r.persistencia != null && card('Persistencia', r.persistencia + '%')}
+      </div>
+
+      {/* Gráfico Objetivo vs Real */}
+      {r.chart && (
+        <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 18 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b', marginBottom: 8 }}>Avance vs objetivo</div>
+          <OleChart chart={r.chart} pct={r.pct} />
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 6 }}>
+            {[['Objetivo', '#e2e8f0'], ['Base activos', '#6366f1'], ...(r.extra > 0 ? [['Extra', '#16a34a']] : []), ...(r.pendiente > 0 ? [['Pendiente', '#f59e0b']] : [])].map(([l, c]) => (
+              <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <span style={{ width: 10, height: 10, borderRadius: 2, background: c, border: c === '#e2e8f0' ? '1px solid #c2cad8' : 'none', display: 'inline-block' }} />{l}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Detalle de pólizas + descarga PDF */}
+      <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
+            Detalle de pólizas {Array.isArray(r.detalle) && <span style={{ fontWeight: 500, color: '#9ca3af' }}>· {r.detalle.length}</span>}
+          </div>
+          {url && <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: '#3E4095', textDecoration: 'none', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 12px' }}>Descargar PDF ↗</a>}
+        </div>
+        {Array.isArray(r.detalle) && r.detalle.length > 0 ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
+                  {['Asegurado', 'Estado', 'Tipo', 'Plan', 'Prima', 'F. Efectivo'].map((h, i) => (
+                    <th key={h} style={{ padding: '7px 10px', textAlign: i >= 4 ? 'right' : 'left', color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {r.detalle.map((p, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', background: p.pend ? '#fffdf5' : (i % 2 === 0 ? '#fff' : '#fafafa') }}>
+                    <td style={{ padding: '7px 10px', color: '#374151', whiteSpace: 'nowrap' }}>
+                      {p.asegurado}
+                      {p.extra && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', borderRadius: 4, padding: '1px 5px' }}>extra</span>}
+                    </td>
+                    <td style={{ padding: '7px 10px', color: p.pend ? '#d97706' : '#6b7280', whiteSpace: 'nowrap' }}>{p.estado}</td>
+                    <td style={{ padding: '7px 10px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.tipo}</td>
+                    <td style={{ padding: '7px 10px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.plan}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600, color: '#1e1b4b', whiteSpace: 'nowrap' }}>{fmt$(p.prima)}</td>
+                    <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.fEfectivo}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Sin pólizas en este período.</div>
+        )}
+      </div>
     </div>
   );
 }
