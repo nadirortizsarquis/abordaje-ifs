@@ -6950,9 +6950,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
       {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && (
         <ProduccionOLE
-          userId={viewAs ? viewAs.id : (agente?.id || user?.id)}
-          nombre={viewAs ? (viewAs.display_name || viewAs.email) : (agente?.display_name || user?.email)}
-          esAjeno={!!viewAs}
+          selfUserId={agente?.id || user?.id}
+          selfNombre={agente?.display_name || user?.email}
+          isAdmin={agente?.role === 'admin'}
+          viewAs={viewAs}
         />
       )}
 
@@ -8944,29 +8945,48 @@ function OleChart({ chart }) {
 // Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
 // muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
 // Asistentes NO acceden (la solapa ni se muestra para ellos).
-function ProduccionOLE({ userId, nombre, esAjeno }) {
+function ProduccionOLE({ selfUserId, selfNombre, isAdmin, viewAs }) {
+  // target: a quién estoy mirando. {type:'user'|'equipo', userId, nombre}
+  const initialTarget = viewAs
+    ? { type: 'user', userId: viewAs.id, nombre: viewAs.display_name || viewAs.email }
+    : { type: 'user', userId: selfUserId, nombre: selfNombre };
+  const [target, setTarget] = useState(initialTarget);
+  const [agentes, setAgentes] = useState([]);   // lista para el selector (admin)
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
   const [url, setUrl]     = useState(null);
   const [err, setErr]     = useState(null);
 
+  const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
+  const nombre = target.nombre;
+
+  // Cargar lista de agentes para el selector (solo admin)
   useEffect(() => {
-    if (!userId) return;
+    if (!isAdmin) return;
+    sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
+      .order('display_name', { ascending: true })
+      .then(({ data }) => setAgentes(data || []));
+  }, [isAdmin]);
+
+  // Cargar reportes del target (ole_reportes por user_id, o ole_equipo)
+  useEffect(() => {
     setRows(null); setErr(null); setUrl(null); setVista(null);
-    sb.from('ole_reportes').select('*').eq('user_id', userId)
-      .then(({ data, error }) => {
-        if (error) { setErr(error.message); setRows([]); return; }
-        const orden = { anual: 0, obj1: 1, obj2: 2 };
-        const sorted = (data || []).sort((a, b) => (orden[a.vista] ?? 9) - (orden[b.vista] ?? 9));
-        setRows(sorted);
-        if (sorted.length) setVista(sorted[0].vista);
-      });
-  }, [userId]);
+    const q = target.type === 'equipo'
+      ? sb.from('ole_equipo').select('*')
+      : sb.from('ole_reportes').select('*').eq('user_id', target.userId);
+    q.then(({ data, error }) => {
+      if (error) { setErr(error.message); setRows([]); return; }
+      const orden = { anual: 0, obj1: 1, obj2: 2 };
+      const sorted = (data || []).sort((a, b) => (orden[a.vista] ?? 9) - (orden[b.vista] ?? 9));
+      setRows(sorted);
+      if (sorted.length) setVista(sorted[0].vista);
+    });
+  }, [target.type, target.userId]);
 
   const actual = rows && rows.find(r => r.vista === vista);
 
   useEffect(() => {
-    if (!actual) { setUrl(null); return; }
+    if (!actual || !actual.storage_path) { setUrl(null); return; }
     let cancel = false;
     const fecha = new Date().toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-');
     const fname = `Reporte produccion ${nombre || 'asesor'} ${fecha}.pdf`;
@@ -8974,6 +8994,24 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
       .then(({ data, error }) => { if (!cancel) setUrl(error ? null : data.signedUrl); });
     return () => { cancel = true; };
   }, [actual && actual.storage_path]);
+
+  // Selector de asesor / equipo (solo admin)
+  const selector = isAdmin ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Ver:</span>
+      <select
+        value={target.type === 'equipo' ? '__equipo__' : target.userId}
+        onChange={e => {
+          const v = e.target.value;
+          if (v === '__equipo__') setTarget({ type: 'equipo', nombre: 'Equipo' });
+          else { const a = agentes.find(x => x.id === v); setTarget({ type: 'user', userId: v, nombre: a ? (a.display_name || a.email) : 'asesor' }); }
+        }}
+        style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 600, color: '#374151', background: '#fff', cursor: 'pointer', minWidth: 200 }}>
+        <option value="__equipo__">📊 Equipo (todos)</option>
+        {agentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
+      </select>
+    </div>
+  ) : null;
 
   const fmt$ = n => (n == null ? '—' : '$' + Math.round(n).toLocaleString('es-AR'));
   const hace = ts => {
@@ -8989,10 +9027,13 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
   const fechaLarga = ts => new Date(ts).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' })
     + ' ' + new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
-  if (rows === null) return <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Cargando producción…</div>;
-  if (!rows.length) return (
+  const wrap = (inner) => (
+    <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>{selector}{inner}</div>
+  );
+  if (rows === null) return wrap(<div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Cargando producción…</div>);
+  if (!rows.length) return wrap(
     <div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>
-      {esAjeno ? `${nombre} todavía no tiene producción publicada.` : 'Todavía no hay producción publicada para vos.'}
+      {target.type === 'equipo' ? 'El equipo todavía no tiene producción publicada.' : (esAjeno ? `${nombre} todavía no tiene producción publicada.` : 'Todavía no hay producción publicada para vos.')}
       {err && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{err}</div>}
     </div>
   );
@@ -9012,9 +9053,10 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
 
   return (
     <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>
+      {selector}
       {esAjeno && (
         <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 14 }}>
-          Producción de <strong>{nombre}</strong>
+          {target.type === 'equipo' ? <>Producción del <strong>Equipo</strong> (todos los asesores)</> : <>Producción de <strong>{nombre}</strong></>}
         </div>
       )}
 
