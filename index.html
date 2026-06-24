@@ -6962,6 +6962,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} />
         {view === 'produccion' && isAdminProd && prodTarget && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
+        )}
+        {view === 'produccion' && isAdminProd && prodTarget && (
           <select
             value={prodTarget.type === 'equipo' ? '__equipo__' : prodTarget.userId}
             onChange={e => {
@@ -9047,11 +9050,6 @@ function ProduccionOLE({ target, selfUserId }) {
   return (
     <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>
       {selector}
-      {esAjeno && (
-        <div style={{ background: '#eef2ff', border: '1px solid #c7d2fe', color: '#3730a3', borderRadius: 8, padding: '8px 12px', fontSize: 13, marginBottom: 14 }}>
-          {target.type === 'equipo' ? <>Producción del <strong>Equipo</strong> (todos los asesores)</> : <>Producción de <strong>{nombre}</strong></>}
-        </div>
-      )}
 
       {/* Selector de vista */}
       {rows.length > 1 && (
