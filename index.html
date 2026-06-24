@@ -6970,7 +6970,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               else { const a = prodAgentes.find(x => x.id === v); setProdTarget({ type: 'user', userId: v, nombre: a ? (a.display_name || a.email) : 'asesor' }); }
             }}
             style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 11px', fontSize: 13, fontWeight: 600, color: '#374151', background: '#fff', cursor: 'pointer' }}>
-            <option value="__equipo__">📊 Equipo (todos)</option>
+            <option value="__equipo__">Equipo (todos)</option>
             {prodAgentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
           </select>
         )}
