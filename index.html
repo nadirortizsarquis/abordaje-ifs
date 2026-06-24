@@ -5438,7 +5438,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -6945,10 +6945,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined">
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} />
       </div>
 
-      {view === 'produccion' && !isAssistant && (
+      {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && (
         <ProduccionOLE
           userId={viewAs ? viewAs.id : (agente?.id || user?.id)}
           nombre={viewAs ? (viewAs.display_name || viewAs.email) : (agente?.display_name || user?.email)}
@@ -10618,7 +10618,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 // ── PROFILES API (compartido entre apps IFS) ──────────────────
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
-    .select('id, email, display_name, role, advisor_name_ole, assistant_of_id, shares_calendar_with_assistant, created_at')
+    .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, assistant_of_id, shares_calendar_with_assistant, created_at')
     .order('role', { ascending: false })
     .order('display_name', { ascending: true });
   if (error) { console.error('loadAllProfiles:', error); return []; }
@@ -10949,7 +10949,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
+  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '', ole_ver_produccion: true });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -10976,6 +10976,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
       advisor_name_ole: p.advisor_name_ole || '',
       role: p.role || 'agent',
       assistant_of_id: p.assistant_of_id || '',
+      ole_ver_produccion: p.ole_ver_produccion !== false,
     });
     setError(null);
   };
@@ -10989,6 +10990,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
         advisor_name_ole: draft.advisor_name_ole || null,
         role: draft.role,
         assistant_of_id: draft.assistant_of_id || null,
+        ole_ver_produccion: draft.ole_ver_produccion,
       });
       setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft, assistant_of_id: draft.assistant_of_id || null } : p));
       setEditingId(null);
@@ -11183,13 +11185,25 @@ function UsuariosSection({ currentUser, onViewAs }) {
                     <td style={{ ...adminTdStyle, color: '#6b7280', fontSize: 12 }}>{p.email}</td>
                     <td style={adminTdStyle}>
                       {isEditing ? (
-                        <input value={draft.advisor_name_ole}
-                          onChange={e => setDraft(d => ({ ...d, advisor_name_ole: e.target.value }))}
-                          placeholder="HERNAN  CARDONA VALDES" style={adminInpStyle} />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <input value={draft.advisor_name_ole}
+                            onChange={e => setDraft(d => ({ ...d, advisor_name_ole: e.target.value }))}
+                            placeholder="HERNAN  CARDONA VALDES" style={adminInpStyle} />
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={draft.ole_ver_produccion}
+                              onChange={e => setDraft(d => ({ ...d, ole_ver_produccion: e.target.checked }))} />
+                            Mostrar producción
+                          </label>
+                        </div>
                       ) : (
-                        <span style={{ fontSize: 11, color: '#6b7280', fontFamily: 'ui-monospace, monospace' }}>
-                          {p.advisor_name_ole || '—'}
-                        </span>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          <span style={{ fontSize: 11, color: '#6b7280', fontFamily: 'ui-monospace, monospace' }}>
+                            {p.advisor_name_ole || '—'}
+                          </span>
+                          {p.ole_ver_produccion === false && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px', alignSelf: 'flex-start' }}>sin producción</span>
+                          )}
+                        </div>
                       )}
                     </td>
                     <td style={adminTdStyle}>
@@ -14207,7 +14221,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) { setAgente(data); return; }
