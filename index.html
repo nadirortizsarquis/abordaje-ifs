@@ -8999,7 +8999,7 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
 
   const r = actual.resumen || {};
   const diasViejo = (Date.now() - new Date(actual.updated_at).getTime()) / 86400000;
-  const stale = diasViejo > 10;
+  const stale = diasViejo > 1;
   const pctColor = r.pct == null ? '#6366f1' : r.pct >= 100 ? '#16a34a' : r.pct >= 75 ? '#d97706' : '#dc2626';
   const VL = { anual: 'Año completo', obj1: r.vistaLabel || 'Objetivo 1', obj2: r.vistaLabel || 'Objetivo 2' };
 
@@ -9033,8 +9033,8 @@ function ProduccionOLE({ userId, nombre, esAjeno }) {
       )}
 
       {/* Frescura */}
-      <div style={{ fontSize: 13, color: stale ? '#92400e' : '#6b7280', background: stale ? '#fffbeb' : 'transparent',
-        border: stale ? '1px solid #fde68a' : 'none', borderRadius: 8, padding: stale ? '7px 12px' : '0', marginBottom: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: stale ? 600 : 400, color: stale ? '#991b1b' : '#6b7280', background: stale ? '#fef2f2' : 'transparent',
+        border: stale ? '1px solid #fecaca' : 'none', borderRadius: 8, padding: stale ? '7px 12px' : '0', marginBottom: 14 }}>
         {stale ? '⚠ ' : ''}Producción actualizada <strong>{hace(actual.updated_at)}</strong> — {fechaLarga(actual.updated_at)}
         {stale ? ' (puede estar desactualizada)' : ''}
       </div>
