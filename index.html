@@ -5328,6 +5328,21 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // del principal y banner sutil arriba que indica de quién está siendo
   // asistente. La marca visual (★) en cards/listas se basa en actor_id.
   const isAssistant = !!agente?.assistant_of_id;
+  const isAdminProd = agente?.role === 'admin';
+  // Estado del selector de "Mi producción" (elevado para mostrarlo en la fila de tabs)
+  const [prodTarget, setProdTarget] = useState(null);
+  const [prodAgentes, setProdAgentes] = useState([]);
+  useEffect(() => {
+    if (!agente) return;
+    setProdTarget(viewAs
+      ? { type: 'user', userId: viewAs.id, nombre: viewAs.display_name || viewAs.email }
+      : { type: 'user', userId: agente.id, nombre: agente.display_name || user?.email });
+  }, [agente?.id, viewAs?.id]);
+  useEffect(() => {
+    if (!isAdminProd) return;
+    sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
+      .order('display_name', { ascending: true }).then(({ data }) => setProdAgentes(data || []));
+  }, [isAdminProd]);
   const [principalProfile, setPrincipalProfile] = useState(null);
   // Trigger para refrescar principalProfile durante la sesión. Si el principal
   // cambia `shares_calendar_with_assistant` o desactiva `gcal_enabled` mientras
@@ -6944,17 +6959,25 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       {/* Header de página: solo las pestañas Lista/Tareas/Calendario.
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
-      <div className="main-head-combined">
+      <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} />
+        {view === 'produccion' && isAdminProd && prodTarget && (
+          <select
+            value={prodTarget.type === 'equipo' ? '__equipo__' : prodTarget.userId}
+            onChange={e => {
+              const v = e.target.value;
+              if (v === '__equipo__') setProdTarget({ type: 'equipo', nombre: 'Equipo' });
+              else { const a = prodAgentes.find(x => x.id === v); setProdTarget({ type: 'user', userId: v, nombre: a ? (a.display_name || a.email) : 'asesor' }); }
+            }}
+            style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '6px 11px', fontSize: 13, fontWeight: 600, color: '#374151', background: '#fff', cursor: 'pointer' }}>
+            <option value="__equipo__">📊 Equipo (todos)</option>
+            {prodAgentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
+          </select>
+        )}
       </div>
 
-      {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && (
-        <ProduccionOLE
-          selfUserId={agente?.id || user?.id}
-          selfNombre={agente?.display_name || user?.email}
-          isAdmin={agente?.role === 'admin'}
-          viewAs={viewAs}
-        />
+      {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && prodTarget && (
+        <ProduccionOLE target={prodTarget} selfUserId={agente?.id || user?.id} />
       )}
 
       {view === 'lista' && (
@@ -8945,13 +8968,7 @@ function OleChart({ chart }) {
 // Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
 // muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
 // Asistentes NO acceden (la solapa ni se muestra para ellos).
-function ProduccionOLE({ selfUserId, selfNombre, isAdmin, viewAs }) {
-  // target: a quién estoy mirando. {type:'user'|'equipo', userId, nombre}
-  const initialTarget = viewAs
-    ? { type: 'user', userId: viewAs.id, nombre: viewAs.display_name || viewAs.email }
-    : { type: 'user', userId: selfUserId, nombre: selfNombre };
-  const [target, setTarget] = useState(initialTarget);
-  const [agentes, setAgentes] = useState([]);   // lista para el selector (admin)
+function ProduccionOLE({ target, selfUserId }) {
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
   const [url, setUrl]     = useState(null);
@@ -8959,14 +8976,6 @@ function ProduccionOLE({ selfUserId, selfNombre, isAdmin, viewAs }) {
 
   const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
   const nombre = target.nombre;
-
-  // Cargar lista de agentes para el selector (solo admin)
-  useEffect(() => {
-    if (!isAdmin) return;
-    sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
-      .order('display_name', { ascending: true })
-      .then(({ data }) => setAgentes(data || []));
-  }, [isAdmin]);
 
   // Cargar reportes del target (ole_reportes por user_id, o ole_equipo)
   useEffect(() => {
@@ -8995,23 +9004,7 @@ function ProduccionOLE({ selfUserId, selfNombre, isAdmin, viewAs }) {
     return () => { cancel = true; };
   }, [actual && actual.storage_path]);
 
-  // Selector de asesor / equipo (solo admin)
-  const selector = isAdmin ? (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-      <span style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Ver:</span>
-      <select
-        value={target.type === 'equipo' ? '__equipo__' : target.userId}
-        onChange={e => {
-          const v = e.target.value;
-          if (v === '__equipo__') setTarget({ type: 'equipo', nombre: 'Equipo' });
-          else { const a = agentes.find(x => x.id === v); setTarget({ type: 'user', userId: v, nombre: a ? (a.display_name || a.email) : 'asesor' }); }
-        }}
-        style={{ border: '1px solid #d1d5db', borderRadius: 8, padding: '7px 12px', fontSize: 13, fontWeight: 600, color: '#374151', background: '#fff', cursor: 'pointer', minWidth: 200 }}>
-        <option value="__equipo__">📊 Equipo (todos)</option>
-        {agentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
-      </select>
-    </div>
-  ) : null;
+  const selector = null; // el selector ahora vive en la fila de tabs (App)
 
   const fmt$ = n => (n == null ? '—' : '$' + Math.round(n).toLocaleString('es-AR'));
   const hace = ts => {
