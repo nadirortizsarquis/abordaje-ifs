@@ -6959,7 +6959,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       {/* Header de página: solo las pestañas Lista/Tareas/Calendario.
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
-      <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+      <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
