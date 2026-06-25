@@ -7343,6 +7343,7 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
     const target = document.getElementById('headerActions');
     if (!target) return;
     target.innerHTML = '';
+    let menuCleanup = null;
     const mk = (txt, title, fn) => {
       const b = document.createElement('button');
       b.className = 'header-btn';
@@ -7405,7 +7406,57 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       if (onChangePassword) u.onclick = onChangePassword;
       target.appendChild(u);
       target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
+
+      // ── Menú hamburguesa: acceso a otros tableros IFS ──
+      // target con NOMBRE FIJO por tablero (ej "ifs-entrenamiento") en vez de
+      // "_blank" → reutiliza la misma pestaña en clicks sucesivos. Cada destino
+      // tiene su propio candado. Tablero Control queda afuera de la lista.
+      const TABLEROS_IFS = [
+        { key: 'comisiones', label: 'Comisiones', desc: 'Proyección de ingresos', url: 'https://comisiones.broker-ifs.com' },
+        { key: 'entrenamiento', label: 'Entrenamiento', desc: 'Manual de inducción', url: 'https://entrenamiento.broker-ifs.com' },
+        { key: 'calculadora', label: 'Calculadora', desc: 'Cotizador de inversión', url: 'https://calculadora.broker-ifs.com' },
+        { key: 'patrimoniales', label: 'Patrimoniales', desc: 'Cotizador & comparador', url: 'https://patrimoniales.broker-ifs.com' },
+      ];
+      const menuWrap = document.createElement('div');
+      menuWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;margin-left:6px;';
+      const hb = document.createElement('button');
+      hb.type = 'button';
+      hb.title = 'Otros tableros IFS';
+      hb.setAttribute('aria-label', 'Otros tableros IFS');
+      hb.style.cssText = 'display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;width:40px;height:34px;padding:0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.22);border-radius:6px;cursor:pointer;transition:all .15s;';
+      for (let i = 0; i < 3; i++) { const ln = document.createElement('span'); ln.style.cssText = 'display:block;width:18px;height:2px;background:#fff;border-radius:2px;'; hb.appendChild(ln); }
+      const panel = document.createElement('div');
+      panel.style.cssText = 'position:absolute;top:calc(100% + 8px);right:0;z-index:1000;min-width:248px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.28);border:1px solid #e5e7eb;overflow:hidden;display:none;';
+      const phead = document.createElement('div');
+      phead.textContent = 'Tableros IFS';
+      phead.style.cssText = 'padding:10px 14px;background:linear-gradient(135deg,#1e1b4b 0%,#1e3a5f 100%);color:#91D8F7;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;';
+      panel.appendChild(phead);
+      const plist = document.createElement('div');
+      plist.style.cssText = 'padding:6px;';
+      const onOutside = (e) => { if (!menuWrap.contains(e.target)) closeMenu(); };
+      const onEscMenu = (e) => { if (e.key === 'Escape') closeMenu(); };
+      function openMenu() { panel.style.display = 'block'; hb.style.background = 'rgba(255,255,255,0.22)'; document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onEscMenu); }
+      function closeMenu() { panel.style.display = 'none'; hb.style.background = 'rgba(255,255,255,0.08)'; document.removeEventListener('mousedown', onOutside); document.removeEventListener('keydown', onEscMenu); }
+      TABLEROS_IFS.forEach(t => {
+        const a = document.createElement('a');
+        a.href = t.url; a.target = 'ifs-' + t.key; a.rel = 'noopener noreferrer';
+        a.style.cssText = 'display:flex;flex-direction:column;gap:1px;padding:9px 12px;border-radius:8px;text-decoration:none;color:#1a1a2e;transition:background .12s;';
+        const l1 = document.createElement('span'); l1.textContent = t.label; l1.style.cssText = 'font-size:13.5px;font-weight:700;';
+        const l2 = document.createElement('span'); l2.textContent = t.desc; l2.style.cssText = 'font-size:11px;color:#6b7280;';
+        a.appendChild(l1); a.appendChild(l2);
+        a.onmouseenter = () => a.style.background = '#f0f2f7';
+        a.onmouseleave = () => a.style.background = 'transparent';
+        a.onclick = () => closeMenu();
+        plist.appendChild(a);
+      });
+      panel.appendChild(plist);
+      menuWrap.appendChild(hb);
+      menuWrap.appendChild(panel);
+      hb.onclick = () => { panel.style.display === 'block' ? closeMenu() : openMenu(); };
+      target.appendChild(menuWrap);
+      menuCleanup = closeMenu;
     }
+    return () => { if (menuCleanup) menuCleanup(); };
   }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onToggleBell]);
   return null;
 }
