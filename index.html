@@ -575,8 +575,10 @@
     margin-top: 10px;
     /* flex-start: cada columna toma su propia altura natural (estilo Trello) */
     align-items: flex-start;
-    /* Altura fija para que la barra de scroll horizontal quede pegada al bottom del viewport */
-    height: calc(100vh - var(--header-h) - 110px);
+    /* Altura para que la barra de scroll horizontal quede pegada al bottom del
+       viewport. En Tareas, arriba del kanban solo está la fila de tabs (no hay
+       FilterBar), por eso el descuento es chico. dvh = alto real en standalone/PWA. */
+    height: calc(100dvh - var(--header-h) - 72px);
   }
   .kanban-col {
     flex: 0 0 240px;
@@ -7413,9 +7415,9 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       panel.style.cssText = 'position:absolute;top:calc(100% + 8px);right:0;z-index:1000;min-width:248px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.28);border:1px solid #e5e7eb;overflow:hidden;display:none;';
       // Sección de cuenta (arriba): identidad + cambiar contraseña + Salir.
       const acc = document.createElement('div');
-      acc.style.cssText = 'padding:12px 14px 8px;border-bottom:1px solid #f0f2f7;';
+      acc.style.cssText = 'padding:6px;border-bottom:1px solid #f0f2f7;';
       const idRow = document.createElement('div');
-      idRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+      idRow.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 12px 8px;';
       if (esAdmin) {
         const b = document.createElement('span');
         b.textContent = 'admin';
@@ -7424,19 +7426,20 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       }
       const nm = document.createElement('span');
       nm.textContent = displayName;
-      nm.style.cssText = 'font-size:13px;font-weight:700;color:#1a1a2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      nm.style.cssText = 'font-size:13.5px;font-weight:700;color:#1a1a2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
       idRow.appendChild(nm);
       acc.appendChild(idRow);
       const mkAccBtn = (txt, color, fn) => {
         const bb = document.createElement('button');
         bb.type = 'button';
         bb.textContent = txt;
-        bb.style.cssText = 'display:block;width:100%;text-align:left;padding:7px 10px;border-radius:8px;background:transparent;border:none;cursor:pointer;font:inherit;font-size:12.5px;color:' + color + ';transition:background .12s;';
+        bb.style.cssText = 'display:block;width:100%;text-align:left;padding:9px 12px;border-radius:8px;background:transparent;border:none;cursor:pointer;font:inherit;font-size:13.5px;font-weight:700;color:' + color + ';transition:background .12s;';
         bb.onmouseenter = () => bb.style.background = '#f0f2f7';
         bb.onmouseleave = () => bb.style.background = 'transparent';
         bb.onclick = () => { closeMenu(); fn && fn(); };
         return bb;
       };
+      acc.appendChild(mkAccBtn('Actualizar', '#1a1a2e', () => window.location.reload()));
       if (onChangePassword) acc.appendChild(mkAccBtn('Cambiar contraseña', '#1a1a2e', onChangePassword));
       acc.appendChild(mkAccBtn('Salir', '#b91c1c', onLogout));
       panel.appendChild(acc);
