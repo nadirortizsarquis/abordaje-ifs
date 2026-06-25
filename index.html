@@ -7389,28 +7389,12 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
     }
     target.appendChild(mk('Ajustes', esAdmin ? 'Configuración y gestión de usuarios' : 'Configurar horario y vista', onOpenSettings));
     if (user) {
-      const sep = document.createElement('div');
-      sep.style.cssText = 'width:1px;height:22px;background:rgba(255,255,255,0.18);margin:0 4px;';
-      target.appendChild(sep);
-      if (esAdmin) {
-        const badge = document.createElement('span');
-        badge.className = 'header-admin-badge';
-        badge.textContent = 'ADMIN';
-        target.appendChild(badge);
-      }
-      const u = document.createElement('button');
-      u.className = 'header-user';
-      u.type = 'button';
-      u.textContent = displayName;
-      u.title = onChangePassword ? 'Cambiar contraseña' : user.email;
-      if (onChangePassword) u.onclick = onChangePassword;
-      target.appendChild(u);
-      target.appendChild(mk('Salir', 'Cerrar sesión', onLogout));
-
-      // ── Menú hamburguesa: acceso a otros tableros IFS ──
-      // target con NOMBRE FIJO por tablero (ej "ifs-entrenamiento") en vez de
-      // "_blank" → reutiliza la misma pestaña en clicks sucesivos. Cada destino
-      // tiene su propio candado. Tablero Control queda afuera de la lista.
+      // ── Menú hamburguesa: cuenta (identidad + cambiar contraseña + Salir)
+      //    + acceso a otros tableros IFS ──
+      // El usuario, "cambiar contraseña" y "Salir" viven DENTRO del menú (no en
+      // el header) para ahorrar espacio, sobre todo en mobile/PWA. La campanita
+      // y Ajustes quedan como íconos en el header. Los links a otros tableros
+      // usan target con NOMBRE FIJO (ej "ifs-entrenamiento") → reutilizan pestaña.
       const TABLEROS_IFS = [
         { key: 'comisiones', label: 'Comisiones', desc: 'Proyección de ingresos', url: 'https://comisiones.broker-ifs.com' },
         { key: 'entrenamiento', label: 'Entrenamiento', desc: 'Manual de inducción', url: 'https://entrenamiento.broker-ifs.com' },
@@ -7421,14 +7405,44 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       menuWrap.style.cssText = 'position:relative;display:inline-flex;align-items:center;margin-left:6px;';
       const hb = document.createElement('button');
       hb.type = 'button';
-      hb.title = 'Otros tableros IFS';
-      hb.setAttribute('aria-label', 'Otros tableros IFS');
+      hb.title = 'Menú';
+      hb.setAttribute('aria-label', 'Menú');
       hb.style.cssText = 'display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;width:40px;height:34px;padding:0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.22);border-radius:6px;cursor:pointer;transition:all .15s;';
       for (let i = 0; i < 3; i++) { const ln = document.createElement('span'); ln.style.cssText = 'display:block;width:18px;height:2px;background:#fff;border-radius:2px;'; hb.appendChild(ln); }
       const panel = document.createElement('div');
       panel.style.cssText = 'position:absolute;top:calc(100% + 8px);right:0;z-index:1000;min-width:248px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.28);border:1px solid #e5e7eb;overflow:hidden;display:none;';
+      // Sección de cuenta (arriba): identidad + cambiar contraseña + Salir.
+      const acc = document.createElement('div');
+      acc.style.cssText = 'padding:12px 14px 8px;border-bottom:1px solid #f0f2f7;';
+      const idRow = document.createElement('div');
+      idRow.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:8px;';
+      if (esAdmin) {
+        const b = document.createElement('span');
+        b.textContent = 'admin';
+        b.style.cssText = 'font-size:9px;color:#0c4a6e;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;background:#7dd3fc;border-radius:4px;padding:1px 6px;';
+        idRow.appendChild(b);
+      }
+      const nm = document.createElement('span');
+      nm.textContent = displayName;
+      nm.style.cssText = 'font-size:13px;font-weight:700;color:#1a1a2e;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+      idRow.appendChild(nm);
+      acc.appendChild(idRow);
+      const mkAccBtn = (txt, color, fn) => {
+        const bb = document.createElement('button');
+        bb.type = 'button';
+        bb.textContent = txt;
+        bb.style.cssText = 'display:block;width:100%;text-align:left;padding:7px 10px;border-radius:8px;background:transparent;border:none;cursor:pointer;font:inherit;font-size:12.5px;color:' + color + ';transition:background .12s;';
+        bb.onmouseenter = () => bb.style.background = '#f0f2f7';
+        bb.onmouseleave = () => bb.style.background = 'transparent';
+        bb.onclick = () => { closeMenu(); fn && fn(); };
+        return bb;
+      };
+      if (onChangePassword) acc.appendChild(mkAccBtn('Cambiar contraseña', '#1a1a2e', onChangePassword));
+      acc.appendChild(mkAccBtn('Salir', '#b91c1c', onLogout));
+      panel.appendChild(acc);
+
       const phead = document.createElement('div');
-      phead.textContent = 'Tableros IFS';
+      phead.textContent = 'Otros tableros IFS';
       phead.style.cssText = 'padding:10px 14px;background:linear-gradient(135deg,#1e1b4b 0%,#1e3a5f 100%);color:#91D8F7;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;';
       panel.appendChild(phead);
       const plist = document.createElement('div');
