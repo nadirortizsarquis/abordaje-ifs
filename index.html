@@ -98,8 +98,11 @@
   }
   .header-subtitle { color: var(--celeste); font-size: 0.78rem; display: block; font-weight: 400; }
   .header-actions { display: flex; gap: 10px; align-items: center; }
-  .header-instr-slot { margin-left: auto; display: flex; align-items: center; }
-  .header-search-slot { display: flex; align-items: center; margin-left: 10px; }
+  /* Wrapper de buscador + acciones (campanita + menú). En desktop va pegado a
+     la derecha (margin-left:auto, antes lo hacía .header-instr-slot que ya no
+     existe). En mobile pasa a ser su propia fila — ver media query. */
+  .header-actions-row { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+  .header-search-slot { display: flex; align-items: center; }
   .header-btn {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -3123,13 +3126,12 @@
     :root { --app-max-w: min(2400px, 92vw); }
   }
   /* Breakpoint intermedio (>720 y <=1280): el monitor es chico pero no es
-     mobile. Apretamos padding del header y achicamos buscador + botón
-     Instrucciones para que todo entre sin que "Salir" se desborde. */
+     mobile. Apretamos padding del header y achicamos el buscador para que
+     todo entre sin que el cluster derecho se desborde. */
   @media (min-width: 721px) and (max-width: 1280px) {
     .header { padding-left: 14px; padding-right: 14px; gap: 10px; }
     .header-title { padding-left: 10px; font-size: 1rem; }
     .header-subtitle { font-size: 0.7rem; }
-    .header-instr-slot .header-btn { padding: 6px 10px; font-size: 0.72rem; }
     .buscador-input { width: 180px; font-size: 0.76rem; padding: 6px 10px; }
     .buscador-input:focus { width: 220px; }
     .header-btn { padding: 6px 10px; font-size: 0.74rem; }
@@ -3141,7 +3143,7 @@
        Fila 3: buscador (full width).
        La altura sube para que el contenido principal no quede tapado
        (--header-h se override y el margin-top de .main respeta el cambio). */
-    :root { --header-h: 140px; }
+    :root { --header-h: 112px; }
     .header {
       height: auto;
       min-height: var(--header-h);
@@ -3175,43 +3177,37 @@
       width: 1px;
     }
     .header-subtitle { display: none; }
-    /* En mobile combinamos buscador + botón Instrucciones en la última
-       fila para ahorrar una línea. El buscador toma el espacio que sobra
-       y el botón Instrucciones queda pegado a la derecha. */
-    .header-search-slot {
-      order: 10; flex: 1 1 auto;
-      margin-left: 0; margin-right: 0;
+    /* Header compacto en mobile: buscador + campanita + menú en UNA fila
+       (fila 2), debajo de logo+título. El buscador crece y queda pegado a la
+       campanita. Orden visual: [☰ menú][🔔 campanita][buscador →]. Instrucciones,
+       Ajustes, cuenta y otros tableros viven dentro del menú hamburguesa. */
+    .header-actions-row {
+      order: 5; flex: 1 1 100%; min-width: 0;
+      margin-left: 0; gap: 8px;
     }
-    .header-search-slot .buscador-input { width: 100%; max-width: 100%; }
-    .header-search-slot .buscador-input:focus { width: 100%; }
-    /* El dropdown de resultados se ancla al ancho útil del header, NO al
-       wrap angosto que comparte la última fila con el botón Instrucciones.
-       Con el anclaje original (right:0 + width:340 sobre un wrap corrido) el
-       desplegable se iba a la izquierda y se salía de pantalla → quedaba
-       "cruzado" y tapaba la búsqueda. Acá ocupa de borde a borde del header. */
-    .buscador-dropdown {
-      left: 0;
-      right: auto;
-      width: calc(100vw - 32px);
-      max-width: none;
-    }
-    .header-instr-slot {
-      order: 11; margin-left: 6px; margin-right: 0; flex: 0 0 auto;
-    }
-    .header-instr-slot .header-btn { padding: 7px 10px; font-size: 0.74rem; }
     .header-actions {
-      order: 5; flex: 1 100%;
-      gap: 8px;
-      /* nowrap: si el nombre del user es largo (ej. "Federico Del Boca"),
-         se trunca con ellipsis en .header-user en lugar de empujar Salir
-         a una segunda línea, lo que rompía la altura del header y
-         escondía las tabs Lista/Tareas/Calendario. */
-      flex-wrap: nowrap;
-      min-width: 0;
-      justify-content: flex-end;
-      align-items: center;
+      order: 1; flex: 0 0 auto; gap: 8px;
+      flex-wrap: nowrap; min-width: 0; align-items: center;
     }
     .header-actions > * { flex: 0 0 auto; }
+    /* La campanita va DESPUÉS del menú (que es el primer hijo) para quedar
+       pegada al buscador, que la sigue. */
+    .header-actions .bell-btn { order: 2; }
+    .header-search-slot {
+      order: 2; flex: 1 1 0; min-width: 0;
+      margin-left: 0; margin-right: 0;
+    }
+    .header-search-slot .buscador-wrap { display: flex; flex: 1 1 auto; min-width: 0; margin-right: 0; }
+    .header-search-slot .buscador-input { flex: 1 1 auto; width: auto; min-width: 0; max-width: 100%; }
+    .header-search-slot .buscador-input:focus { width: auto; }
+    /* El dropdown de resultados se ancla al viewport (position:fixed): de borde
+       a borde bajo el header, independiente del ancho del input. Antes seguía
+       al input angosto y quedaba "cruzado"/desbordado en mobile. */
+    .buscador-dropdown {
+      position: fixed;
+      left: 16px; right: 16px; width: auto; max-width: none;
+      top: calc(var(--header-h) + max(env(safe-area-inset-top, 0px), 32px) - 4px);
+    }
     .header-btn { padding: 7px 12px; font-size: 0.78rem; }
     .header-user {
       font-size: 0.78rem;
@@ -3387,9 +3383,10 @@
       Planificador de Abordaje
       <span class="header-subtitle">Gestión de prospectos · IFS</span>
     </div>
-    <div id="headerInstrucciones" class="header-instr-slot"></div>
-    <div id="headerSearch" class="header-search-slot"></div>
-    <div class="header-actions" id="headerActions"></div>
+    <div class="header-actions-row">
+      <div id="headerSearch" class="header-search-slot"></div>
+      <div class="header-actions" id="headerActions"></div>
+    </div>
   </header>
 
   <main class="main" id="reactRoot"></main>
@@ -6925,6 +6922,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         onLogout={onLogout}
         onOpenSettings={() => setShowSettings(true)}
         onChangePassword={viewAs ? null : () => setShowPassModal(true)}
+        onOpenInstrucciones={() => setShowInstrucciones(true)}
         notifCount={notifUrgentes}
         onToggleBell={() => setBellOpen(o => !o)}
       />
@@ -6934,10 +6932,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onClose={() => setShowPassModal(false)}
         />
       )}
-      <MountInSlot slotId="headerInstrucciones">
-        <button className="header-btn" onClick={() => setShowInstrucciones(true)}
-          title="Cómo usar Abordaje">Instrucciones</button>
-      </MountInSlot>
       <MountInSlot slotId="headerSearch">
         <BuscadorGlobal state={state} isPilot={isPilot} onClickItem={handleNavToItem} />
       </MountInSlot>
@@ -7348,7 +7342,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, onChangePassword, notifCount, onToggleBell }) {
+function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, notifCount, onToggleBell }) {
   const esAdmin = agente?.role === 'admin';
   const displayName = agente?.display_name || user?.email || '';
   const enViewAs = !!viewAs;
@@ -7400,14 +7394,14 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       }
       target.appendChild(bell);
     }
-    target.appendChild(mk('Ajustes', esAdmin ? 'Configuración y gestión de usuarios' : 'Configurar horario y vista', onOpenSettings));
     if (user) {
       // ── Menú hamburguesa: cuenta (identidad + cambiar contraseña + Salir)
-      //    + acceso a otros tableros IFS ──
-      // El usuario, "cambiar contraseña" y "Salir" viven DENTRO del menú (no en
-      // el header) para ahorrar espacio, sobre todo en mobile/PWA. La campanita
-      // y Ajustes quedan como íconos en el header. Los links a otros tableros
-      // usan target con NOMBRE FIJO (ej "ifs-entrenamiento") → reutilizan pestaña.
+      //    + app (Instrucciones + Ajustes) + acceso a otros tableros IFS ──
+      // Para dejar el header lo más limpio y compacto posible, en el header sólo
+      // quedan la campanita y el menú; "Instrucciones" y "Ajustes" (antes botones
+      // sueltos) viven ahora DENTRO del menú, igual que identidad/contraseña/Salir.
+      // Los links a otros tableros usan target con NOMBRE FIJO (ej
+      // "ifs-entrenamiento") → reutilizan pestaña.
       const TABLEROS_IFS = [
         { key: 'comisiones', label: 'Comisiones', desc: 'Proyección de ingresos', url: 'https://comisiones.broker-ifs.com' },
         { key: 'entrenamiento', label: 'Entrenamiento', desc: 'Manual de inducción', url: 'https://entrenamiento.broker-ifs.com' },
@@ -7455,6 +7449,13 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       acc.appendChild(mkAccBtn('Salir', '#b91c1c', onLogout));
       panel.appendChild(acc);
 
+      // Sección app: Instrucciones + Ajustes (antes botones sueltos del header).
+      const appSec = document.createElement('div');
+      appSec.style.cssText = 'padding:6px;border-bottom:1px solid #f0f2f7;';
+      if (onOpenInstrucciones) appSec.appendChild(mkAccBtn('Instrucciones', '#1a1a2e', onOpenInstrucciones));
+      appSec.appendChild(mkAccBtn('Ajustes', '#1a1a2e', onOpenSettings));
+      panel.appendChild(appSec);
+
       const phead = document.createElement('div');
       phead.textContent = 'Otros tableros IFS';
       phead.style.cssText = 'padding:10px 14px;background:linear-gradient(135deg,#1e1b4b 0%,#1e3a5f 100%);color:#91D8F7;font-size:11px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;';
@@ -7485,7 +7486,7 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       menuCleanup = closeMenu;
     }
     return () => { if (menuCleanup) menuCleanup(); };
-  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onToggleBell]);
+  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, onToggleBell]);
   return null;
 }
 
