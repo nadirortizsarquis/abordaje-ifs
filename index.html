@@ -3184,6 +3184,17 @@
     }
     .header-search-slot .buscador-input { width: 100%; max-width: 100%; }
     .header-search-slot .buscador-input:focus { width: 100%; }
+    /* El dropdown de resultados se ancla al ancho útil del header, NO al
+       wrap angosto que comparte la última fila con el botón Instrucciones.
+       Con el anclaje original (right:0 + width:340 sobre un wrap corrido) el
+       desplegable se iba a la izquierda y se salía de pantalla → quedaba
+       "cruzado" y tapaba la búsqueda. Acá ocupa de borde a borde del header. */
+    .buscador-dropdown {
+      left: 0;
+      right: auto;
+      width: calc(100vw - 32px);
+      max-width: none;
+    }
     .header-instr-slot {
       order: 11; margin-left: 6px; margin-right: 0; flex: 0 0 auto;
     }
