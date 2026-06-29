@@ -103,6 +103,9 @@
      existe). En mobile pasa a ser su propia fila — ver media query. */
   .header-actions-row { display: flex; align-items: center; gap: 10px; margin-left: auto; }
   .header-search-slot { display: flex; align-items: center; }
+  /* Panel del menú hamburguesa. Desktop: cuelga a la derecha del botón. En
+     mobile se vuelve fijo y ancho completo — ver media query. */
+  .header-menu-panel { position: absolute; top: calc(100% + 8px); right: 0; min-width: 248px; max-height: calc(100dvh - var(--header-h) - 24px); }
   .header-btn {
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.18);
@@ -3208,6 +3211,29 @@
       left: 16px; right: 16px; width: auto; max-width: none;
       top: calc(var(--header-h) + max(env(safe-area-inset-top, 0px), 32px) - 4px);
     }
+    /* Menú hamburguesa y notificaciones: mismo criterio que el buscador —
+       fijos, centrados, de borde a borde bajo el header. Nada oculto fuera
+       de pantalla, scroll interno si el contenido es largo. */
+    .header-menu-panel {
+      position: fixed;
+      left: 16px; right: 16px; width: auto; min-width: 0; max-width: none;
+      top: calc(var(--header-h) + max(env(safe-area-inset-top, 0px), 32px) - 4px);
+      max-height: calc(100dvh - var(--header-h) - 40px);
+    }
+    .bell-dropdown {
+      left: 16px; right: 16px; width: auto; max-width: none;
+      top: calc(var(--header-h) + max(env(safe-area-inset-top, 0px), 32px) - 4px);
+      max-height: calc(100dvh - var(--header-h) - 40px);
+    }
+    /* Inputs a 16px en mobile: iOS NO hace auto-zoom al enfocar un input de
+       16px o más. Evita que la pantalla quede zoomeada tras tocar el buscador
+       o un campo de formulario. */
+    .buscador-input,
+    .field input[type=text], .field input[type=tel], .field input[type=date],
+    .field input[type=time], .field select, .field textarea,
+    .field-inline input, .field-inline select, .field-inline textarea {
+      font-size: 16px;
+    }
     .header-btn { padding: 7px 12px; font-size: 0.78rem; }
     .header-user {
       font-size: 0.78rem;
@@ -4825,6 +4851,22 @@ async function exportarProspectosPDF(prospectos, user) {
   doc.save(`IFS_Abordaje_${ts}.pdf`);
 }
 
+// Re-encuadra la pantalla a escala 1 si el usuario hizo pinch-zoom (o iOS
+// auto-zoomeó al enfocar un input). Truco iOS Safari: agregar maximum-scale=1
+// al meta viewport fuerza el clamp a escala 1; lo sacamos en el próximo frame
+// para volver a permitir el zoom manual. En Android/desktop es inocuo.
+// Se llama al abrir overlays (menú, notificaciones, buscador, ficha del
+// prospect) para que nada quede oculto fuera del área visible al estar zoomeado.
+function resetViewportZoom() {
+  try {
+    const vp = document.querySelector('meta[name="viewport"]');
+    if (!vp) return;
+    const base = 'width=device-width, initial-scale=1.0, viewport-fit=cover';
+    vp.setAttribute('content', base + ', maximum-scale=1');
+    requestAnimationFrame(() => { vp.setAttribute('content', base); });
+  } catch {}
+}
+
 // Helper para montar children en un elemento del DOM ya existente (slot
 // fuera del árbol React). Se usa para inyectar el buscador en el header HTML.
 function MountInSlot({ slotId, children }) {
@@ -5042,7 +5084,7 @@ function BuscadorGlobal({ state, isPilot, onClickItem }) {
         placeholder="Buscar prospecto, tarea, cita…"
         value={query}
         onChange={e => { setQuery(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
+        onFocus={() => { resetViewportZoom(); setOpen(true); }}
         onKeyDown={e => {
           if (e.key === 'Escape') { setQuery(''); setOpen(false); e.target.blur(); }
           if (e.key === 'Enter' && items[0]) seleccionar(items[0]);
@@ -5151,6 +5193,10 @@ function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
   const grupos = ['vencido', 'hoy', '24h', 'semana']
     .map(u => ({ urgencia: u, items: items.filter(i => i.urgencia === u) }))
     .filter(g => g.items.length > 0);
+
+  // Si la pantalla estaba zoomeada, re-encuadrar para que el dropdown se vea
+  // completo dentro del área visible.
+  useEffect(() => { resetViewportZoom(); }, []);
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -7417,7 +7463,11 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       hb.style.cssText = 'display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;width:40px;height:34px;padding:0;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.22);border-radius:6px;cursor:pointer;transition:all .15s;';
       for (let i = 0; i < 3; i++) { const ln = document.createElement('span'); ln.style.cssText = 'display:block;width:18px;height:2px;background:#fff;border-radius:2px;'; hb.appendChild(ln); }
       const panel = document.createElement('div');
-      panel.style.cssText = 'position:absolute;top:calc(100% + 8px);right:0;z-index:1000;min-width:248px;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.28);border:1px solid #e5e7eb;overflow:hidden;display:none;';
+      // Posicionamiento por CSS (.header-menu-panel): en desktop cuelga a la
+      // derecha del botón; en mobile es fijo y ocupa el ancho de la pantalla
+      // (el botón está a la izquierda, así que right:0 lo sacaba de pantalla).
+      panel.className = 'header-menu-panel';
+      panel.style.cssText = 'z-index:1000;background:#fff;border-radius:12px;box-shadow:0 12px 32px rgba(0,0,0,0.28);border:1px solid #e5e7eb;overflow-y:auto;display:none;';
       // Sección de cuenta (arriba): identidad + cambiar contraseña + Salir.
       const acc = document.createElement('div');
       acc.style.cssText = 'padding:6px;border-bottom:1px solid #f0f2f7;';
@@ -7464,7 +7514,7 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       plist.style.cssText = 'padding:6px;';
       const onOutside = (e) => { if (!menuWrap.contains(e.target)) closeMenu(); };
       const onEscMenu = (e) => { if (e.key === 'Escape') closeMenu(); };
-      function openMenu() { panel.style.display = 'block'; hb.style.background = 'rgba(255,255,255,0.22)'; document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onEscMenu); }
+      function openMenu() { resetViewportZoom(); panel.style.display = 'block'; hb.style.background = 'rgba(255,255,255,0.22)'; document.addEventListener('mousedown', onOutside); document.addEventListener('keydown', onEscMenu); }
       function closeMenu() { panel.style.display = 'none'; hb.style.background = 'rgba(255,255,255,0.08)'; document.removeEventListener('mousedown', onOutside); document.removeEventListener('keydown', onEscMenu); }
       TABLEROS_IFS.forEach(t => {
         const a = document.createElement('a');
@@ -8347,6 +8397,8 @@ function relevGetIn(obj, path) {
 function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
   // Modal de relevamiento de necesidades (casi pantalla completa).
   const [relevOpen, setRelevOpen] = useState(false);
+  // Al abrir la ficha, re-encuadrar a pantalla completa si estaba zoomeada.
+  useEffect(() => { resetViewportZoom(); }, []);
   useEffect(() => {
     // Si el relevamiento está abierto, Esc lo cierra a él (su propio handler)
     // y NO al panel — sin este guard se cerraban los dos juntos.
