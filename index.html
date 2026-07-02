@@ -5144,7 +5144,14 @@ function calcularNotificaciones(state, isPilot = false, dismissed = {}) {
   // a notificaciones (el calendar tampoco los muestra en piloto).
   const skipAgendadosDB = isPilot;
   for (const a of (skipAgendadosDB ? [] : (state.agendados || []))) {
-    const fecha = new Date(a.fecha);
+    // Parseo en hora LOCAL. Una fecha sin hora (all-day, "YYYY-MM-DD") se toma
+    // como fin del día (23:59:59), igual que las tareas. Sin esto, new Date()
+    // la interpreta como medianoche UTC y en Argentina (UTC-3) la corre al día
+    // anterior → un agendado de mañana caía como "hoy" (y sumaba al badge) y uno
+    // de hoy como "vencido".
+    const fecha = (typeof a.fecha === 'string' && !a.fecha.includes('T'))
+      ? new Date(`${a.fecha}T23:59:59`)
+      : new Date(a.fecha);
     if (fecha > en7d) continue;
     const prospect = state.prospectos.find(p => p.id === a.prospectoId);
     items.push({
@@ -9300,7 +9307,12 @@ function ProduccionOLE({ target, selfUserId }) {
       {/* Gráfico Objetivo vs Real */}
       {r.chart && (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 18 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b', marginBottom: 8 }}>Avance vs objetivo</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>Avance vs objetivo</div>
+            {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
+              <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
+            )}
+          </div>
           <OleChart chart={r.chart} pct={r.pct} />
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 6 }}>
             {[['Objetivo', '#e2e8f0'], ['Activo', '#6366f1'], ...((r.extraActivo != null ? r.extraActivo : r.extra) > 0 ? [['Extra activo', '#16a34a']] : []), ...(r.pendiente > 0 ? [['Pendiente', '#f59e0b']] : []), ...((r.extraPendiente || 0) > 0 ? [['Extra pend.', '#86efac']] : [])].map(([l, c]) => (
