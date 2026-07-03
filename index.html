@@ -11550,25 +11550,31 @@ function UsuariosSection({ currentUser, onViewAs }) {
     try {
       const created = await createUser(newUser);
       // Si se eligió un agente principal, marcar al user nuevo como su asistente.
-      // La edge function create-user no soporta este campo, lo hacemos en una
-      // segunda llamada con update (admin tiene permisos vía RLS).
+      // Blindado: el user ya se creó, un fallo acá no debe abortar el alta.
       if (newUser.assistant_of_id) {
-        await sb.from('profiles')
-          .update({ assistant_of_id: newUser.assistant_of_id })
-          .eq('id', created.id);
-        created.assistant_of_id = newUser.assistant_of_id;
+        try {
+          await sb.from('profiles').update({ assistant_of_id: newUser.assistant_of_id }).eq('id', created.id);
+          created.assistant_of_id = newUser.assistant_of_id;
+        } catch (asErr) { console.warn('No se pudo setear assistant_of_id:', asErr); }
       }
-      // Directorio: el trigger de email ya linkea el perfil si existe un advisor con
-      // este email. Si no quedó linkeado, creamos su advisor (con email → auto-link).
-      // Blindado: si algo falla acá, el alta del usuario NO se ve afectada.
+      // Directorio: el trigger de email linkea el perfil si ya existe un advisor con
+      // este email. Si no quedó linkeado, buscamos su advisor por OLE o por nombre
+      // (evita duplicado/huérfano si el roster se pre-cargó sin email) y le seteamos
+      // el email (→ auto-link); si no existe, lo creamos. Blindado.
       try {
         const { data: prof } = await sb.from('profiles').select('advisor_id').eq('id', created.id).maybeSingle();
         if (prof && !prof.advisor_id) {
           const ole = (newUser.advisor_name_ole || '').trim() || null;
-          await sb.from('advisors').insert({
-            display_name: (newUser.display_name || '').trim() || newUser.email,
-            advisor_name_ole: ole, email: newUser.email, active: true,
-          });
+          const dn  = (newUser.display_name || '').trim();
+          let advId = null;
+          if (ole) { const { data } = await sb.from('advisors').select('id').eq('advisor_name_ole', ole).limit(1); advId = data && data[0] && data[0].id; }
+          if (!advId && dn) { const { data } = await sb.from('advisors').select('id').eq('display_name', dn).is('email', null).limit(1); advId = data && data[0] && data[0].id; }
+          if (advId) {
+            await sb.from('advisors').update({ email: newUser.email }).eq('id', advId);
+            await sb.from('profiles').update({ advisor_id: advId }).eq('id', created.id);
+          } else {
+            await sb.from('advisors').insert({ display_name: dn || newUser.email, advisor_name_ole: ole, email: newUser.email, active: true });
+          }
         }
       } catch (linkErr) { console.warn('No se pudo registrar/linkear el advisor del nuevo usuario:', linkErr); }
       setProfiles(ps => [created, ...ps]);
