@@ -11377,6 +11377,98 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
   );
 }
 
+// ── Gestor del DIRECTORIO de asesores (public.advisors) — Fase 2 ──
+// Additivo: escribe solo en la tabla `advisors` (no toca profiles/cuentas).
+// Es el admin maestro del roster que consume el Tablero.
+function AsesoresSection() {
+  const [advisors, setAdvisors] = useState([]);
+  const [loading, setLoading]   = useState(true);
+  const [nuevo, setNuevo]       = useState({ display_name: '', advisor_name_ole: '' });
+  const [busy, setBusy]         = useState(false);
+  const [error, setError]       = useState(null);
+
+  const load = () => sb.from('advisors').select('*').order('display_name')
+    .then(({ data, error }) => { if (!error && data) setAdvisors(data); setLoading(false); });
+  useEffect(() => { load(); }, []);
+
+  const write = async (fn) => {
+    setBusy(true); setError(null);
+    try { const { error } = await fn(); if (error) throw error; await load(); }
+    catch (e) { setError(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  const add = () => {
+    const dn = (nuevo.display_name || '').trim();
+    if (!dn) { setError('Poné un nombre.'); return; }
+    const ole = (nuevo.advisor_name_ole || '').trim() || null;
+    write(() => sb.from('advisors').insert({ display_name: dn, advisor_name_ole: ole, active: true }))
+      .then(() => setNuevo({ display_name: '', advisor_name_ole: '' }));
+  };
+  const patch = (id, p) => write(() => sb.from('advisors').update(p).eq('id', id));
+  const confirmOle = (oldO, newO) => {
+    const from = oldO || '(vacío)', to = newO || '(vacío)';
+    if (!window.confirm(`Vas a cambiar el Nombre OLE:\n\n  "${from}"  →  "${to}"\n\nEs el dato que vincula al asesor con el reporte de producción y con el Tablero / Comisiones. Un error rompe el mapeo.\n\n¿Continuar?`)) return false;
+    return window.confirm(`Confirmación final.\n\nCambiar el Nombre OLE a:\n  "${to}"\n\n¿Estás seguro?`);
+  };
+
+  const wrap = { marginTop: 22, padding: '18px 20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14 };
+  const th = { textAlign: 'left', padding: '7px 10px', fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' };
+  const td = { padding: '6px 10px', fontSize: 13, borderBottom: '1px solid #f3f4f6' };
+
+  return (
+    <section style={wrap}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#1e1b4b', marginBottom: 4 }}>Asesores (directorio)</div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>
+        Roster único que consume el Tablero. Podés dar de alta asesores con solo el nombre (sin login ni OLE) para
+        planificarles objetivos, marcar <strong>baja</strong> (dejan de figurar), y setear el <strong>Nombre OLE</strong>
+        {' '}(dato vinculante, con doble confirmación al editarlo). No toca las cuentas de acceso.
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+        <AdminField label="Nombre">
+          <input value={nuevo.display_name} onChange={e => setNuevo(v => ({ ...v, display_name: e.target.value }))} placeholder="Lucas Carro" style={adminInpStyle} />
+        </AdminField>
+        <AdminField label="Nombre OLE (opcional)">
+          <input value={nuevo.advisor_name_ole} onChange={e => setNuevo(v => ({ ...v, advisor_name_ole: e.target.value }))} placeholder="LUCAS MARTIN CARRO" style={adminInpStyle} />
+        </AdminField>
+        <button onClick={add} disabled={busy} style={{ border: 'none', background: '#4338ca', color: '#fff', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: busy ? 'wait' : 'pointer', opacity: busy ? 0.6 : 1 }}>+ Agregar asesor</button>
+      </div>
+      {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+
+      {loading ? <div style={{ fontSize: 13, color: '#9ca3af' }}>Cargando…</div> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Nombre OLE</th>
+            </tr></thead>
+            <tbody>
+              {advisors.map(a => (
+                <tr key={a.id} style={{ opacity: a.active ? 1 : 0.5 }}>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <input type="checkbox" checked={!!a.active} disabled={busy}
+                      onChange={e => patch(a.id, { active: e.target.checked })}
+                      title={a.active ? 'Activo — click para dar de baja' : 'En baja — click para reactivar'} />
+                  </td>
+                  <td style={td}>
+                    <input key={a.id + '|dn|' + (a.display_name || '')} defaultValue={a.display_name || ''} disabled={busy}
+                      onBlur={e => { const v = e.target.value.trim(); if (v && v !== a.display_name) patch(a.id, { display_name: v }); }}
+                      style={{ ...adminInpStyle, width: 180 }} />
+                  </td>
+                  <td style={td}>
+                    <input key={a.id + '|ole|' + (a.advisor_name_ole || '')} defaultValue={a.advisor_name_ole || ''} disabled={busy} placeholder="—"
+                      onBlur={e => { const v = e.target.value.trim() || null; if (v === a.advisor_name_ole) return; if (confirmOle(a.advisor_name_ole, v)) patch(a.id, { advisor_name_ole: v }); else e.target.value = a.advisor_name_ole || ''; }}
+                      style={{ ...adminInpStyle, width: 220 }} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function UsuariosSection({ currentUser, onViewAs }) {
   const currentUserId = currentUser?.id;
   const esMegaAdmin = (currentUser?.email || '').toLowerCase() === MEGAADMIN_EMAIL;
@@ -12620,6 +12712,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
           />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
+          {esAdmin && <AsesoresSection />}
           {esAdmin && <DemoUserToggle />}
           {esAdmin && <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />}
         </div>
