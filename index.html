@@ -3371,10 +3371,17 @@
      La matriz puede tener N agentes y necesita scroll horizontal cómodo
      para cargar pagos sin pelearse con una scrollbar de 6px. */
   .mp-scroll-x {
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: auto;                    /* scroll horizontal + vertical dentro del box */
+    max-height: calc(100vh - 240px);   /* acota la matriz: la barra horizontal queda
+                                          siempre visible sin scrollear el modal */
     scrollbar-width: auto;             /* Firefox */
     scrollbar-color: #6366f1 #e8ecf7;  /* Firefox */
+  }
+  /* Encabezados fijos al hacer scroll vertical dentro de la matriz. */
+  .mp-scroll-x thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
   }
   .mp-scroll-x::-webkit-scrollbar {
     height: 16px;
