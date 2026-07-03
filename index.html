@@ -9043,6 +9043,9 @@ function ViewTabs({ view, setView, showProd }) {
 // Izquierda: Objetivo vs Real (apilado, total arriba). Derecha: las 3
 // componentes por separado (Activa / Pendiente / Extra).
 const _fmtMoneyFull = n => '$' + Math.round(n || 0).toLocaleString('es-AR');
+// Formateador de plata a nivel módulo (algunos componentes como BonoMeter lo
+// usan fuera del scope de ProduccionOLE, donde había un fmt$ local).
+const fmt$ = n => (n == null ? '—' : '$' + Math.round(n).toLocaleString('es-AR'));
 const _fmtK = n => { n = Math.round(n || 0); return n >= 1000 ? '$' + (n / 1000).toFixed(n % 1000 === 0 ? 0 : 1) + 'k' : '$' + n; };
 const _niceScale = maxV => {
   maxV = Math.max(maxV, 1);
