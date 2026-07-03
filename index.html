@@ -9088,24 +9088,32 @@ function MiniBars({ bars, totalTop }) {
         const tot = stack.reduce((s, x) => s + x.val, 0);
         const topY = PT + cH - px(tot);
         const multi = !!(b.stack && stack.length > 1);
+        const ttLeft = Math.min(Math.max(cx / W * 100, 20), 80); // clamp p/ mobile (no salirse de pantalla)
         return (
-          <div style={{ position: 'absolute', left: (cx / W * 100) + '%', top: (topY / H * 100) + '%',
+          <div style={{ position: 'absolute', left: ttLeft + '%', top: (topY / H * 100) + '%',
             transform: 'translate(-50%,-100%)', marginTop: -5, pointerEvents: 'none', zIndex: 30,
-            background: '#1e1b4b', color: '#fff', borderRadius: 8, padding: '7px 10px',
-            boxShadow: '0 4px 14px rgba(0,0,0,0.28)', whiteSpace: 'nowrap', minWidth: 104 }}>
-            <div style={{ fontSize: 10.5, fontWeight: 700, color: '#c7d2fe', marginBottom: multi ? 5 : 3, textTransform: 'uppercase', letterSpacing: '0.03em' }}>{b.label}</div>
-            {multi && stack.map((s, si) => (
-              <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 7, fontSize: 11.5, lineHeight: 1.55 }}>
-                <span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 2, background: s.color, flexShrink: 0 }} />
-                <span style={{ flex: 1, color: '#e0e7ff' }}>{s.name || '—'}</span>
-                <span style={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>{_fmtMoneyFull(s.val)}</span>
+            background: '#1e1b4b', borderRadius: 7, padding: '8px 12px',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.28)', whiteSpace: 'nowrap', minWidth: 118 }}>
+            <div style={{ textAlign: 'center', fontSize: 12.5, fontWeight: 700, color: '#fff', marginBottom: multi ? 6 : 4 }}>{b.full || b.label}</div>
+            {multi ? (
+              <React.Fragment>
+                {stack.map((s, si) => (
+                  <div key={si} style={{ display: 'flex', gap: 16, justifyContent: 'space-between', fontSize: 11.5, lineHeight: 1.6 }}>
+                    <span style={{ color: s.tc || '#e0e7ff' }}>{s.name || '—'}</span>
+                    <span style={{ fontWeight: 700, color: s.tc || '#fff', fontVariantNumeric: 'tabular-nums' }}>{_fmtMoneyFull(s.val)}</span>
+                  </div>
+                ))}
+                <div style={{ fontSize: 12, fontWeight: 800, marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.18)', display: 'flex', gap: 16, justifyContent: 'space-between' }}>
+                  <span style={{ color: '#c7d2fe' }}>Total</span>
+                  <span style={{ color: '#e5e7eb', fontVariantNumeric: 'tabular-nums' }}>{_fmtMoneyFull(tot)}</span>
+                </div>
+              </React.Fragment>
+            ) : (
+              <div style={{ display: 'flex', gap: 16, justifyContent: 'space-between', fontSize: 11.5, lineHeight: 1.6 }}>
+                <span style={{ color: '#c7d2fe' }}>Monto</span>
+                <span style={{ fontWeight: 700, color: b.tc || '#fff', fontVariantNumeric: 'tabular-nums' }}>{_fmtMoneyFull(tot)}</span>
               </div>
-            ))}
-            <div style={{ fontSize: multi ? 12 : 13, fontWeight: 800, marginTop: multi ? 6 : 0, paddingTop: multi ? 6 : 0,
-              borderTop: multi ? '1px solid rgba(255,255,255,0.18)' : 'none', display: 'flex', gap: 12, justifyContent: 'space-between' }}>
-              <span style={{ color: '#c7d2fe' }}>{multi ? 'Total' : ''}</span>
-              <span style={{ fontVariantNumeric: 'tabular-nums' }}>{_fmtMoneyFull(tot)}</span>
-            </div>
+            )}
           </div>
         );
       })()}
@@ -9113,35 +9121,51 @@ function MiniBars({ bars, totalTop }) {
   );
 }
 
+const _SEG = { base: '#6366f1', extraAct: '#16a34a', pend: '#f59e0b', extraPend: '#86efac' };
+const _EX_ACT_PAL = ['#16a34a', '#059669', '#047857', '#065f46', '#15803d', '#166534'];
+const _EX_PND_PAL = ['#86efac', '#6ee7b7', '#a7f3d0', '#bbf7d0', '#4ade80', '#34d399'];
+const _TC = { base: '#a5b4fc', pend: '#fcd34d', obj: '#cbd5e1' };
+const _EX_ACT_TC = ['#6ee7b7', '#5eead4', '#a7f3d0', '#86efac', '#4ade80', '#2dd4bf'];
+const _EX_PND_TC = ['#bbf7d0', '#a7f3d0', '#d1fae5', '#ccfbf1', '#dcfce7', '#99f6e4'];
 function OleChart({ chart }) {
   if (!chart) return null;
   // Compat: resúmenes viejos sólo traían chart.extra (sin desglose activo/pendiente).
   const exAct  = chart.extraActivo != null ? chart.extraActivo : chart.extra;
   const exPend = chart.extraPend != null ? chart.extraPend : 0;
-  // base activo (indigo) · extra activo (verde fuerte) · pend base (ámbar) · extra pend (verde claro)
+  const byInc  = chart.extraByInc || [];
+  // Segmentos de extra: por incentivo si hay desglose, sino combinado (compat).
+  const exActSegs = byInc.length
+    ? byInc.filter(s => s.activo > 0).map((s, i) => ({ val: s.activo, color: _EX_ACT_PAL[i % _EX_ACT_PAL.length], tc: _EX_ACT_TC[i % _EX_ACT_TC.length], name: `Extra ${s.name}` }))
+    : (exAct > 0 ? [{ val: exAct, color: _SEG.extraAct, tc: _EX_ACT_TC[0], name: 'Extra activo' }] : []);
+  const exPndSegs = byInc.length
+    ? byInc.filter(s => s.pend > 0).map((s, i) => ({ val: s.pend, color: _EX_PND_PAL[i % _EX_PND_PAL.length], tc: _EX_PND_TC[i % _EX_PND_TC.length], name: `Extra ${s.name} (pend.)` }))
+    : (exPend > 0 ? [{ val: exPend, color: _SEG.extraPend, tc: _EX_PND_TC[0], name: 'Extra pend.' }] : []);
   const segs = [
-    { val: chart.base, color: '#6366f1', name: 'Activa' },
-    { val: exAct, color: '#16a34a', name: 'Extra activo' },
-    { val: chart.pendiente, color: '#f59e0b', name: 'Pendiente' },
-    { val: exPend, color: '#86efac', name: 'Extra pend.' },
+    { val: chart.base, color: _SEG.base, tc: _TC.base, name: 'Activa' },
+    ...exActSegs,
+    { val: chart.pendiente, color: _SEG.pend, tc: _TC.pend, name: 'Pendiente' },
+    ...exPndSegs,
   ].filter(s => s.val > 0);
+  const shortInc = n => (n && n.length > 7) ? n.slice(0, 6) + '…' : (n || 'Extra');
+  const compBars = [
+    { label: 'Activa', full: 'Activa', val: chart.base, color: _SEG.base, tc: _TC.base },
+    ...(byInc.length
+      ? byInc.map((s, i) => ({ label: shortInc(s.name), full: `Extra ${s.name}`, val: s.activo + s.pend, color: _EX_ACT_PAL[i % _EX_ACT_PAL.length], tc: _EX_ACT_TC[i % _EX_ACT_TC.length] }))
+      : [{ label: 'Ext.act', full: 'Extra activo', val: exAct, color: _SEG.extraAct, tc: _EX_ACT_TC[0] }, { label: 'Ext.pend', full: 'Extra pend.', val: exPend, color: _SEG.extraPend, tc: _EX_PND_TC[0] }]),
+    { label: 'Pend.', full: 'Pendiente', val: chart.pendiente, color: _SEG.pend, tc: _TC.pend },
+  ];
   return (
     <div style={{ display: 'flex', gap: 28, flexWrap: 'wrap', justifyContent: 'center', maxWidth: 600, margin: '0 auto' }}>
       <div style={{ flex: '1 1 0', minWidth: 200 }}>
         <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Objetivo vs Real</div>
         <MiniBars bars={[
-          { label: 'Objetivo', val: chart.objetivo, color: '#e2e8f0', border: '#c2cad8' },
-          { label: 'Real', stack: segs.length ? segs : [{ val: 0, color: '#6366f1' }] },
+          { label: 'Objetivo', val: chart.objetivo, color: '#e2e8f0', border: '#c2cad8', tc: _TC.obj },
+          { label: 'Real', stack: segs.length ? segs : [{ val: 0, color: _SEG.base }] },
         ]} />
       </div>
       <div style={{ flex: '1 1 0', minWidth: 200 }}>
         <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Composición</div>
-        <MiniBars bars={[
-          { label: 'Activa', val: chart.base, color: '#6366f1' },
-          { label: 'Ext.act', val: exAct, color: '#16a34a' },
-          { label: 'Pend.', val: chart.pendiente, color: '#f59e0b' },
-          { label: 'Ext.pend', val: exPend, color: '#86efac' },
-        ]} />
+        <MiniBars bars={compBars} />
       </div>
     </div>
   );
@@ -9307,15 +9331,31 @@ function ProduccionOLE({ target, selfUserId }) {
       {/* Gráfico Objetivo vs Real */}
       {r.chart && (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 18 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, flexWrap: 'wrap', gap: 6 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>Avance vs objetivo</div>
-            {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
-              <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
-            )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 6 }}>
+            <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>Avance vs objetivo</div>
+            <div style={{ textAlign: 'right' }}>
+              {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
+                <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
+              )}
+              {(r.incentivosAplicables || []).map((inc, i) => (
+                <div key={i} style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 600, marginTop: 2 }}>
+                  Incentivo {inc.nombre}{inc.multiplicador > 1 ? ` ×${inc.multiplicador}` : ''} · {(inc.desde || '').split('-').reverse().join('/')} — {(inc.hasta || '').split('-').reverse().join('/')}
+                </div>
+              ))}
+            </div>
           </div>
           <OleChart chart={r.chart} pct={r.pct} />
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 6 }}>
-            {[['Objetivo', '#e2e8f0'], ['Activo', '#6366f1'], ...((r.extraActivo != null ? r.extraActivo : r.extra) > 0 ? [['Extra activo', '#16a34a']] : []), ...(r.pendiente > 0 ? [['Pendiente', '#f59e0b']] : []), ...((r.extraPendiente || 0) > 0 ? [['Extra pend.', '#86efac']] : [])].map(([l, c]) => (
+            {(() => {
+              const byInc = (r.chart && r.chart.extraByInc) || [];
+              const exA = (r.extraActivo != null ? r.extraActivo : r.extra);
+              const items = [['Objetivo', '#e2e8f0'], ['Activo', '#6366f1']];
+              if (byInc.length) byInc.forEach((s, i) => { if (s.activo > 0 || s.pend > 0) items.push(['Extra ' + s.name, _EX_ACT_PAL[i % _EX_ACT_PAL.length]]); });
+              else if (exA > 0) items.push(['Extra activo', '#16a34a']);
+              if (r.pendiente > 0) items.push(['Pendiente', '#f59e0b']);
+              if (!byInc.length && (r.extraPendiente || 0) > 0) items.push(['Extra pend.', '#86efac']);
+              return items;
+            })().map(([l, c]) => (
               <span key={l} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                 <span style={{ width: 10, height: 10, borderRadius: 2, background: c, border: c === '#e2e8f0' ? '1px solid #c2cad8' : 'none', display: 'inline-block' }} />{l}
               </span>
@@ -9327,33 +9367,33 @@ function ProduccionOLE({ target, selfUserId }) {
       {/* Detalle de pólizas + descarga PDF */}
       <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, color: '#1e1b4b' }}>
+          <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>
             Detalle de pólizas {Array.isArray(r.detalle) && <span style={{ fontWeight: 500, color: '#9ca3af' }}>· {r.detalle.length}</span>}
           </div>
           {url && <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: '#3E4095', textDecoration: 'none', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 12px' }}>Descargar PDF ↗</a>}
         </div>
         {Array.isArray(r.detalle) && r.detalle.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '2px solid #e5e7eb', background: '#f9fafb' }}>
                   {['Asegurado', 'Estado', 'Tipo', 'Plan', 'Prima', 'F. Efectivo'].map((h, i) => (
-                    <th key={h} style={{ padding: '7px 10px', textAlign: i >= 4 ? 'right' : 'left', color: '#6b7280', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                    <th key={h} style={{ padding: '8px 8px', textAlign: i >= 4 ? 'right' : 'left', color: '#6b7280', fontWeight: 600, fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.02em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {r.detalle.map((p, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', background: p.pend ? '#fffdf5' : (i % 2 === 0 ? '#fff' : '#fafafa') }}>
-                    <td style={{ padding: '7px 10px', color: '#374151', whiteSpace: 'nowrap' }}>
+                    <td style={{ padding: '7px 8px', color: '#374151', whiteSpace: 'nowrap' }}>
                       {p.asegurado}
-                      {p.extra && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', borderRadius: 4, padding: '1px 5px' }}>extra</span>}
+                      {p.extra && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 700, color: '#16a34a', background: '#dcfce7', borderRadius: 4, padding: '1px 5px' }}>{p.extraInc || 'extra'}</span>}
                     </td>
-                    <td style={{ padding: '7px 10px', color: p.pend ? '#d97706' : '#6b7280', whiteSpace: 'nowrap' }}>{p.estado}</td>
-                    <td style={{ padding: '7px 10px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.tipo}</td>
-                    <td style={{ padding: '7px 10px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.plan}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600, color: '#1e1b4b', whiteSpace: 'nowrap' }}>{fmt$(p.prima)}</td>
-                    <td style={{ padding: '7px 10px', textAlign: 'right', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.fEfectivo}</td>
+                    <td style={{ padding: '7px 8px', color: p.pend ? '#d97706' : '#6b7280', whiteSpace: 'nowrap' }}>{p.estado}</td>
+                    <td style={{ padding: '7px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.tipo}</td>
+                    <td style={{ padding: '7px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.plan}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: '#1e1b4b', whiteSpace: 'nowrap' }}>{fmt$(p.prima)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.fEfectivo}</td>
                   </tr>
                 ))}
               </tbody>
