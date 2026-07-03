@@ -9171,6 +9171,103 @@ function OleChart({ chart }) {
   );
 }
 
+// ── MEDIDOR DE BONO (termómetro: facturación → premio) ──
+const fmtPremio = (p) => {
+  if (p == null || p === '') return '—';
+  const raw = String(p).replace(/[$.\s,]/g, '');
+  return /^\d+$/.test(raw) ? '$' + Number(raw).toLocaleString('es-AR') : String(p);
+};
+function BonoMeter({ bono }) {
+  const [hov, setHov] = useState(false);
+  const isTeam = !!bono.isTeam;
+  const pct = isTeam
+    ? (bono.totalAsesores > 0 ? bono.calificadosCount / bono.totalAsesores : 0)
+    : (bono.pct || 0);
+  const calificado = isTeam ? (bono.calificadosCount > 0 && bono.calificadosCount === bono.totalAsesores) : !!bono.calificado;
+  const algunos = isTeam && bono.calificadosCount > 0;
+  const fillPct = Math.min(Math.max(pct, 0), 1) * 100;
+  const color = calificado ? '#16a34a' : (algunos || pct >= 0.8 ? '#d97706' : '#6366f1');
+  const per = s => (s || '').split('-').reverse().join('/');
+  const H = 150;
+  const uA = (!isTeam && bono.umbral > 0) ? Math.min((bono.facturadoActivo || 0) / bono.umbral, 1) : 0;
+  const uP = (!isTeam && bono.umbral > 0) ? Math.min((bono.facturadoPend || 0) / bono.umbral, Math.max(1 - uA, 0)) : 0;
+  const barFill = isTeam ? fillPct : (uA + uP) * 100;
+  const list = isTeam ? (bono.advisors || []) : (bono.pols || []);
+  const shown = list.slice(0, 14);
+  const alerts = [];
+  if (!isTeam && bono.cumpleMonto && !bono.calificado) {
+    if (bono.cumplePol === false) alerts.push(`${bono.nActivas || 0}/${bono.minPolizas} pól.`);
+    if (bono.cumplePersist === false) alerts.push(`persist. ${bono.persistencia}%`);
+  }
+  return (
+    <div style={{ width: 132, textAlign: 'center', flexShrink: 0, position: 'relative', cursor: list.length ? 'help' : 'default' }}
+      onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#374151', textTransform: 'uppercase', letterSpacing: '0.03em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{bono.nombre}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: '#16a34a', marginTop: 2, minHeight: 18 }}>{fmtPremio(bono.premio)}</div>
+      <div style={{ position: 'relative', width: 38, height: H, margin: '8px auto 6px', background: '#f3f4f6', borderRadius: 9, border: '1px solid #e5e7eb', overflow: 'hidden' }}>
+        {isTeam
+          ? <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: fillPct + '%', background: color, transition: 'height .35s ease' }} />
+          : <React.Fragment>
+              <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: (uA * 100) + '%', background: '#6366f1', transition: 'height .35s ease' }} />
+              <div style={{ position: 'absolute', bottom: (uA * 100) + '%', left: 0, right: 0, height: (uP * 100) + '%', background: '#f59e0b', transition: 'height .35s ease' }} />
+            </React.Fragment>}
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 800, color: barFill > 55 ? '#fff' : '#374151' }}>{Math.round(pct * 100)}%</div>
+      </div>
+      {calificado
+        ? <div style={{ fontSize: 12, fontWeight: 800, color: '#16a34a' }}>✓ Calificado</div>
+        : (!isTeam && bono.cumpleMonto && alerts.length)
+          ? <div style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', lineHeight: 1.3 }}>⚠ {alerts.join(' · ')}</div>
+          : <div style={{ fontSize: 11, fontWeight: 600, color: algunos ? '#d97706' : '#6b7280' }}>
+              {isTeam ? `${bono.calificadosCount}/${bono.totalAsesores} calificados` : `Faltan ${fmt$(bono.falta)}`}
+            </div>}
+      <div style={{ fontSize: 10, color: '#9ca3af', marginTop: 2 }}>
+        {isTeam ? `equipo ${fmt$(bono.facturadoTotal)}` : `${fmt$(bono.facturado)} / ${fmt$(bono.umbral)}`}
+      </div>
+      {bono.desde && bono.hasta && <div style={{ fontSize: 9, color: '#c4c7d0', marginTop: 1 }}>{per(bono.desde)} — {per(bono.hasta)}</div>}
+      {hov && list.length > 0 && (
+        <div style={{ position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: 8, zIndex: 40, background: '#1e1b4b', borderRadius: 8, padding: '8px 10px', width: 224, boxShadow: '0 6px 18px rgba(0,0,0,0.32)', textAlign: 'left', pointerEvents: 'none' }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: '#fff', textAlign: 'center', marginBottom: 6 }}>{isTeam ? 'Facturación por asesor' : 'Pólizas que suman'}</div>
+          {shown.map((it, i) => {
+            const tc = isTeam ? (it.calificado ? '#6ee7b7' : '#e0e7ff') : (it.estado === 'gracia' ? '#fca5a5' : it.estado === 'pend' ? '#fcd34d' : '#a5b4fc');
+            return (
+              <div key={i} style={{ display: 'flex', gap: 8, justifyContent: 'space-between', fontSize: 11.5, lineHeight: 1.6 }}>
+                <span style={{ color: tc, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
+                  {isTeam ? it.nombre : it.asegurado}{!isTeam && it.estado === 'pend' ? ' · pend' : !isTeam && it.estado === 'gracia' ? ' · gracia' : ''}
+                </span>
+                <span style={{ fontWeight: 700, color: isTeam ? '#fff' : tc, fontVariantNumeric: 'tabular-nums' }}>{fmt$(isTeam ? it.facturado : it.prima)}</span>
+              </div>
+            );
+          })}
+          {list.length > shown.length && <div style={{ fontSize: 10, color: '#c7d2fe', marginTop: 3 }}>+{list.length - shown.length} más…</div>}
+          <div style={{ borderTop: '1px solid rgba(255,255,255,0.18)', marginTop: 6, paddingTop: 6, display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 800 }}>
+            <span style={{ color: '#c7d2fe' }}>{isTeam ? 'Facturado equipo' : 'Total (cuenta)'}</span>
+            <span style={{ color: '#e5e7eb', fontVariantNumeric: 'tabular-nums' }}>{fmt$(isTeam ? bono.facturadoTotal : bono.facturado)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, fontWeight: 700, marginTop: 2 }}>
+            <span style={{ color: '#c7d2fe' }}>Objetivo</span>
+            <span style={{ color: '#e0e7ff', fontVariantNumeric: 'tabular-nums' }}>{fmt$(bono.umbral)}</span>
+          </div>
+          {!isTeam && bono.facturadoGracia > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, marginTop: 2, color: '#fca5a5' }}>
+              <span>En gracia (no cuenta)</span><span style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt$(bono.facturadoGracia)}</span>
+            </div>
+          )}
+          {!isTeam && bono.minPolizas > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, marginTop: 2, color: bono.cumplePol ? '#6ee7b7' : '#fca5a5' }}>
+              <span>Pólizas activadas</span><span>{bono.nActivas || 0} / {bono.minPolizas}</span>
+            </div>
+          )}
+          {!isTeam && bono.persistenciaMinPct > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 600, marginTop: 2, color: bono.cumplePersist ? '#6ee7b7' : '#fca5a5' }}>
+              <span>Persistencia</span><span>{bono.persistencia}% (mín {bono.persistenciaMinPct}%)</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── MI PRODUCCIÓN (OLE) ───────────────────────────────────────
 // Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
 // muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
@@ -9328,6 +9425,24 @@ function ProduccionOLE({ target, selfUserId }) {
         )}
       </div>
 
+      {/* Requisitos: aparece SOLO cuando el asesor alcanzó la meta de facturación */}
+      {r.requisitos && r.requisitos.cumpleMonto && (
+        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14, padding: '9px 14px', borderRadius: 10,
+          background: r.requisitos.calificado ? '#f0fdf4' : '#fef2f2',
+          border: '1px solid ' + (r.requisitos.calificado ? '#bbf7d0' : '#fecaca') }}>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Requisitos</span>
+          {r.requisitos.minPolizas > 0 && (
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: r.requisitos.cumplePol ? '#16a34a' : '#dc2626' }}>{r.requisitos.cumplePol ? '✓' : '⚠'} Pólizas {r.requisitos.nActivas}/{r.requisitos.minPolizas}</span>
+          )}
+          {r.requisitos.persistenciaMinPct > 0 && (
+            <span style={{ fontSize: 12.5, fontWeight: 700, color: r.requisitos.cumplePersist ? '#16a34a' : '#dc2626' }}>{r.requisitos.cumplePersist ? '✓' : '⚠'} Persistencia {r.requisitos.persist}% / {r.requisitos.persistenciaMinPct}%</span>
+          )}
+          {r.requisitos.calificado
+            ? <span style={{ fontSize: 11.5, fontWeight: 800, color: '#16a34a' }}>✓ Califica</span>
+            : (r.requisitos.cumpleMonto && <span style={{ fontSize: 11.5, fontWeight: 700, color: '#dc2626' }}>Alcanzó la meta pero faltan requisitos</span>)}
+        </div>
+      )}
+
       {/* Gráfico Objetivo vs Real */}
       {r.chart && (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 18 }}>
@@ -9344,7 +9459,14 @@ function ProduccionOLE({ target, selfUserId }) {
               ))}
             </div>
           </div>
-          <OleChart chart={r.chart} pct={r.pct} />
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
+            <div style={{ flex: '1 1 320px', minWidth: 0 }}><OleChart chart={r.chart} pct={r.pct} /></div>
+            {Array.isArray(r.bonos) && r.bonos.length > 0 && (
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center', borderLeft: '1px solid #eef0f4', paddingLeft: 20 }}>
+                {r.bonos.map(b => <BonoMeter key={b.incId} bono={b} />)}
+              </div>
+            )}
+          </div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 6 }}>
             {(() => {
               const byInc = (r.chart && r.chart.extraByInc) || [];
