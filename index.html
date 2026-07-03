@@ -11519,21 +11519,12 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const cancelEdit = () => { setEditingId(null); setError(null); };
 
   const save = async id => {
-    // El Nombre OLE es el dato VINCULANTE (cruza el reporte de producción con el
-    // Tablero y Comisiones). Si cambia, pedir doble confirmación para evitar typos.
-    const orig = profiles.find(p => p.id === id);
-    const oldO = (orig && orig.advisor_name_ole) || '';
-    const newO = draft.advisor_name_ole || '';
-    if (oldO !== newO) {
-      const from = oldO || '(vacío)', to = newO || '(vacío)';
-      if (!window.confirm(`Vas a cambiar el Nombre OLE de este asesor:\n\n  "${from}"  →  "${to}"\n\nEs el dato que vincula al asesor con el reporte de producción y con el Tablero / Comisiones. Un error rompe el mapeo.\n\n¿Continuar?`)) return;
-      if (!window.confirm(`Confirmación final.\n\nCambiar el Nombre OLE a:\n  "${to}"\n\n¿Estás seguro?`)) return;
-    }
+    // El Nombre OLE (dato vinculante) se edita SOLO en la sección Asesores (fuente
+    // única) → acá no se escribe advisor_name_ole, para evitar divergencias.
     setSaving(true); setError(null);
     try {
       await updateProfile(id, {
         display_name: draft.display_name || null,
-        advisor_name_ole: draft.advisor_name_ole || null,
         role: draft.role,
         assistant_of_id: draft.assistant_of_id || null,
         ole_ver_produccion: draft.ole_ver_produccion,
@@ -11751,9 +11742,12 @@ function UsuariosSection({ currentUser, onViewAs }) {
                     <td style={adminTdStyle}>
                       {isEditing ? (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                          <input value={draft.advisor_name_ole}
-                            onChange={e => setDraft(d => ({ ...d, advisor_name_ole: e.target.value }))}
-                            placeholder="HERNAN  CARDONA VALDES" style={adminInpStyle} />
+                          <div style={{ fontSize: 11, color: '#6b7280', fontFamily: 'ui-monospace, monospace' }}>
+                            {draft.advisor_name_ole || '—'}
+                            <span style={{ display: 'block', fontSize: 10, color: '#9ca3af', fontFamily: 'inherit', marginTop: 2 }}>
+                              El Nombre OLE se edita en la sección <strong>Asesores</strong> (fuente única).
+                            </span>
+                          </div>
                           <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
                             <input type="checkbox" checked={draft.ole_ver_produccion}
                               onChange={e => setDraft(d => ({ ...d, ole_ver_produccion: e.target.checked }))} />
