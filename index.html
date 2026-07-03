@@ -5411,6 +5411,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   useEffect(() => {
     if (!isAdminProd) return;
     sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
+      .or('is_demo.eq.false,demo_active.eq.true')
       .order('display_name', { ascending: true }).then(({ data }) => setProdAgentes(data || []));
   }, [isAdminProd]);
   const [principalProfile, setPrincipalProfile] = useState(null);
@@ -11047,6 +11048,8 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
     .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, assistant_of_id, shares_calendar_with_assistant, created_at')
+    // Ocultar el usuario de ejemplo (demo) salvo que esté activado.
+    .or('is_demo.eq.false,demo_active.eq.true')
     .order('role', { ascending: false })
     .order('display_name', { ascending: true });
   if (error) { console.error('loadAllProfiles:', error); return []; }
@@ -11985,6 +11988,7 @@ function MaintenancePaymentsModal({ onClose }) {
     sb.from('profiles')
       .select('id, email, display_name, role, assistant_of_id')
       .is('assistant_of_id', null)
+      .or('is_demo.eq.false,demo_active.eq.true')
       .order('display_name', { ascending: true })
       .then(({ data, error }) => {
         if (cancel) return;
@@ -12433,6 +12437,56 @@ function MaintenancePaymentEditor({ year, agente, month, initial, onClose, onSav
   );
 }
 
+// Switch admin para activar/desactivar el usuario de ejemplo (demo).
+// OFF → se oculta de las listas de admin (loadAllProfiles / prodAgentes /
+// matriz de pagos) y su login queda bloqueado (ver AppShell).
+function DemoUserToggle() {
+  const [demo, setDemo] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let c = false;
+    sb.from('profiles').select('id, display_name, email, demo_active').eq('is_demo', true).maybeSingle()
+      .then(({ data }) => { if (!c) setDemo(data || null); });
+    return () => { c = true; };
+  }, []);
+  if (!demo) return null;
+  const toggle = async () => {
+    if (busy) return;
+    const next = !demo.demo_active;
+    setBusy(true);
+    const { error } = await sb.from('profiles').update({ demo_active: next }).eq('id', demo.id);
+    setBusy(false);
+    if (error) { showToast('No se pudo actualizar el usuario de ejemplo', { duration: 4000 }); return; }
+    setDemo(d => ({ ...d, demo_active: next }));
+    showToast(next ? 'Usuario de ejemplo activado' : 'Usuario de ejemplo desactivado');
+  };
+  return (
+    <section style={adminSectionStyle}>
+      <h3 style={adminSectionTitleStyle}>🎭 Usuario de ejemplo</h3>
+      <p style={adminSectionDescStyle}>
+        Cuenta demo con datos ficticios para mostrarle el sistema a agentes nuevos sin exponer datos reales.
+      </p>
+      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div
+          className={`toggle-switch ${demo.demo_active ? 'on' : ''}`}
+          onClick={toggle}
+          role="switch"
+          aria-checked={demo.demo_active}
+          style={busy ? { opacity: 0.5, pointerEvents: 'none' } : undefined}
+        />
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+            {demo.demo_active ? 'Activado' : 'Desactivado'} — {demo.display_name || demo.email}
+          </div>
+          <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+            ON = visible y con login habilitado · OFF = oculto de tus vistas admin y login bloqueado.
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
@@ -12553,6 +12607,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
           />
 
           {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
+          {esAdmin && <DemoUserToggle />}
           {esAdmin && <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />}
         </div>
       </div>
@@ -14394,6 +14449,10 @@ function LoginScreen({ onLoggedIn }) {
       // Limpiar el query param sin recargar
       const cleanUrl = window.location.pathname + window.location.hash;
       window.history.replaceState({}, '', cleanUrl);
+    } else if (params.get('error') === 'demo_off') {
+      setError('El usuario de ejemplo está desactivado.');
+      const cleanUrl = window.location.pathname + window.location.hash;
+      window.history.replaceState({}, '', cleanUrl);
     }
     return () => document.body.classList.remove('login-mode');
   }, []);
@@ -14649,10 +14708,21 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
-        if (data) { setAgente(data); return; }
+        if (data) {
+          // Usuario de ejemplo (demo) desactivado → bloquear acceso.
+          if (data.is_demo && !data.demo_active) {
+            try { await sb.auth.signOut(); } catch (_) {}
+            const url = new URL(window.location.href);
+            url.searchParams.set('error', 'demo_off');
+            url.searchParams.delete('code'); url.hash = '';
+            window.location.replace(url.toString());
+            return;
+          }
+          setAgente(data); return;
+        }
         // No hay profile para este user → email no autorizado (caso típico:
         // alguien con Gmail random intentó entrar con Google sin estar
         // pre-cargado en profiles por el admin).
