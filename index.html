@@ -11548,6 +11548,23 @@ function UsuariosSection({ currentUser, onViewAs }) {
           .eq('id', created.id);
         created.assistant_of_id = newUser.assistant_of_id;
       }
+      // Directorio: si se dio un Nombre OLE, buscar/crear el advisor y linkear el
+      // perfil, así el nuevo login aparece en el roster del Tablero. Blindado:
+      // si algo falla acá, el alta del usuario NO se ve afectada.
+      try {
+        const ole = (newUser.advisor_name_ole || '').trim();
+        if (ole) {
+          const { data: found } = await sb.from('advisors').select('id').eq('advisor_name_ole', ole).maybeSingle();
+          let advId = found && found.id;
+          if (!advId) {
+            const { data: ins } = await sb.from('advisors')
+              .insert({ display_name: (newUser.display_name || '').trim() || ole, advisor_name_ole: ole, active: true })
+              .select('id').maybeSingle();
+            advId = ins && ins.id;
+          }
+          if (advId) await sb.from('profiles').update({ advisor_id: advId }).eq('id', created.id);
+        }
+      } catch (linkErr) { console.warn('No se pudo linkear el advisor del nuevo usuario:', linkErr); }
       setProfiles(ps => [created, ...ps]);
       setNewUser({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
       setCreating(false);
