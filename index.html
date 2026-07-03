@@ -11417,6 +11417,16 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const cancelEdit = () => { setEditingId(null); setError(null); };
 
   const save = async id => {
+    // El Nombre OLE es el dato VINCULANTE (cruza el reporte de producción con el
+    // Tablero y Comisiones). Si cambia, pedir doble confirmación para evitar typos.
+    const orig = profiles.find(p => p.id === id);
+    const oldO = (orig && orig.advisor_name_ole) || '';
+    const newO = draft.advisor_name_ole || '';
+    if (oldO !== newO) {
+      const from = oldO || '(vacío)', to = newO || '(vacío)';
+      if (!window.confirm(`Vas a cambiar el Nombre OLE de este asesor:\n\n  "${from}"  →  "${to}"\n\nEs el dato que vincula al asesor con el reporte de producción y con el Tablero / Comisiones. Un error rompe el mapeo.\n\n¿Continuar?`)) return;
+      if (!window.confirm(`Confirmación final.\n\nCambiar el Nombre OLE a:\n  "${to}"\n\n¿Estás seguro?`)) return;
+    }
     setSaving(true); setError(null);
     try {
       await updateProfile(id, {
