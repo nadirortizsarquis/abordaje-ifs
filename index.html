@@ -11383,7 +11383,7 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
 function AsesoresSection() {
   const [advisors, setAdvisors] = useState([]);
   const [loading, setLoading]   = useState(true);
-  const [nuevo, setNuevo]       = useState({ display_name: '', advisor_name_ole: '' });
+  const [nuevo, setNuevo]       = useState({ display_name: '', advisor_name_ole: '', email: '' });
   const [busy, setBusy]         = useState(false);
   const [error, setError]       = useState(null);
 
@@ -11401,8 +11401,9 @@ function AsesoresSection() {
     const dn = (nuevo.display_name || '').trim();
     if (!dn) { setError('Poné un nombre.'); return; }
     const ole = (nuevo.advisor_name_ole || '').trim() || null;
-    write(() => sb.from('advisors').insert({ display_name: dn, advisor_name_ole: ole, active: true }))
-      .then(() => setNuevo({ display_name: '', advisor_name_ole: '' }));
+    const email = (nuevo.email || '').trim() || null;
+    write(() => sb.from('advisors').insert({ display_name: dn, advisor_name_ole: ole, email, active: true }))
+      .then(() => setNuevo({ display_name: '', advisor_name_ole: '', email: '' }));
   };
   const patch = (id, p) => write(() => sb.from('advisors').update(p).eq('id', id));
   const confirmOle = (oldO, newO) => {
@@ -11421,12 +11422,16 @@ function AsesoresSection() {
       <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>
         Roster único que consume el Tablero. Podés dar de alta asesores con solo el nombre (sin login ni OLE) para
         planificarles objetivos, marcar <strong>baja</strong> (dejan de figurar), y setear el <strong>Nombre OLE</strong>
-        {' '}(dato vinculante, con doble confirmación al editarlo). No toca las cuentas de acceso.
+        {' '}(con doble confirmación). El <strong>Email</strong> es la llave que lo vincula con su login: si coincide con
+        el de una cuenta, se linkean solos en cualquier orden. No toca las cuentas de acceso.
       </div>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
         <AdminField label="Nombre">
           <input value={nuevo.display_name} onChange={e => setNuevo(v => ({ ...v, display_name: e.target.value }))} placeholder="Lucas Carro" style={adminInpStyle} />
+        </AdminField>
+        <AdminField label="Email (login)">
+          <input value={nuevo.email} onChange={e => setNuevo(v => ({ ...v, email: e.target.value }))} placeholder="lucas@..." style={adminInpStyle} />
         </AdminField>
         <AdminField label="Nombre OLE (opcional)">
           <input value={nuevo.advisor_name_ole} onChange={e => setNuevo(v => ({ ...v, advisor_name_ole: e.target.value }))} placeholder="LUCAS MARTIN CARRO" style={adminInpStyle} />
@@ -11439,7 +11444,7 @@ function AsesoresSection() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Nombre OLE</th>
+              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th>
             </tr></thead>
             <tbody>
               {advisors.map(a => (
@@ -11452,7 +11457,12 @@ function AsesoresSection() {
                   <td style={td}>
                     <input key={a.id + '|dn|' + (a.display_name || '')} defaultValue={a.display_name || ''} disabled={busy}
                       onBlur={e => { const v = e.target.value.trim(); if (v && v !== a.display_name) patch(a.id, { display_name: v }); }}
-                      style={{ ...adminInpStyle, width: 180 }} />
+                      style={{ ...adminInpStyle, width: 160 }} />
+                  </td>
+                  <td style={td}>
+                    <input key={a.id + '|em|' + (a.email || '')} defaultValue={a.email || ''} disabled={busy} placeholder="—"
+                      onBlur={e => { const v = e.target.value.trim() || null; if (v !== a.email) patch(a.id, { email: v }); }}
+                      style={{ ...adminInpStyle, width: 190 }} />
                   </td>
                   <td style={td}>
                     <input key={a.id + '|ole|' + (a.advisor_name_ole || '')} defaultValue={a.advisor_name_ole || ''} disabled={busy} placeholder="—"
@@ -11548,23 +11558,19 @@ function UsuariosSection({ currentUser, onViewAs }) {
           .eq('id', created.id);
         created.assistant_of_id = newUser.assistant_of_id;
       }
-      // Directorio: si se dio un Nombre OLE, buscar/crear el advisor y linkear el
-      // perfil, así el nuevo login aparece en el roster del Tablero. Blindado:
-      // si algo falla acá, el alta del usuario NO se ve afectada.
+      // Directorio: el trigger de email ya linkea el perfil si existe un advisor con
+      // este email. Si no quedó linkeado, creamos su advisor (con email → auto-link).
+      // Blindado: si algo falla acá, el alta del usuario NO se ve afectada.
       try {
-        const ole = (newUser.advisor_name_ole || '').trim();
-        if (ole) {
-          const { data: found } = await sb.from('advisors').select('id').eq('advisor_name_ole', ole).maybeSingle();
-          let advId = found && found.id;
-          if (!advId) {
-            const { data: ins } = await sb.from('advisors')
-              .insert({ display_name: (newUser.display_name || '').trim() || ole, advisor_name_ole: ole, active: true })
-              .select('id').maybeSingle();
-            advId = ins && ins.id;
-          }
-          if (advId) await sb.from('profiles').update({ advisor_id: advId }).eq('id', created.id);
+        const { data: prof } = await sb.from('profiles').select('advisor_id').eq('id', created.id).maybeSingle();
+        if (prof && !prof.advisor_id) {
+          const ole = (newUser.advisor_name_ole || '').trim() || null;
+          await sb.from('advisors').insert({
+            display_name: (newUser.display_name || '').trim() || newUser.email,
+            advisor_name_ole: ole, email: newUser.email, active: true,
+          });
         }
-      } catch (linkErr) { console.warn('No se pudo linkear el advisor del nuevo usuario:', linkErr); }
+      } catch (linkErr) { console.warn('No se pudo registrar/linkear el advisor del nuevo usuario:', linkErr); }
       setProfiles(ps => [created, ...ps]);
       setNewUser({ email: '', password: '', display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '' });
       setCreating(false);
