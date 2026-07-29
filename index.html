@@ -582,10 +582,21 @@
     /* flex-start: cada columna toma su propia altura natural (estilo Trello) */
     align-items: flex-start;
     /* Altura para que la barra de scroll horizontal quede pegada al bottom del
-       viewport. En Tareas, arriba del kanban solo está la fila de tabs (no hay
-       FilterBar), por eso el descuento es chico. dvh = alto real en standalone/PWA. */
+       viewport. En Tareas, arriba del kanban solo está la fila de tabs (el toggle
+       de autoorden vive en esa misma fila). dvh = alto real en standalone/PWA. */
     height: calc(100dvh - var(--header-h) - 72px);
   }
+  /* Toggle "Autoordenar por vencimiento" — vive en la fila de tabs (view === tareas). */
+  .kanban-autoorden {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--texto-suave);
+    cursor: pointer;
+    user-select: none;
+  }
+  .kanban-autoorden input { cursor: pointer; accent-color: #7c3aed; margin: 0; }
   .kanban-col {
     flex: 0 0 240px;
     background: var(--bg-card);
@@ -754,6 +765,52 @@
     color: #b91c1c;
     background: rgba(220, 38, 38, 0.10);
   }
+  /* ── Fijar (pin) y orden de tarjetas ── */
+  .tarea-card.fijada {
+    background: #f5f3ff;
+    border-color: #ddd6fe;
+  }
+  .tarea-card.fijada.tarea-auto { background: #f5f3ff; }
+  /* Botón de fijar: esquina sup. izquierda. Siempre algo visible (para poder
+     tocarlo en mobile), se resalta en hover o cuando está fijada. */
+  .tarea-pin-btn {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    border-radius: 5px;
+    background: transparent;
+    color: #b7b3c9;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s, color 0.12s, background 0.12s;
+  }
+  /* No se muestra en la generalidad de las tarjetas: aparece al pasar el mouse
+     por la tarjeta, y queda SIEMPRE visible cuando la tarjeta está fijada
+     (para poder desfijarla desde ahí). */
+  .tarea-card:hover .tarea-pin-btn { opacity: 1; pointer-events: auto; }
+  .tarea-pin-btn.on { opacity: 1; pointer-events: auto; color: #7c3aed; }
+  .tarea-pin-btn:hover { background: rgba(124,58,237,0.10); color: #7c3aed; }
+  /* En dispositivos sin hover (touch) el pin queda tenue pero disponible. */
+  @media (hover: none) {
+    .tarea-pin-btn { opacity: 0.4; pointer-events: auto; }
+    .tarea-pin-btn.on { opacity: 1; }
+  }
+  /* Reservar espacio a la izquierda del título solo cuando el pin se muestra
+     (tarjeta fijada o con el mouse encima), para no pisar el título ni dejar
+     una sangría en la generalidad de las tarjetas. */
+  .tarea-card.fijada .tarea-card-titulo.has-pin,
+  .tarea-card:hover .tarea-card-titulo.has-pin { padding-left: 20px; }
+  @media (hover: none) { .tarea-card-titulo.has-pin { padding-left: 20px; } }
+  /* Línea de inserción al arrastrar (se pinta en la card destino). */
+  .tarea-card.drop-before { box-shadow: inset 0 3px 0 0 var(--azul); }
   .tarea-card-obs {
     font-size: 0.72rem;
     color: var(--texto-suave);
@@ -3533,12 +3590,51 @@ function mapTareaFromDB(t) {
     observacion: t.observacion || '',
     googleEventId: t.google_event_id || null,
     compania: t.compania || null,
+    orden: (t.orden === null || t.orden === undefined) ? null : Number(t.orden),
+    fijadaAt: t.fijada_at || null,
     actorId: t.actor_id || null,
     agenteId: t.agente_id,
     archivada: !!t.archivada,
     createdAt: t.created_at,
     updatedAt: t.updated_at
   };
+}
+
+// Orden de las tarjetas dentro de una columna del Kanban.
+//  1. Las fijadas (fijadaAt != null) van SIEMPRE arriba, ordenadas por el
+//     momento en que se fijaron (la primera fijada, primera arriba). Esto
+//     manda esté prendido o no el autoorden.
+//  2. El resto:
+//     - autoOrden ON  → por fecha de vencimiento ascendente (lo más próximo a
+//       vencer / vencido hace más tiempo arriba; sin fecha van al final).
+//     - autoOrden OFF → por `orden` manual ascendente (sin orden van al final).
+//  createdAt se usa siempre como desempate estable.
+function ordenarTareasKanban(items, autoOrden) {
+  const cmpCreated = (a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || ''));
+  const claveVenc = (t) => {
+    if (!t.fechaRecordatorio) return null;
+    return t.horaRecordatorio ? `${t.fechaRecordatorio}T${t.horaRecordatorio}` : `${t.fechaRecordatorio}T23:59`;
+  };
+  const fijadas = items.filter(t => t.fijadaAt)
+    .sort((a, b) => String(a.fijadaAt).localeCompare(String(b.fijadaAt)) || cmpCreated(a, b));
+  const resto = items.filter(t => !t.fijadaAt);
+  if (autoOrden) {
+    resto.sort((a, b) => {
+      const fa = claveVenc(a), fb = claveVenc(b);
+      if (fa && fb) return fa.localeCompare(fb) || cmpCreated(a, b);
+      if (fa) return -1;   // con fecha antes que sin fecha
+      if (fb) return 1;
+      return cmpCreated(a, b);
+    });
+  } else {
+    resto.sort((a, b) => {
+      const oa = (a.orden == null ? Infinity : a.orden);
+      const ob = (b.orden == null ? Infinity : b.orden);
+      if (oa !== ob) return oa - ob;
+      return cmpCreated(a, b);
+    });
+  }
+  return [...fijadas, ...resto];
 }
 
 function mapAgendadoFromDB(a) {
@@ -3644,7 +3740,7 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
@@ -3883,13 +3979,17 @@ const storage = {
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
     if ('compania' in patch) dbPatch.compania = patch.compania;
+    if ('orden' in patch) dbPatch.orden = patch.orden;
+    if ('fijadaAt' in patch) dbPatch.fijada_at = patch.fijadaAt;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
     if (Object.keys(dbPatch).length === 0) return;
-    // Solo marcamos actor cuando el cambio incluye campos user-visible. Si el
-    // patch es exclusivamente `googleEventId` (sync interno tras crear el evento
-    // en Google) no pisamos el actor original.
-    const onlyGoogleSync = Object.keys(dbPatch).length === 1 && 'google_event_id' in dbPatch;
-    if (!onlyGoogleSync) {
+    // Solo marcamos actor cuando el cambio incluye campos user-visible. No
+    // pisamos el actor original cuando el patch es puramente "mecánico":
+    // sync de googleEventId (interno), o reordenar/fijar (orden/fijada_at) —
+    // acomodar el tablero no es una acción de autoría sobre la tarea.
+    const MECANICO = new Set(['google_event_id', 'orden', 'fijada_at']);
+    const soloMecanico = Object.keys(dbPatch).every(k => MECANICO.has(k));
+    if (!soloMecanico) {
       const user = await auth.getUser();
       if (user?.id) dbPatch.actor_id = user.id;
     }
@@ -3907,7 +4007,7 @@ const storage = {
   async listTareasArchivadas() {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
     const { data, error } = await selectAllRows(() => sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
@@ -5663,6 +5763,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [filterFecha, setFilterFecha] = useState('todos');
   const [filterEtiqueta, setFilterEtiqueta] = useState([]); // array de tipo.id ó 'sin_etiqueta'
   const [ordenFecha, setOrdenFecha] = useState('ninguno'); // 'asc' | 'desc' | 'ninguno'
+  // Kanban Tareas: autoordenar cada columna por fecha de vencimiento. Preferencia
+  // de vista, persiste en localStorage. OFF por default (orden manual / arrastre).
+  const [autoOrdenTareas, setAutoOrdenTareas] = useState(() => {
+    try { return localStorage.getItem('abordaje_tareas_autoorden') === '1'; } catch (_) { return false; }
+  });
+  const toggleAutoOrdenTareas = useCallback(() => {
+    setAutoOrdenTareas(v => {
+      const nv = !v;
+      try { localStorage.setItem('abordaje_tareas_autoorden', nv ? '1' : '0'); } catch (_) {}
+      return nv;
+    });
+  }, []);
   // Solapa dentro de la vista Lista: 'abordaje' (default, prospects activos)
   // o 'archivo' (prospects archivados). No persiste — al recargar arranca en 'abordaje'.
   const [vistaLista, setVistaLista] = useState('abordaje');
@@ -6509,41 +6621,82 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   }, [state.tareas, guardReadOnly]);
 
-  const handleMoveTarea = async (tareaId, nuevaColumnaId) => {
+  // Drop de una tarjeta tras arrastrarla. Cubre dos casos con una sola pasada:
+  //  - mover a otra columna (targetColId != columna actual)
+  //  - reordenar dentro de la columna (mismo target, orden manual)
+  // `beforeTareaId` = id de la tarjeta ANTES de la cual soltamos (null = al
+  // final de las no-fijadas). Renumera el `orden` de las no-fijadas de la
+  // columna destino de forma contigua (0..n) y persiste solo lo que cambió.
+  // Las fijadas no participan del orden manual (van siempre arriba por fecha
+  // de fijado); si se arrastra una fijada solo cambiamos su columna.
+  const handleDropTarea = async (tareaId, targetColId, beforeTareaId = null) => {
     if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
-    if (!tarea || tarea.columnaId === nuevaColumnaId) return;
-    // Validamos que la columna destino exista en el state. Si fue borrada
-    // en otra sesión, evitamos un error crudo de FK al persistir.
-    const colDest = state.tareas.columnas.find(c => c.id === nuevaColumnaId);
-    if (!colDest) {
-      showToast('La columna destino ya no existe');
+    if (!tarea) return;
+    const colDest = state.tareas.columnas.find(c => c.id === targetColId);
+    if (!colDest) { showToast('La columna destino ya no existe'); return; }
+    const sameCol = tarea.columnaId === targetColId;
+
+    // Tarjeta fijada: mantenemos el pin, solo puede cambiar de columna.
+    if (tarea.fijadaAt) {
+      if (sameCol) return;
+      const prev = state.tareas.items;
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
+        t.id === tareaId ? { ...t, columnaId: targetColId } : t) } }));
+      try { await storage.updateTarea(tareaId, { columnaId: targetColId }); }
+      catch (e) { handleErr(e, 'moveTarea'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
       return;
     }
-    // Optimistic
-    setState(s => ({
-      ...s,
-      tareas: {
-        ...s.tareas,
-        items: s.tareas.items.map(t => t.id === tareaId
-          ? { ...t, columnaId: nuevaColumnaId, updatedAt: new Date().toISOString() }
-          : t)
-      }
-    }));
-    try {
-      await storage.updateTarea(tareaId, { columnaId: nuevaColumnaId });
-    } catch (e) {
-      handleErr(e, 'moveTarea');
-      // Rollback
-      setState(s => ({
-        ...s,
-        tareas: {
-          ...s.tareas,
-          items: s.tareas.items.map(t => t.id === tareaId
-            ? { ...t, columnaId: tarea.columnaId } : t)
-        }
-      }));
+
+    // No-fijadas de la columna destino (sin la que arrastramos), en su orden manual.
+    const destNoFijadas = state.tareas.items
+      .filter(t => t.columnaId === targetColId && !t.fijadaAt && t.id !== tareaId)
+      .sort((a, b) => ((a.orden == null ? Infinity : a.orden) - (b.orden == null ? Infinity : b.orden))
+        || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+    // Índice de inserción.
+    let idx = beforeTareaId ? destNoFijadas.findIndex(t => t.id === beforeTareaId) : -1;
+    if (idx < 0) {
+      // beforeTareaId puede ser una fijada (soltó en la zona de arriba) → al inicio.
+      const bt = beforeTareaId ? state.tareas.items.find(t => t.id === beforeTareaId) : null;
+      idx = (bt && bt.fijadaAt && bt.columnaId === targetColId) ? 0 : destNoFijadas.length;
     }
+    const lista = [...destNoFijadas];
+    lista.splice(idx, 0, tarea);
+    const ordenById = {};
+    lista.forEach((t, i) => { ordenById[t.id] = i; });
+
+    const prev = state.tareas.items;
+    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t => {
+      if (t.id === tareaId) return { ...t, columnaId: targetColId, orden: ordenById[t.id] };
+      if (t.id in ordenById) return { ...t, orden: ordenById[t.id] };
+      return t;
+    }) } }));
+
+    try {
+      await storage.updateTarea(tareaId, { columnaId: targetColId, orden: ordenById[tareaId] });
+      for (const t of destNoFijadas) {
+        if ((t.orden == null ? null : t.orden) !== ordenById[t.id]) {
+          await storage.updateTarea(t.id, { orden: ordenById[t.id] });
+        }
+      }
+    } catch (e) {
+      handleErr(e, 'reorderTarea');
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
+    }
+  };
+
+  // Fijar / desfijar una tarjeta arriba de su columna.
+  const handleTogglePin = async (tareaId) => {
+    if (guardReadOnly()) return;
+    const tarea = state.tareas.items.find(t => t.id === tareaId);
+    if (!tarea) return;
+    const nuevo = tarea.fijadaAt ? null : new Date().toISOString();
+    const prev = state.tareas.items;
+    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
+      t.id === tareaId ? { ...t, fijadaAt: nuevo } : t) } }));
+    try { await storage.updateTarea(tareaId, { fijadaAt: nuevo }); }
+    catch (e) { handleErr(e, 'togglePin'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
   };
 
   const handleUpdateTarea = async (id, patch) => {
@@ -7045,6 +7198,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             {prodAgentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
           </select>
         )}
+        {view === 'tareas' && (
+          <label className="kanban-autoorden" style={{ marginLeft: 'auto' }}
+            title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
+            <input type="checkbox" checked={autoOrdenTareas} onChange={toggleAutoOrdenTareas} />
+            <span>Autoordenar por vencimiento</span>
+          </label>
+        )}
       </div>
 
       {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && prodTarget && (
@@ -7164,8 +7324,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         <TareasView
           tareasState={state.tareas}
           readOnly={readOnly}
+          autoOrden={autoOrdenTareas}
           onAddTarea={handleAddTarea}
-          onMoveTarea={handleMoveTarea}
+          onDropTarea={handleDropTarea}
+          onTogglePin={handleTogglePin}
           onEditarTarea={(t) => setTareaEditando(t)}
           onAddColumna={handleAddColumna}
           onRenameColumna={handleRenameColumna}
@@ -12746,22 +12908,27 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
+function TareasView({ tareasState, readOnly, autoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
   const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   return (
     <div className="kanban-wrap">
       {cols.map(col => {
-        const items = tareasState.items.filter(t => t.columnaId === col.id);
+        const items = ordenarTareasKanban(
+          tareasState.items.filter(t => t.columnaId === col.id),
+          autoOrden
+        );
         return (
           <TareaColumna
             key={col.id}
             columna={col}
             tareas={items}
             readOnly={readOnly}
+            autoOrden={autoOrden}
             onRename={(nuevo) => onRenameColumna(col.id, nuevo)}
             onDelete={() => onDeleteColumna(col.id)}
             onAddTarea={(titulo) => onAddTarea(col.id, titulo)}
-            onMoveTarea={onMoveTarea}
+            onDropTarea={onDropTarea}
+            onTogglePin={onTogglePin}
             onMoveColumna={onMoveColumna}
             onEditarTarea={onEditarTarea}
             onSetCompania={onSetCompania}
@@ -12775,7 +12942,7 @@ function TareasView({ tareasState, readOnly, onAddTarea, onMoveTarea, onEditarTa
   );
 }
 
-function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTarea, onMoveTarea, onMoveColumna, onEditarTarea, onSetCompania }) {
+function TareaColumna({ columna, tareas, readOnly, autoOrden, onRename, onDelete, onAddTarea, onDropTarea, onTogglePin, onMoveColumna, onEditarTarea, onSetCompania }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
@@ -12964,7 +13131,7 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} onClick={() => onEditarTarea(t)} onMoveTarea={onMoveTarea} onSetCompania={onSetCompania} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} autoOrden={autoOrden} onClick={() => onEditarTarea(t)} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
         )}
       </div>
       {!readOnly && (agregando ? (
@@ -12984,7 +13151,7 @@ function TareaColumna({ columna, tareas, readOnly, onRename, onDelete, onAddTare
   );
 }
 
-function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
+function TareaCard({ tarea, readOnly, autoOrden, onClick, onDropTarea, onTogglePin, onSetCompania }) {
   // Popover de compañías (solo desktop, via click derecho onContextMenu).
   // En mobile no se habilita por ahora — el long-press está reservado para drag.
   const [companiaPicker, setCompaniaPicker] = useState(null); // {x, y} o null
@@ -13019,6 +13186,30 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
 
   const clearDragOver = () => {
     document.querySelectorAll('.kanban-col-body.drag-over').forEach(n => n.classList.remove('drag-over'));
+    document.querySelectorAll('.tarea-card.drop-before').forEach(n => n.classList.remove('drop-before'));
+  };
+
+  // Resuelve, dado un punto de pantalla durante el drag, la columna destino y
+  // la tarjeta ANTES de la cual soltaríamos (beforeId). Si el punto cae en la
+  // mitad inferior de una tarjeta, apuntamos a la siguiente (o al final).
+  const computeDrop = (clientX, clientY) => {
+    const el = document.elementFromPoint(clientX, clientY);
+    const colBody = el && el.closest ? el.closest('.kanban-col-body') : null;
+    if (!colBody) return null;
+    const targetColId = colBody.dataset.colId;
+    let beforeId = null;
+    const overCard = el.closest ? el.closest('.tarea-card') : null;
+    if (overCard && overCard.dataset.tareaId && overCard.dataset.tareaId !== tarea.id) {
+      const rect = overCard.getBoundingClientRect();
+      const above = clientY < rect.top + rect.height / 2;
+      if (above) {
+        beforeId = overCard.dataset.tareaId;
+      } else {
+        const next = overCard.nextElementSibling;
+        beforeId = (next && next.classList.contains('tarea-card')) ? next.dataset.tareaId : null;
+      }
+    }
+    return { targetColId, beforeId };
   };
 
   const clearTouchPending = () => {
@@ -13045,6 +13236,8 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
     // disparar onClick→abrir TareaModal.
     if (companiaPicker) return;
     if (readOnly) return;
+    // El botón de fijar maneja su propio click; no debe iniciar drag ni abrir el editor.
+    if (e.target.closest && e.target.closest('.tarea-pin-btn')) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (dragRef.current.active || pendingTouchRef.current) return;
 
@@ -13109,13 +13302,22 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
       setDragging(true);
     }
     if (ds.dragging) {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const colBody = el && el.closest ? el.closest('.kanban-col-body') : null;
-      document.querySelectorAll('.kanban-col-body.drag-over').forEach(n => {
-        if (n !== colBody) n.classList.remove('drag-over');
-      });
-      if (colBody && colBody.dataset.colId !== tarea.columnaId) {
-        colBody.classList.add('drag-over');
+      const drop = computeDrop(e.clientX, e.clientY);
+      // Limpiamos marcadores previos (destino de columna + línea de inserción).
+      clearDragOver();
+      if (drop) {
+        const crossCol = drop.targetColId !== tarea.columnaId;
+        if (crossCol) {
+          const body = document.querySelector(`.kanban-col-body[data-col-id="${drop.targetColId}"]`);
+          if (body) body.classList.add('drag-over');
+        }
+        // La línea de inserción solo aplica cuando el orden manual manda:
+        // dentro de la misma columna con autoorden apagado, o al cruzar de columna.
+        const mostrarLinea = crossCol || !autoOrden;
+        if (mostrarLinea && drop.beforeId) {
+          const card = document.querySelector(`.tarea-card[data-tarea-id="${drop.beforeId}"]`);
+          if (card) card.classList.add('drop-before');
+        }
       }
     }
   };
@@ -13129,10 +13331,16 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
     if (ds.dragging) {
       try { cardRef.current.releasePointerCapture(ds.pointerId); } catch (_) {}
       if (commit) {
-        const el = document.elementFromPoint(e.clientX, e.clientY);
-        const colBody = el && el.closest ? el.closest('.kanban-col-body') : null;
-        const colId = colBody && colBody.dataset ? colBody.dataset.colId : null;
-        if (colId && colId !== tarea.columnaId) onMoveTarea(tarea.id, colId);
+        const drop = computeDrop(e.clientX, e.clientY);
+        if (drop && drop.targetColId) {
+          const sameCol = drop.targetColId === tarea.columnaId;
+          // Reordenar dentro de la misma columna solo tiene sentido con el
+          // autoorden apagado (si está prendido, la fecha manda y volvería a
+          // acomodarse). Cruzar de columna siempre se aplica.
+          if (!(sameCol && autoOrden)) {
+            onDropTarea(tarea.id, drop.targetColId, drop.beforeId);
+          }
+        }
       }
       clearDragOver();
       setDragging(false);
@@ -13153,7 +13361,8 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
   return (
     <div
       ref={cardRef}
-      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${armed ? 'long-press-armed' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''}`}
+      data-tarea-id={tarea.id}
+      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${armed ? 'long-press-armed' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''} ${tarea.fijadaAt ? 'fijada' : ''}`}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -13163,10 +13372,28 @@ function TareaCard({ tarea, readOnly, onClick, onMoveTarea, onSetCompania }) {
       tabIndex={0}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
     >
+      {!readOnly && onTogglePin && (
+        <button
+          type="button"
+          className={`tarea-pin-btn ${tarea.fijadaAt ? 'on' : ''}`}
+          title={tarea.fijadaAt ? 'Desfijar' : 'Fijar arriba'}
+          aria-label={tarea.fijadaAt ? 'Desfijar tarea' : 'Fijar tarea arriba'}
+          aria-pressed={!!tarea.fijadaAt}
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onTogglePin(tarea.id); }}
+        >
+          {/* Chincheta: relleno cuando está fijada, contorno cuando no. */}
+          <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true">
+            <path d="M9.5 1.5 6 5 2.8 6.1c-.5.2-.6.8-.2 1.1l2 2-3.1 3.9c-.2.3.1.6.4.4L5.8 10l2 2c.4.4 1 .3 1.1-.2L10 8.5l3.5-3.5c.4-.4.4-1 0-1.5l-2.5-2.5c-.4-.4-1-.4-1.5 0z"
+              fill={tarea.fijadaAt ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
+          </svg>
+        </button>
+      )}
       {cfgCompania && (
         <CompaniaBadge cfg={cfgCompania} />
       )}
-      <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'} ${cfgCompania ? 'has-compania' : ''}`}>
+      <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'} ${cfgCompania ? 'has-compania' : ''} ${(!readOnly && onTogglePin) ? 'has-pin' : ''}`}>
         <ActorStar item={tarea} />
         {tarea.titulo || '(sin título)'}
       </div>
