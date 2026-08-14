@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Autorizar acceso · IFS</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+  * { box-sizing:border-box; margin:0; padding:0; }
+  :root{ --azul-oscuro:#3E4095; --azul:#0098DA; --navy:#1e1b4b; --fondo:#f0f2f7; }
+  body{ font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--fondo); color:#1a1a2e; min-height:100vh; display:flex;
+    align-items:center; justify-content:center; padding:20px; -webkit-font-smoothing:antialiased; }
+  .card{ background:#fff; border-radius:18px; padding:34px 34px 28px; width:min(420px,96vw);
+    box-shadow:0 10px 40px rgba(0,0,0,0.10); }
+  .brand{ font-size:13px; font-weight:800; letter-spacing:0.08em; color:var(--azul-oscuro);
+    text-transform:uppercase; margin-bottom:6px; }
+  h1{ font-size:20px; font-weight:800; color:var(--navy); margin-bottom:6px; }
+  p{ font-size:14px; color:#4b5563; line-height:1.55; }
+  .client{ font-weight:800; color:var(--azul); }
+  .scopes{ background:#f8fafc; border:1px solid #e5e7eb; border-radius:10px; padding:12px 14px;
+    margin:16px 0; font-size:13px; color:#374151; }
+  .scopes ul{ margin:6px 0 0 18px; }
+  input{ width:100%; border:1px solid #d1d5db; border-radius:10px; padding:11px 13px;
+    font-size:15px; outline:none; margin-bottom:10px; }
+  input:focus{ border-color:var(--azul); }
+  .row{ display:flex; gap:10px; margin-top:18px; }
+  button{ flex:1; border:none; border-radius:10px; padding:12px; font-size:15px; font-weight:700;
+    cursor:pointer; transition:opacity .15s; }
+  button:disabled{ opacity:.6; cursor:default; }
+  .primary{ background:var(--azul); color:#fff; }
+  .ghost{ background:#f1f5f9; color:#475569; }
+  .muted{ font-size:12px; color:#9ca3af; margin-top:16px; text-align:center; }
+  .err{ color:#dc2626; font-size:13px; margin-top:8px; }
+  .spin{ text-align:center; color:#9ca3af; font-size:14px; padding:20px 0; }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <div class="brand">IFS</div>
+  <div class="spin" id="loading">Cargando…</div>
+</div>
+
+<script>
+const SB_URL  = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
+const SB_ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh4anBuZWt6bmNxZXBiaHBka2Z2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzgyMzY4OTksImV4cCI6MjA5MzgxMjg5OX0.ZPcAhoPOILjamUaNu5oTODo90bKHYNLmUVaOUBpZ5SQ';
+const sb = window.supabase.createClient(SB_URL, SB_ANON, { auth:{ storageKey:'pm_sb_auth', persistSession:true } });
+
+const params = new URLSearchParams(location.search);
+const authorizationId = params.get('authorization_id');
+const card = document.getElementById('card');
+
+const esc = (s) => String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function render(html){ card.innerHTML = '<div class="brand">IFS</div>' + html; }
+
+async function main(){
+  if (!authorizationId){
+    return render('<h1>Enlace inválido</h1><p>Falta el parámetro de autorización. Volvé a iniciar la conexión desde Claude.</p>');
+  }
+  // 1) ¿Hay sesión?
+  const { data:{ session } } = await sb.auth.getSession();
+  if (!session){ return showLogin(); }
+  // 2) Detalles de la autorización
+  await showConsent();
+}
+
+function showLogin(msg){
+  render(`
+    <h1>Iniciá sesión</h1>
+    <p>Para autorizar el acceso, entrá con tu cuenta de IFS.</p>
+    <div style="margin-top:16px">
+      <input id="email" type="email" placeholder="Email" autocomplete="username"/>
+      <input id="pass" type="password" placeholder="Contraseña" autocomplete="current-password"/>
+      <div class="row" style="margin-top:8px">
+        <button class="primary" id="loginBtn">Entrar</button>
+      </div>
+      ${msg?`<div class="err">${esc(msg)}</div>`:''}
+    </div>`);
+  document.getElementById('loginBtn').onclick = async () => {
+    const btn = document.getElementById('loginBtn'); btn.disabled = true; btn.textContent='Entrando…';
+    const email = document.getElementById('email').value.trim();
+    const password = document.getElementById('pass').value;
+    const { error } = await sb.auth.signInWithPassword({ email, password });
+    if (error){ return showLogin('Email o contraseña incorrectos.'); }
+    await showConsent();
+  };
+  const p = document.getElementById('pass');
+  p.addEventListener('keydown', e => { if(e.key==='Enter') document.getElementById('loginBtn').click(); });
+}
+
+async function showConsent(){
+  render('<div class="spin">Cargando la solicitud…</div>');
+  let details;
+  try {
+    const res = await sb.auth.oauth.getAuthorizationDetails(authorizationId);
+    details = res && (res.data || res);
+  } catch(e){
+    return render(`<h1>Error</h1><p>No pude leer la solicitud de autorización.</p><div class="err">${esc(e.message||e)}</div>`);
+  }
+  const clientName = (details && (details.client?.name || details.client_name)) || 'Una aplicación';
+  const scopeStr = (details && details.scope) || '';
+  const scopes = scopeStr.split(/\s+/).filter(Boolean);
+  const scopeLabel = { openid:'Identificarte', email:'Ver tu email', profile:'Ver tu perfil', phone:'Ver tu teléfono' };
+
+  render(`
+    <h1>Autorizar acceso</h1>
+    <p><span class="client">${esc(clientName)}</span> quiere acceder a tu cuenta de IFS para operar en tu nombre (Abordaje y tu PM Personal).</p>
+    ${scopes.length?`<div class="scopes">Permisos solicitados:<ul>${scopes.map(s=>`<li>${esc(scopeLabel[s]||s)}</li>`).join('')}</ul></div>`:''}
+    <div class="row">
+      <button class="ghost" id="deny">Denegar</button>
+      <button class="primary" id="approve">Autorizar</button>
+    </div>
+    <div class="muted">Solo autorizá si vos iniciaste esta conexión desde Claude.</div>
+    <div class="err" id="err"></div>`);
+
+  document.getElementById('approve').onclick = () => decide(true);
+  document.getElementById('deny').onclick = () => decide(false);
+}
+
+async function decide(approve){
+  const a = document.getElementById('approve'), d = document.getElementById('deny');
+  a.disabled = d.disabled = true; (approve?a:d).textContent = approve?'Autorizando…':'Denegando…';
+  try {
+    const fn = approve ? sb.auth.oauth.approveAuthorization : sb.auth.oauth.denyAuthorization;
+    const res = await fn.call(sb.auth.oauth, authorizationId);
+    const out = res && (res.data || res);
+    const url = out && (out.redirect_url || out.redirectUrl || out.url);
+    if (url){ location.href = url; return; }
+    throw new Error('La respuesta no trajo redirect_url.');
+  } catch(e){
+    a.disabled = d.disabled = false; a.textContent='Autorizar'; d.textContent='Denegar';
+    document.getElementById('err').textContent = (e.message||String(e));
+  }
+}
+
+main().catch(e => render(`<h1>Error</h1><div class="err">${esc(e.message||e)}</div>`));
+</script>
+</body>
+</html>
