@@ -464,6 +464,39 @@
     border-color: var(--estado-rechazado, #b91c1c);
   }
 
+  /* ── Fila compacta Columna/Fecha/Hora (TareaModal) ── */
+  .field-row.field-row-3 { grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .field-row.field-row-3 .field { margin-bottom: 0; }
+  .field-row.field-row-3 .field label { font-size: 0.72rem; }
+  .field-row.field-row-3 .field input,
+  .field-row.field-row-3 .field select { min-width: 0; }
+
+  /* ── Atajos de bitácora (TareaModal) ── */
+  .msg-shortcut-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 0 0 14px;
+  }
+  .btn-msg-shortcut {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 7px 10px;
+    border: 1.5px solid var(--teal, #5CC6D0);
+    background: rgba(92, 198, 208, 0.08);
+    color: var(--azul-oscuro);
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+  .btn-msg-shortcut:hover { background: rgba(92, 198, 208, 0.2); }
+  .btn-msg-shortcut:active { transform: translateY(1px); }
+
   /* ── CALLOUT (info contextual en modales) ── */
   .help-callout {
     background: rgba(0,152,218,0.07);
@@ -3367,6 +3400,7 @@
     .timeline-mas { display: none; }
     .timeline-obs { white-space: normal; }
     .field-row, .field-inline-row { grid-template-columns: 1fr; }
+    .field-row.field-row-3 { grid-template-columns: 1fr; }
     .tipos-grid { grid-template-columns: 1fr 1fr; }
     .panel-side { max-width: 100%; }
     .panel-section { padding: 18px 18px; }
@@ -13530,6 +13564,11 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
   const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Atajos de bitácora: agregan una frase al campo de nueva entrada. Si ya hay
+  // texto, la concatenan con " · " para poder combinar acciones (ej: mensaje + llamada).
+  const agregarAtajo = (txt) => {
+    setNuevaEntrada(prev => (prev.trim() ? `${prev.trim()} · ${txt}` : txt));
+  };
 
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -13653,7 +13692,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
               onChange={e => upd('titulo', e.target.value)}
               placeholder="Ej: Cotización Pérez, Llamar a Juan" />
           </div>
-          <div className="field-row">
+          <div className="field-row field-row-3">
             <div className="field">
               <label>Columna</label>
               <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
@@ -13661,34 +13700,41 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
               </select>
             </div>
             <div className="field">
-              <label>Fecha recordatorio</label>
+              <label>Fecha</label>
               <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
                 onChange={e => upd('fechaRecordatorio', e.target.value)} />
             </div>
-          </div>
-          <div className="field">
-            <label>Hora (opcional, si tiene fecha)</label>
-            {readOnly || !form.fechaRecordatorio ? (
-              <input type="time" value={form.horaRecordatorio || ''} readOnly disabled />
-            ) : (
-              <HoraTexto value={form.horaRecordatorio || ''}
-                onChange={(v) => upd('horaRecordatorio', v)} />
-            )}
+            <div className="field">
+              <label>Hora</label>
+              {readOnly || !form.fechaRecordatorio ? (
+                <input type="time" value={form.horaRecordatorio || ''} readOnly disabled />
+              ) : (
+                <HoraTexto value={form.horaRecordatorio || ''}
+                  onChange={(v) => upd('horaRecordatorio', v)} />
+              )}
+            </div>
           </div>
           {!readOnly && (
-            <div className="field">
-              <label>Nueva entrada de bitácora <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(Enter guarda · Shift+Enter nueva línea)</span></label>
-              <textarea value={nuevaEntrada} autoFocus={!readOnly}
-                onChange={e => setNuevaEntrada(e.target.value)}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                    e.preventDefault();
-                    guardar();
-                  }
-                }}
-                placeholder="Al guardar se agrega arriba con fecha y hora..."
-                rows={3} />
-            </div>
+            <>
+              <div className="msg-shortcut-row" aria-label="Atajos de bitácora">
+                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Mandé mensaje hoy')}>Mandé mensaje hoy</button>
+                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Lo llamé hoy')}>Lo llamé hoy</button>
+                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Envié propuesta/mail')}>Envié propuesta/mail</button>
+              </div>
+              <div className="field">
+                <label>Nueva entrada de bitácora <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.66rem'}}>(Enter guarda · Shift+Enter línea nueva)</span></label>
+                <textarea value={nuevaEntrada} autoFocus={!readOnly}
+                  onChange={e => setNuevaEntrada(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                      e.preventDefault();
+                      guardar();
+                    }
+                  }}
+                  placeholder="Al guardar se agrega arriba con fecha y hora..."
+                  rows={3} />
+              </div>
+            </>
           )}
           {form.observacion && (
             <div className="field">
