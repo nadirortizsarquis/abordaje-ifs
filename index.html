@@ -129,6 +129,11 @@
     margin-left: auto;
     margin-right: auto;
   }
+  /* Footer global: encuadra el contenido con una línea del color del header
+     y deja un margen de respiro al final de cualquier vista. */
+  .app-footer { margin-top: 46px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  .app-footer-line { height: 4px; border-radius: 4px; background: linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 100%); }
+  .app-footer-text { text-align: center; font-size: 0.72rem; font-weight: 600; color: var(--texto-suave); letter-spacing: 0.3px; margin-top: 10px; }
 
   .main-head {
     display: flex; align-items: center; justify-content: space-between;
@@ -1113,7 +1118,7 @@
     margin-bottom: 6px;
   }
   .field label .req { color: var(--estado-rechazado); margin-left: 2px; }
-  .field input[type=text], .field input[type=tel], .field input[type=date], .field input[type=time], .field select, .field textarea {
+  .field input[type=text], .field input[type=tel], .field input[type=email], .field input[type=date], .field input[type=time], .field select, .field textarea {
     width: 100%;
     padding: 10px 13px;
     border: 1.5px solid var(--borde);
@@ -2273,6 +2278,94 @@
     color: var(--azul-oscuro);
   }
 
+  /* ── CALENDARIO DE PAGOS (renovaciones OLE) ── */
+  .calpago-toolbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+    padding: 12px 16px; background: var(--bg-card); border: 1px solid var(--borde);
+    border-radius: 12px; margin-bottom: 12px;
+  }
+  .calpago-fgroup { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .calpago-fgroup-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--texto-suave); }
+  .calpago-chk { display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem; font-weight: 600; color: var(--texto); cursor: pointer; user-select: none; }
+  .calpago-chk input { cursor: pointer; }
+  .calpago-toggle { display: inline-flex; border: 1px solid var(--borde); border-radius: 8px; overflow: hidden; }
+  .calpago-toggle button {
+    border: none; background: var(--bg-card); color: var(--texto-suave);
+    font-size: 0.78rem; font-weight: 700; padding: 6px 12px; cursor: pointer; transition: all 0.14s;
+  }
+  .calpago-toggle button.active { background: linear-gradient(135deg, var(--azul-oscuro), var(--azul)); color: white; }
+  .calpago-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-left: auto; }
+  .calpago-legend-item { display: inline-flex; align-items: center; gap: 5px; font-size: 0.74rem; font-weight: 600; color: var(--texto-suave); }
+  .calpago-dot { width: 11px; height: 11px; border-radius: 3px; border: 1px solid; }
+  .calpago-chip {
+    display: block; width: 100%; text-align: left; border: 1px solid; border-left-width: 3px;
+    border-radius: 5px; padding: 2px 5px; margin-bottom: 2px; font-size: 0.7rem; font-weight: 600;
+    line-height: 1.25; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: none;
+  }
+  .calpago-chip.mut { opacity: 0.72; }
+  .calpago-chip .calpago-chip-ren { font-size: 0.58rem; font-weight: 800; opacity: 0.85; }
+  .calpago-more { font-size: 0.64rem; font-weight: 700; color: var(--texto-suave); padding: 1px 4px; cursor: pointer; }
+  .calpago-grid { display: grid; grid-template-columns: repeat(7, 1fr); border-top: 1px solid var(--borde); border-left: 1px solid var(--borde); }
+  .calpago-cell {
+    min-height: 92px; border-right: 1px solid var(--borde); border-bottom: 1px solid var(--borde);
+    padding: 4px 4px 6px; background: var(--bg-card); position: relative; overflow: hidden;
+  }
+  .calpago-cell.out { background: #fafbfc; }
+  .calpago-cell.today { background: #eef6ff; }
+  .calpago-cell.sel { box-shadow: inset 0 0 0 2px var(--azul); }
+  .calpago-daynum { font-size: 0.72rem; font-weight: 700; color: var(--texto-suave); margin-bottom: 3px; }
+  .calpago-cell.out .calpago-daynum { opacity: 0.4; }
+  .calpago-cell.today .calpago-daynum { color: var(--azul); }
+  .calpago-year { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .calpago-mini { background: var(--bg-card); border: 1px solid var(--borde); border-radius: 10px; padding: 10px; }
+  .calpago-mini-title { font-size: 0.82rem; font-weight: 700; color: var(--azul-oscuro); text-transform: capitalize; margin-bottom: 6px; cursor: pointer; }
+  .calpago-mini-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+  .calpago-mini-dow { font-size: 0.56rem; font-weight: 700; color: var(--texto-suave); text-align: center; }
+  .calpago-mini-day {
+    aspect-ratio: 1; display: flex; align-items: center; justify-content: center;
+    font-size: 0.64rem; border-radius: 4px; position: relative; color: var(--texto-suave); cursor: default;
+  }
+  .calpago-mini-day.has { cursor: pointer; font-weight: 700; }
+  .calpago-mini-day.today { outline: 1.5px solid var(--azul); }
+  .calpago-detail { background: var(--bg-card); border: 1px solid var(--borde); border-radius: 12px; margin-top: 12px; overflow: hidden; }
+  .calpago-detail-head { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #f8fafc; border-bottom: 1px solid var(--borde); }
+  .calpago-detail-title { font-size: 0.92rem; font-weight: 700; color: var(--azul-oscuro); text-transform: capitalize; }
+  .calpago-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
+  .calpago-row:last-child { border-bottom: none; }
+  .calpago-badge { font-size: 0.66rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.3px; }
+  .calpago-paysel { display: inline-flex; gap: 4px; margin-left: auto; }
+  .calpago-paysel button {
+    border: 1px solid var(--borde); background: var(--bg-card); border-radius: 6px;
+    font-size: 0.72rem; font-weight: 700; padding: 4px 9px; cursor: pointer; transition: all 0.12s;
+  }
+  .calpago-paysel button.on { color: white; border-color: transparent; }
+  .calpago-empty { padding: 26px; text-align: center; color: var(--texto-suave); font-size: 0.86rem; }
+  .calpago-chip-note { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+  .calpago-search { border: 1px solid var(--borde); border-radius: 8px; padding: 6px 26px 6px 11px; font-size: 0.82rem; min-width: 210px; background: var(--bg-card); color: var(--texto); font-family: inherit; }
+  .calpago-search-x { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--texto-suave); font-size: 1.05rem; cursor: pointer; line-height: 1; }
+  .calpago-asesor-btn { border: 1px solid var(--borde); background: var(--bg-card); border-radius: 8px; font-size: 0.8rem; font-weight: 700; color: var(--texto); padding: 6px 12px; cursor: pointer; }
+  .calpago-asesor-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.16); padding: 10px 12px; min-width: 230px; }
+  .calpago-asesor-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; max-height: 280px; overflow: auto; border-top: 1px solid var(--borde); padding-top: 6px; }
+  .calpago-pop { position: fixed; z-index: 60; pointer-events: none; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.18); padding: 10px 12px; max-width: 270px; }
+  .calpago-pop-row { font-size: 0.74rem; color: #6b7280; margin-bottom: 2px; }
+  .calpago-pop-obs { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--borde); font-size: 0.74rem; color: #374151; font-style: italic; white-space: pre-wrap; }
+  .calpago-modal-ov { position: fixed; inset: 0; z-index: 70; background: rgba(15,23,42,0.5); display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .calpago-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 440px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); overflow: hidden; }
+  .calpago-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px; background: linear-gradient(135deg, var(--azul-oscuro), var(--azul)); color: #fff; }
+  .calpago-modal-title { font-size: 1.02rem; font-weight: 800; }
+  .calpago-modal-sub { font-size: 0.76rem; opacity: 0.9; margin-top: 2px; }
+  .calpago-modal-x { background: rgba(255,255,255,0.18); border: none; color: #fff; font-size: 1.15rem; line-height: 1; width: 28px; height: 28px; border-radius: 7px; cursor: pointer; flex-shrink: 0; }
+  .calpago-modal-body { padding: 16px 18px; }
+  .calpago-modal-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; color: var(--texto-suave); margin-bottom: 8px; }
+  .calpago-payopts { display: flex; gap: 8px; }
+  .calpago-payopt { flex: 1; border: 2px solid; border-radius: 9px; padding: 10px 8px; font-size: 0.86rem; font-weight: 800; cursor: pointer; transition: all 0.12s; }
+  .calpago-modal-obs { width: 100%; border: 1px solid var(--borde); border-radius: 9px; padding: 9px 11px; font-size: 0.85rem; font-family: inherit; resize: vertical; box-sizing: border-box; }
+  .calpago-modal-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px 16px; }
+  .calpago-btn-ghost { border: 1px solid var(--borde); background: #fff; color: var(--texto-suave); border-radius: 8px; font-size: 0.85rem; font-weight: 700; padding: 8px 16px; cursor: pointer; }
+  .calpago-btn-primary { border: none; background: linear-gradient(135deg, var(--azul-oscuro), var(--azul)); color: #fff; border-radius: 8px; font-size: 0.85rem; font-weight: 700; padding: 8px 18px; cursor: pointer; }
+  @media (max-width: 900px) { .calpago-year { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px) { .calpago-year { grid-template-columns: 1fr; } }
+
   /* ── Calendar picker (popover de mostrar/ocultar calendars de Google) ── */
   .cal-picker-wrap { position: relative; display: inline-block; }
   .cal-picker-btn { display: inline-flex; align-items: center; gap: 6px; }
@@ -3319,7 +3412,7 @@
        16px o más. Evita que la pantalla quede zoomeada tras tocar el buscador
        o un campo de formulario. */
     .buscador-input,
-    .field input[type=text], .field input[type=tel], .field input[type=date],
+    .field input[type=text], .field input[type=tel], .field input[type=email], .field input[type=date],
     .field input[type=time], .field select, .field textarea,
     .field-inline input, .field-inline select, .field-inline textarea {
       font-size: 16px;
@@ -3582,6 +3675,7 @@ function mapProspectoFromDB(p, contactosTodos) {
     id: p.id,
     nombre: p.nombre || '',
     telefono: p.telefono || '',
+    documento: p.documento || '',
     preferenciaContacto: p.preferencia_contacto || '',
     detalle: p.detalle || '',
     referente: p.referente || '',
@@ -3589,6 +3683,8 @@ function mapProspectoFromDB(p, contactosTodos) {
     relevamiento: p.relevamiento || null,
     agenteId: p.agente_id,
     actorId: p.actor_id || null,
+    crmClientId: p.crm_client_id || null,
+    crmLinkedAt: p.crm_linked_at || null,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
     proximoContacto: p.proximo_contacto,
@@ -3771,7 +3867,7 @@ const storage = {
     // Columnas explícitas (no select('*')): consumimos menos ancho de banda y
     // documentamos qué necesita cada mapper. Si se agrega una columna nueva al
     // schema y se quiere visible en el frontend, actualizar el select aquí.
-    const PROSPECTO_COLS = 'id, nombre, telefono, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, created_at, updated_at';
+    const PROSPECTO_COLS = 'id, nombre, telefono, documento, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, crm_client_id, crm_linked_at, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
     const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
@@ -3889,6 +3985,7 @@ const storage = {
     const dbPatch = {};
     if ('nombre' in patch) dbPatch.nombre = patch.nombre;
     if ('telefono' in patch) dbPatch.telefono = patch.telefono;
+    if ('documento' in patch) dbPatch.documento = patch.documento;
     if ('preferenciaContacto' in patch) dbPatch.preferencia_contacto = patch.preferenciaContacto;
     if ('detalle' in patch) dbPatch.detalle = patch.detalle;
     if ('referente' in patch) dbPatch.referente = patch.referente;
@@ -4151,6 +4248,95 @@ const gcalApi = {
     return data;
   }
 };
+
+// ── MODO MOCK (solo para pulir la UI en local, nunca en prod) ────────────────
+// Se activa SOLO en localhost, leyendo el modo de la URL (?crm_mock=...) o del
+// localStorage. Por URL cada ventana puede tener su propio modo:
+//   ?crm_mock=found     -> el DNI siempre "existe" en el CRM
+//   ?crm_mock=notfound  -> el DNI nunca existe (fuerza "Crear")
+//   ?crm_mock=1         -> existe si el DNI es par, no si es impar
+// Se captura al cargar el script (inmune a limpiezas de URL). En prod se ignora.
+const _CRM_MOCK_MODE = (() => {
+  try {
+    if (typeof location === 'undefined' || location.hostname !== 'localhost') return null;
+    const q = new URLSearchParams(location.search).get('crm_mock');
+    return q || (typeof localStorage !== 'undefined' ? localStorage.getItem('crm_mock') : null) || null;
+  } catch (_) { return null; }
+})();
+let _crmMockState = { clientId: null, synced: false };
+function _crmMockEnabled() { return !!_CRM_MOCK_MODE; }
+function _crmMock(op, payload) {
+  const mode = _CRM_MOCK_MODE;
+  const dni = String(payload.documento || payload.document_number || '').trim();
+  const mkClient = (id, nombre, doc) => ({
+    id, full_name: nombre, first_name: (nombre.split(' ')[0] || ''),
+    last_name: nombre.split(' ').slice(1).join(' '), document_number: doc,
+    primary_advisor: { id: 9, first_name: 'Nadir', last_name: 'Ortiz' },
+  });
+  const fuzzy = [
+    mkClient(101, 'María Soledad Marchetti', '27333444'),
+    mkClient(102, 'Mario Marchetti', '30111222'),
+  ];
+  const existe = () => {
+    if (mode === 'found') return true;
+    if (mode === 'notfound') return false;
+    const n = parseInt(dni.replace(/\D/g, ''), 10);
+    return Number.isFinite(n) ? (n % 2 === 0) : false;
+  };
+  switch (op) {
+    case 'status':
+      return {
+        ok: true, crm_client_id: _crmMockState.clientId,
+        pendientes: _crmMockState.clientId ? (_crmMockState.synced ? 0 : 3) : 0,
+        detalle: _crmMockState.clientId && !_crmMockState.synced
+          ? { contactos: 1, agendados: 1, tareas: 1 } : { contactos: 0, agendados: 0, tareas: 0 },
+      };
+    case 'lookup':
+      return {
+        ok: true,
+        exact: existe() ? [mkClient(200, (payload.search || 'Cliente Existente'), dni || '20111222')] : [],
+        fuzzy,
+        documento: dni,
+      };
+    case 'link':
+      _crmMockState = { clientId: Number(payload.crm_client_id) || 200, synced: false };
+      return { ok: true, action: 'linked', crm_client_id: _crmMockState.clientId };
+    case 'create':
+      _crmMockState = { clientId: 300, synced: false };
+      return { ok: true, action: 'created', client: mkClient(300, `${payload.first_name} ${payload.last_name}`, dni) };
+    case 'sync':
+      _crmMockState.synced = true;
+      return { ok: true, action: 'synced', synced: 3, detalle: { contactos: 1, agendados: 1, tareas: 1 } };
+    case 'unlink':
+      _crmMockState = { clientId: null, synced: false };
+      return { ok: true, action: 'unlinked' };
+    default:
+      return { ok: true };
+  }
+}
+
+// Wrapper de la edge function crm-sync (integración con el CRM de Bruno).
+// La función corre server-to-server contra la API del CRM con un token de
+// servicio; el JWT del asesor lo inyecta supabase-js automáticamente. Cuando el
+// CRM devuelve un 4xx (ej. 400 advisor_email inexistente, 503 CRM sin
+// configurar), supabase-js lo empaqueta como FunctionsHttpError con el Response
+// real en error.context — lo leemos para mostrarle al asesor el mensaje exacto.
+async function crmSync(op, payload = {}) {
+  if (_crmMockEnabled()) {
+    await new Promise(r => setTimeout(r, 250)); // latencia simulada para ver los "Buscando…"
+    return _crmMock(op, payload);
+  }
+  const { data, error } = await sb.functions.invoke('crm-sync', {
+    body: { op, ...payload }
+  });
+  if (error) {
+    let msg = error.message || 'Error comunicándose con el CRM';
+    try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch (_) {}
+    throw new Error(msg);
+  }
+  if (data && data.ok === false && data.error) throw new Error(data.error);
+  return data;
+}
 
 // Dominio Workspace cubierto por Domain-Wide Delegation. Users con email del
 // dominio activan Google Calendar con un click (DWD impersona via service
@@ -5536,6 +5722,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Estado del selector de "Mi producción" (elevado para mostrarlo en la fila de tabs)
   const [prodTarget, setProdTarget] = useState(null);
   const [prodAgentes, setProdAgentes] = useState([]);
+  // Calendario de pagos: filtro multi-asesor elevado a App (mismo patrón que prodTarget).
+  const [calPagoSel, setCalPagoSel] = useState(null);   // null = Todos
+  const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
+  const calPagoEffIds = useMemo(() => {
+    const selfId = agente?.id || user?.id;
+    if (!isAdminProd) return selfId ? [selfId] : [];
+    if (!calPagoSel) return calRoster.map(a => a.id);
+    const arr = calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
+    return arr.length ? arr : (selfId ? [selfId] : []);
+  }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
+  const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
   useEffect(() => {
     if (!agente) return;
     setProdTarget(viewAs
@@ -5544,7 +5741,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [agente?.id, viewAs?.id]);
   useEffect(() => {
     if (!isAdminProd) return;
-    sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
+    sb.from('profiles').select('id, display_name, email, advisor_name_ole').is('assistant_of_id', null)
       .or('is_demo.eq.false,demo_active.eq.true')
       .order('display_name', { ascending: true }).then(({ data }) => setProdAgentes(data || []));
   }, [isAdminProd]);
@@ -5658,7 +5855,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -5748,7 +5945,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Edición de agendas standalone (click en evento del calendar sin prospect)
   const [agendaEditando, setAgendaEditando] = useState(null);
   const [tareaEditando, setTareaEditando] = useState(null);
-  const [convertirTareaId, setConvertirTareaId] = useState(null);
   // Estado del modal de confirmación de reorden de columnas. Cuando el user
   // suelta el drag de una columna, el handler arma este state y se renderiza
   // ConfirmColMoveModal. Si confirma, ejecutamos el move. Si cancela, descartamos.
@@ -7048,66 +7244,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (e) { handleErr(e, 'deleteColumna'); }
   };
 
-  const handleConvertirTareaAProspect = async (tareaId, nombre, apellido) => {
-    if (guardReadOnly()) return;
-    const tarea = state.tareas.items.find(t => t.id === tareaId);
-    if (!tarea) return;
-    const notasParts = [];
-    if (tarea.titulo) notasParts.push(`Tarea original: ${tarea.titulo}`);
-    if (tarea.observacion) notasParts.push(tarea.observacion);
-    const observaciones = notasParts.join('\n\n');
-
-    // Si la tarea tenía fecha, vamos a registrar un contacto inicial tipo
-    // 'fecha_exacta' después de crear el prospect. Eso queda como gestión
-    // visible en el historial Y dispara sincronizarSeguimiento que recrea
-    // la tarea auto (lila) + evento Google asociada al prospect. Sin esto
-    // el prospect quedaba con proximoContacto pero sin contactos[] →
-    // deriveEstado decía 'nuevo' (incoherente).
-    const tareaConFecha = !!tarea.fechaRecordatorio;
-    const agendadoParaIso = tareaConFecha
-      ? (tarea.horaRecordatorio
-          ? `${tarea.fechaRecordatorio}T${tarea.horaRecordatorio}:00`
-          : tarea.fechaRecordatorio)
-      : null;
-
-    const nombreCompleto = `${(nombre || '').trim()} ${(apellido || '').trim()}`.trim();
-
-    try {
-      const prospect = await storage.createProspecto({
-        nombre: nombreCompleto,
-        observaciones,
-        // No pasamos proximoContacto acá: si la tarea tenía fecha, la setea
-        // sincronizarSeguimiento abajo a través del contacto que se crea.
-      });
-      // Si la tarea tenía evento en Google Calendar, lo borramos antes de
-      // eliminar la tarea — sino el evento queda huérfano con un
-      // abordaje_tarea_id apuntando a un id que ya no existe.
-      if (isPilot && tarea.googleEventId) {
-        try { await gcalApi.delete(tarea.googleEventId); }
-        catch (e) { console.warn('gcal del tarea (convertir):', e?.message || e); }
-      }
-      await storage.deleteTarea(tareaId);
-      setState(s => ({
-        ...s,
-        prospectos: [prospect, ...s.prospectos],
-        tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== tareaId) }
-      }));
-      // Si tenía fecha, registramos contacto inicial. sincronizarSeguimiento
-      // se encarga de crear la tarea auto + evento Google nuevo.
-      if (tareaConFecha) {
-        await handleAddContacto(prospect.id, {
-          tipo: 'fecha_exacta',
-          agendadoPara: agendadoParaIso,
-          observacion: tarea.titulo || 'Convertido desde tarea',
-        });
-      }
-      if (isPilot) bumpGcal();
-      setTareaEditando(null);
-      setConvertirTareaId(null);
-      showToast('Prospecto creado desde tarea');
-    } catch (e) { handleErr(e, 'convertirTarea'); }
-  };
-
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
 
   const filtrados = useMemo(
@@ -7215,7 +7351,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -7232,6 +7368,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             {prodAgentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
           </select>
         )}
+        {view === 'calendario_pagos' && isAdminProd && calRoster.length > 1 && (
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Asesores</span>
+        )}
+        {view === 'calendario_pagos' && isAdminProd && calRoster.length > 1 && (
+          <CalpagoAsesorPicker roster={calRoster} selIds={calPagoSel} setSelIds={setCalPagoSel} />
+        )}
         {view === 'tareas' && (
           <label className="kanban-autoorden" style={{ marginLeft: 'auto' }}
             title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
@@ -7243,6 +7385,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
       {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && prodTarget && (
         <ProduccionOLE target={prodTarget} selfUserId={agente?.id || user?.id} />
+      )}
+
+      {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
+        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} />
       )}
 
       {view === 'lista' && (
@@ -7408,6 +7554,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         </>
       )}
 
+      <footer className="app-footer">
+        <div className="app-footer-line"></div>
+        <div className="app-footer-text">IFS · Planificador de Abordaje</div>
+      </footer>
+
       {showAddModal && (
         <NuevoProspectoModal
           onCancel={() => setShowAddModal(false)}
@@ -7470,21 +7621,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
-          onConvertir={() => setConvertirTareaId(tareaEditando.id)}
         />
       )}
-
-      {convertirTareaId && (() => {
-        const t = state.tareas.items.find(x => x.id === convertirTareaId);
-        if (!t) { setConvertirTareaId(null); return null; }
-        return (
-          <ConvertirTareaModal
-            tarea={t}
-            onCancel={() => setConvertirTareaId(null)}
-            onConfirm={(nombre, apellido) => handleConvertirTareaAProspect(t.id, nombre, apellido)}
-          />
-        );
-      })()}
 
       {pendingColMove && (
         <ConfirmColMoveModal
@@ -8605,6 +8743,526 @@ function relevGetIn(obj, path) {
   return cur;
 }
 
+// ── VÍNCULO CON EL CRM (scaffold visual) ───────────────────────
+// Muestra el estado de vínculo del prospecto con un cliente del CRM de Bruno
+// y el botón de acción. INERTE por ahora: la sincronización real (match,
+// creación opt-in y volcado de gestión a la bitácora) se habilita cuando el
+// CRM confirme el acceso de servicio + la atribución de asesor.
+// Ref: docs/INTEGRACION_CRM.md · PM tarea #819.
+// Divide "Juan Pérez García" -> { first: "Juan", last: "Pérez García" }.
+// El prospecto de Abordaje guarda el nombre completo en un solo campo; el CRM
+// pide nombre y apellido por separado. Es una sugerencia editable en el modal.
+function splitNombre(nombre) {
+  const parts = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { first: '', last: '' };
+  if (parts.length === 1) return { first: parts[0], last: '' };
+  return { first: parts[0], last: parts.slice(1).join(' ') };
+}
+
+// Modal de la integración con el CRM. Sirve para cualquier ANCLA (prospecto,
+// tarea o agenda) — el vínculo se resuelve por cliente del CRM (opción B). El
+// estado vinculado/sin-vincular y el conteo de pendientes se preguntan al
+// backend (op `status`, 100% local en Supabase, no depende del token del CRM).
+//   - Sin vincular: form (DNI + nombre + apellido) -> Buscar en el CRM ->
+//     candidatos exactos (por DNI) y difusos (por nombre) para Vincular, o
+//     "Crear en el CRM" (opt-in) si no hay match.
+//   - Vinculado: muestra el cliente, cuántos ítems de gestión quedan por volcar
+//     (juntando TODO lo que apunta a ese cliente) y Sincronizar. Permite desvincular.
+// Los pasos que llaman al CRM (lookup/create/sync) responden 503 "CRM no
+// configurado" hasta que existan los secrets CRM_API_URL / CRM_API_TOKEN.
+function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
+  const sugerido = splitNombre(anchor.nombreSugerido);
+  const [dni, setDni] = useState(anchor.documentoSugerido || '');
+  const [first, setFirst] = useState(sugerido.first);
+  const [last, setLast] = useState(sugerido.last);
+  const [busy, setBusy] = useState('status');   // 'status'|'lookup'|'link'|'create'|'sync'|'unlink'|null
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null);
+  const [cands, setCands] = useState(null);      // { exact:[], fuzzy:[] } | null
+  const [showFuzzy, setShowFuzzy] = useState(false); // mostrar posibles por nombre (oculto por default)
+  const [creating, setCreating] = useState(false);   // paso de alta: form con datos del cliente CRM
+  const [masDatos, setMasDatos] = useState(false);   // desplegar campos extra (paridad con el CRM)
+  const [cEmail, setCEmail] = useState('');
+  const [cTel, setCTel] = useState('');
+  const [cNac, setCNac] = useState('');
+  const [cOcup, setCOcup] = useState('');
+  const [cDir, setCDir] = useState('');
+  const [cNotas, setCNotas] = useState('');
+  const [cSexo, setCSexo] = useState('');
+  const [cFumador, setCFumador] = useState(false);
+  const [cPais, setCPais] = useState('');
+  const [cProv, setCProv] = useState('');
+  const [cHobby, setCHobby] = useState('');
+  const [cFamilia, setCFamilia] = useState('');
+  const [cRedes, setCRedes] = useState('');
+  const [cReferido, setCReferido] = useState('');
+  const [cOrigen, setCOrigen] = useState('');
+  const [confirm, setConfirm] = useState(null);   // { kind:'link'|'create', ... } | null
+  const [clientId, setClientId] = useState(null); // cliente CRM efectivo (backend)
+  const [status, setStatus] = useState(null);     // { pendientes, detalle }
+
+  const anchorPayload = { anchor_type: anchor.type, anchor_id: anchor.id };
+  const vinculado = !!clientId;
+
+  const fetchStatus = async () => {
+    const r = await crmSync('status', anchorPayload);
+    setClientId(r.crm_client_id || null);
+    setStatus(r);
+    return r;
+  };
+
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape' && !busy) onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose, busy]);
+
+  // Al abrir: preguntar al backend si el ancla ya está vinculada.
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      setBusy('status'); setError(null);
+      try { await fetchStatus(); }
+      catch (e) { if (vivo) setError(e.message); }
+      finally { if (vivo) { setReady(true); setBusy(null); } }
+    })();
+    return () => { vivo = false; };
+  }, [anchor.type, anchor.id]);
+
+  const run = async (op, payload, after) => {
+    setBusy(op); setError(null); setNotice(null);
+    try {
+      const r = await crmSync(op, { ...anchorPayload, ...payload });
+      if (after) await after(r);
+      return r;
+    } catch (e) {
+      setError(e.message);
+      return null;
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const persistDni = async () => {
+    const d = dni.trim();
+    if (onSaveDni && d && d !== (anchor.documentoSugerido || '')) {
+      try { await onSaveDni(d); } catch (_) {}
+    }
+  };
+
+  const doLookup = async () => {
+    if (!dni.trim() && !`${first} ${last}`.trim()) {
+      setError('Cargá al menos el DNI o el nombre para buscar.');
+      return;
+    }
+    await persistDni();
+    setCands(null);
+    setShowFuzzy(false);
+    setCreating(false);
+    const r = await run('lookup', {
+      documento: dni.trim(),
+      search: `${first} ${last}`.trim() || anchor.nombreSugerido,
+    });
+    if (r) setCands({ exact: r.exact || [], fuzzy: r.fuzzy || [] });
+  };
+
+  // Vincular / Crear piden confirmación antes de escribir (doLink/doCreate solo
+  // abren el aviso; _linkNow/_createNow ejecutan al confirmar).
+  const doLink = (id, nombre) => { setError(null); setConfirm({ kind: 'link', clientId: id, clientName: nombre }); };
+  const _linkNow = async (id) => {
+    await run('link', { crm_client_id: id }, async () => {
+      await fetchStatus();
+      if (onLinked) onLinked(id, new Date().toISOString());
+      setNotice(`Vinculado al cliente #${id}.`);
+      setCands(null); setConfirm(null);
+    });
+  };
+
+  const doCreate = () => {
+    if (!first.trim() || !last.trim() || !dni.trim()) {
+      setError('Para crear en el CRM: DNI, nombre y apellido son obligatorios.');
+      return;
+    }
+    setError(null);
+    setConfirm({ kind: 'create' });
+  };
+  const _createNow = async () => {
+    await persistDni();
+    await run('create', {
+      first_name: first.trim(), last_name: last.trim(), document_number: dni.trim(),
+      phone: cTel.trim(), email: cEmail.trim(), date_of_birth: cNac,
+      occupation: cOcup.trim(), address: cDir.trim(), notes: cNotas.trim(),
+      sex: cSexo, is_smoker: cFumador, country: cPais.trim(), province: cProv.trim(),
+      hobby: cHobby.trim(), family_links: cFamilia.trim(), social_media: cRedes.trim(),
+      referred_by_text: cReferido.trim(), origin_detail: cOrigen.trim(),
+    }, async (r) => {
+      const id = r?.client?.id;
+      await fetchStatus();
+      if (onLinked) onLinked(id, new Date().toISOString());
+      setNotice(`Cliente #${id} creado y vinculado.`);
+      setCands(null); setConfirm(null); setCreating(false);
+    });
+  };
+
+  const runConfirm = () => {
+    if (!confirm) return;
+    if (confirm.kind === 'link') _linkNow(confirm.clientId);
+    else if (confirm.kind === 'create') _createNow();
+  };
+  const anchorLabel = anchor.type === 'tarea' ? 'esta tarea' : anchor.type === 'agendado' ? 'esta agenda' : 'este prospecto';
+
+  const doSync = async () => {
+    await run('sync', {}, async (r) => {
+      if (r.action === 'noop') { setNotice('No hay gestión nueva para volcar.'); }
+      else {
+        const d = r.detalle || {};
+        setNotice(`Volcado a la bitácora: ${r.synced} ítem(s) (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
+      }
+      await fetchStatus();
+    });
+  };
+
+  const doUnlink = async () => {
+    await run('unlink', {}, async () => {
+      await fetchStatus();
+      if (onLinked) onLinked(null, null);
+      setNotice('Vínculo con el CRM eliminado.');
+      setCands(null);
+    });
+  };
+
+  const anyBusy = !!busy;
+
+  return ReactDOM.createPortal((
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget && !anyBusy) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="crm-modal-title" style={{ maxWidth: 520 }}>
+        <div className="modal-header">
+          <h3 id="crm-modal-title">{vinculado ? 'Cliente en el CRM' : 'Vincular con el CRM'}</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar" disabled={anyBusy}>×</button>
+        </div>
+
+        <div className="modal-body">
+          {error && (
+            <div style={{ background:'#fef2f2', border:'1px solid #fecaca', color:'#b91c1c', borderRadius:8, padding:'10px 12px', fontSize:'0.82rem', marginBottom:14, lineHeight:1.4 }}>
+              {error}
+            </div>
+          )}
+          {notice && !error && (
+            <div style={{ background:'#f0fdf4', border:'1px solid #bbf7d0', color:'#15803d', borderRadius:8, padding:'10px 12px', fontSize:'0.82rem', marginBottom:14, lineHeight:1.4 }}>
+              {notice}
+            </div>
+          )}
+
+          {confirm ? (
+            // ── Confirmación (advierte antes de escribir en el CRM) ──────
+            <div>
+              {confirm.kind === 'link' ? (
+                <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10, padding:'16px', marginBottom:14 }}>
+                  <div style={{ fontSize:'0.92rem', fontWeight:700, color:'var(--azul-oscuro)', marginBottom:6 }}>
+                    ¿Vincular con este cliente del CRM?
+                  </div>
+                  <p style={{ fontSize:'0.84rem', color:'var(--texto)', lineHeight:1.5, margin:0 }}>
+                    Vas a vincular {anchorLabel} con <strong>{confirm.clientName || `cliente #${confirm.clientId}`}</strong> (CRM #{confirm.clientId}).
+                    Desde ahí, la gestión se va a poder volcar a la bitácora de ese cliente.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ background:'#fffbeb', border:'2px solid #fbbf24', borderRadius:10, padding:'16px', marginBottom:14 }}>
+                  <div style={{ fontSize:'0.92rem', fontWeight:700, color:'#92400e', marginBottom:6 }}>
+                    ¿Crear un cliente NUEVO en el CRM?
+                  </div>
+                  <p style={{ fontSize:'0.84rem', color:'#92400e', lineHeight:1.5, margin:0 }}>
+                    Se va a dar de alta en el CRM de IFS: <strong>{first.trim()} {last.trim()}</strong> · DNI {dni.trim()}.
+                    Va a quedar vinculado a {anchorLabel}. Revisá que no exista ya, para no duplicar.
+                  </p>
+                </div>
+              )}
+              <div style={{ display:'flex', gap:10 }}>
+                <button type="button" className="btn-secondary" onClick={() => setConfirm(null)} disabled={anyBusy}>Cancelar</button>
+                <button type="button" className="btn-primary" onClick={runConfirm} disabled={anyBusy} style={{ flex:1 }}>
+                  {busy === 'link' ? 'Vinculando…' : busy === 'create' ? 'Creando…'
+                    : (confirm.kind === 'link' ? 'Sí, vincular' : 'Sí, crear cliente')}
+                </button>
+              </div>
+            </div>
+          ) : !ready ? (
+            <p style={{ fontSize:'0.86rem', color:'var(--texto-suave)' }}>Cargando estado…</p>
+          ) : vinculado ? (
+            // ── Modo vinculado ──────────────────────────────────────────
+            <div>
+              <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', color:'var(--azul-oscuro)', borderRadius:8, padding:'12px 14px', fontSize:'0.86rem', marginBottom:16 }}>
+                Vinculado al <strong>cliente CRM #{clientId}</strong>
+              </div>
+              <p style={{ fontSize:'0.86rem', color:'var(--texto)', lineHeight:1.5, marginBottom:14 }}>
+                {busy === 'status'
+                  ? 'Consultando gestión pendiente…'
+                  : status
+                    ? (status.pendientes > 0
+                        ? <><strong>{status.pendientes}</strong> ítem(s) de gestión sin volcar a la bitácora del CRM ({status.detalle?.contactos||0} contactos, {status.detalle?.agendados||0} agendas, {status.detalle?.tareas||0} tareas).</>
+                        : 'Toda la gestión ya está volcada a la bitácora del CRM.')
+                    : 'La sincronización vuelca a la bitácora del CRM todo lo que apunta a este cliente (contactos, agendas y tareas).'}
+              </p>
+              <button type="button" className="btn-primary" onClick={doSync}
+                disabled={anyBusy || (status && status.pendientes === 0)} style={{ width:'100%' }}>
+                {busy === 'sync' ? 'Sincronizando…' : 'Sincronizar gestión ahora'}
+              </button>
+            </div>
+          ) : creating ? (
+            // ── Alta de cliente nuevo en el CRM (datos del cliente) ─────
+            <div>
+              <div style={{ fontSize:'0.92rem', fontWeight:700, color:'var(--azul-oscuro)', marginBottom:4 }}>
+                Nuevo cliente en el CRM
+              </div>
+              <p style={{ fontSize:'0.8rem', color:'var(--texto-suave)', lineHeight:1.5, margin:'0 0 16px' }}>
+                No existía con ese DNI. Completá los datos para darlo de alta. Solo nombre, apellido y DNI son obligatorios.
+              </p>
+              <div className="field-row">
+                <div className="field">
+                  <label>Nombre <span className="req">*</span></label>
+                  <input type="text" value={first} onChange={e => setFirst(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Apellido <span className="req">*</span></label>
+                  <input type="text" value={last} onChange={e => setLast(e.target.value)} />
+                </div>
+              </div>
+              <div className="field">
+                <label>DNI / Documento <span className="req">*</span></label>
+                <input type="text" value={dni} onChange={e => setDni(e.target.value)} placeholder="Sin puntos" />
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Teléfono</label>
+                  <input type="tel" value={cTel} onChange={e => setCTel(e.target.value)} placeholder="+54 11 ..." />
+                </div>
+                <div className="field">
+                  <label>Email</label>
+                  <input type="email" value={cEmail} onChange={e => setCEmail(e.target.value)} />
+                </div>
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Fecha de nacimiento</label>
+                  <input type="date" value={cNac} onChange={e => setCNac(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Ocupación</label>
+                  <input type="text" value={cOcup} onChange={e => setCOcup(e.target.value)} />
+                </div>
+              </div>
+              <div className="field">
+                <label>Dirección</label>
+                <input type="text" value={cDir} onChange={e => setCDir(e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Notas</label>
+                <textarea value={cNotas} onChange={e => setCNotas(e.target.value)}
+                  placeholder="Notas para la ficha del cliente en el CRM..." rows={2} />
+              </div>
+
+              {/* Cargar más datos: paridad con la ficha de cliente del CRM, para
+                  el asesor que quiera dejarla completa. Oculto por defecto. */}
+              <button type="button" className="btn-ghost" onClick={() => setMasDatos(v => !v)}
+                style={{ fontSize:'0.8rem', padding:0, marginBottom: masDatos ? 12 : 0 }}>
+                {masDatos ? 'Ocultar datos adicionales' : '+ Cargar más datos (ficha completa del CRM)'}
+              </button>
+              {masDatos && (
+                <div>
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Sexo</label>
+                      <select value={cSexo} onChange={e => setCSexo(e.target.value)}>
+                        <option value="">— Sin especificar —</option>
+                        <option value="M">Masculino</option>
+                        <option value="F">Femenino</option>
+                      </select>
+                    </div>
+                    <div className="field">
+                      <label>Fumador</label>
+                      <select value={cFumador ? '1' : '0'} onChange={e => setCFumador(e.target.value === '1')}>
+                        <option value="0">No</option>
+                        <option value="1">Sí</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div className="field-row">
+                    <div className="field">
+                      <label>País</label>
+                      <input type="text" value={cPais} onChange={e => setCPais(e.target.value)} />
+                    </div>
+                    <div className="field">
+                      <label>Provincia</label>
+                      <input type="text" value={cProv} onChange={e => setCProv(e.target.value)} />
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>Hobby / deporte</label>
+                    <input type="text" value={cHobby} onChange={e => setCHobby(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Vínculos familiares</label>
+                    <input type="text" value={cFamilia} onChange={e => setCFamilia(e.target.value)} />
+                  </div>
+                  <div className="field">
+                    <label>Redes sociales</label>
+                    <input type="text" value={cRedes} onChange={e => setCRedes(e.target.value)} />
+                  </div>
+                  <div className="field-row">
+                    <div className="field">
+                      <label>Referido por</label>
+                      <input type="text" value={cReferido} onChange={e => setCReferido(e.target.value)} />
+                    </div>
+                    <div className="field">
+                      <label>Origen (detalle)</label>
+                      <input type="text" value={cOrigen} onChange={e => setCOrigen(e.target.value)} />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display:'flex', gap:10, marginTop:6 }}>
+                <button type="button" className="btn-secondary" onClick={() => setCreating(false)} disabled={anyBusy}>
+                  Volver
+                </button>
+                <button type="button" className="btn-primary" onClick={doCreate} disabled={anyBusy} style={{ flex:1 }}>
+                  {busy === 'create' ? 'Creando…' : 'Crear cliente en el CRM'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            // ── Modo sin vincular ───────────────────────────────────────
+            <div>
+              <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)', lineHeight:1.5, marginBottom:16 }}>
+                Buscá al cliente en el CRM por DNI. Si existe, vinculalo; si no, podés crearlo (opt-in).
+                El nombre y apellido se sugieren — editalos si hace falta.
+              </p>
+              <div className="field">
+                <label>DNI / Documento <span className="req">*</span></label>
+                <input type="text" value={dni} onChange={e => setDni(e.target.value)}
+                  placeholder="Sin puntos" autoFocus />
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Nombre <span className="req">*</span></label>
+                  <input type="text" value={first} onChange={e => setFirst(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label>Apellido <span className="req">*</span></label>
+                  <input type="text" value={last} onChange={e => setLast(e.target.value)} />
+                </div>
+              </div>
+
+              <button type="button" className="btn-primary" onClick={doLookup} disabled={anyBusy} style={{ width:'100%', marginTop:4 }}>
+                {busy === 'lookup' ? 'Buscando…' : 'Buscar en el CRM'}
+              </button>
+
+              {cands && (
+                <div style={{ marginTop:18 }}>
+                  {/* Resultado PRIMARIO arriba y bien visible: encontrado -> vincular; no encontrado -> crear. */}
+                  {cands.exact.length > 0 ? (
+                    <div style={{ background:'#eff6ff', border:'1px solid #bfdbfe', borderRadius:10, padding:'14px' }}>
+                      <div style={{ fontSize:'0.82rem', fontWeight:700, color:'var(--azul-oscuro)', marginBottom:10 }}>
+                        Cliente encontrado en el CRM por DNI
+                      </div>
+                      {cands.exact.map(c => (
+                        <CrmCandidato key={c.id} c={c} onLink={() => doLink(c.id, c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' '))} disabled={anyBusy} highlight />
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ background:'#fffbeb', border:'2px solid #fbbf24', borderRadius:10, padding:'16px' }}>
+                      <div style={{ fontSize:'0.92rem', fontWeight:700, color:'#92400e', marginBottom:4 }}>
+                        No existe un cliente con ese DNI en el CRM
+                      </div>
+                      <div style={{ fontSize:'0.8rem', color:'#92400e', marginBottom:12, lineHeight:1.4, opacity:0.9 }}>
+                        Podés darlo de alta cargando sus datos.
+                      </div>
+                      <button type="button" className="btn-primary" onClick={() => { setCreating(true); setError(null); }} disabled={anyBusy}
+                        style={{ width:'100%', fontSize:'0.95rem', padding:'12px' }}>
+                        Cargar datos y crear cliente
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Sugerencias por nombre: secundarias, ocultas por defecto (confunden). */}
+                  {cands.fuzzy.length > 0 && (
+                    <div style={{ marginTop:14 }}>
+                      <button type="button" className="btn-ghost" onClick={() => setShowFuzzy(v => !v)}
+                        style={{ fontSize:'0.8rem', padding:0 }}>
+                        {showFuzzy ? 'Ocultar posibles por nombre' : '¿No es el correcto? Ver posibles por nombre'}
+                      </button>
+                      {showFuzzy && (
+                        <div style={{ marginTop:10 }}>
+                          <p style={{ fontSize:'0.78rem', color:'var(--texto-suave)', margin:'0 0 10px', lineHeight:1.45 }}>
+                            Clientes del CRM con un nombre parecido, por si la persona ya está cargada con
+                            otro DNI (o sin DNI). Revisá antes de crear uno nuevo para no duplicar.
+                          </p>
+                          {cands.fuzzy.map(c => (
+                            <CrmCandidato key={c.id} c={c} onLink={() => doLink(c.id, c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' '))} disabled={anyBusy} />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="modal-footer">
+          {vinculado && (
+            <button type="button" className="btn-ghost" onClick={doUnlink} disabled={anyBusy} style={{ marginRight:'auto' }}>
+              {busy === 'unlink' ? 'Desvinculando…' : 'Desvincular'}
+            </button>
+          )}
+          <button type="button" className="btn-secondary" onClick={onClose} disabled={anyBusy}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  ), document.body);
+}
+
+// Lanzador reutilizable del modal CRM para cualquier ancla (tarea, agenda, etc.).
+// El modal resuelve por sí mismo el estado (op status) — el lanzador es solo el botón.
+function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, className, style }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" className={className || 'btn-secondary'} style={style} onClick={() => setOpen(true)}>
+        {label || 'Cliente en el CRM'}
+      </button>
+      {open && (
+        <CrmModal
+          anchor={anchor}
+          onClose={() => setOpen(false)}
+          onLinked={onLinked}
+          onSaveDni={onSaveDni}
+        />
+      )}
+    </>
+  );
+}
+
+// Fila de un candidato de cliente del CRM en el modal de vínculo.
+function CrmCandidato({ c, onLink, disabled, highlight }) {
+  const nombre = c.full_name || [c.first_name, c.last_name].filter(Boolean).join(' ') || `Cliente #${c.id}`;
+  const asesor = c.primary_advisor
+    ? [c.primary_advisor.first_name, c.primary_advisor.last_name].filter(Boolean).join(' ')
+    : '';
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:10, background:'var(--bg-card)', border:'1px solid var(--borde)', borderRadius:8, padding:'10px 12px', marginBottom:8 }}>
+      <div style={{ minWidth:0 }}>
+        <div style={{ fontSize:'0.88rem', fontWeight:600, color:'var(--texto)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{nombre}</div>
+        <div style={{ fontSize:'0.74rem', color:'var(--texto-suave)' }}>
+          #{c.id}{c.document_number ? ` · DNI ${c.document_number}` : ''}{asesor ? ` · ${asesor}` : ''}
+        </div>
+      </div>
+      <button type="button" className={highlight ? 'btn-primary' : 'btn-secondary'} onClick={onLink} disabled={disabled} style={{ flex:'0 0 auto' }}>Vincular</button>
+    </div>
+  );
+}
+
 function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
   // Modal de relevamiento de necesidades (casi pantalla completa).
   const [relevOpen, setRelevOpen] = useState(false);
@@ -8697,6 +9355,15 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
             se guardan on-blur en los inputs, así que ambos botones cierran
             el panel — el "Cancelar" no descarta nada, solo cierra. */}
         <div className="panel-footer-sticky">
+          {!readOnly && (
+            <CrmVinculoLanzador
+              anchor={{ type: 'prospecto', id: prospecto.id, nombreSugerido: prospecto.nombre, documentoSugerido: prospecto.documento }}
+              label="Convertir a cliente CRM"
+              className="btn-primary"
+              onLinked={(clientId, linkedAt) => onUpdate({ crmClientId: clientId, crmLinkedAt: linkedAt })}
+              onSaveDni={(d) => onUpdate({ documento: d })}
+            />
+          )}
           <button className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button className="btn-primary" onClick={onClose}>Guardar</button>
         </div>
@@ -8710,6 +9377,7 @@ function FieldsProspecto({ prospecto, readOnly, onUpdate }) {
   const [draft, setDraft] = useState({
     nombre: prospecto.nombre || '',
     telefono: prospecto.telefono || '',
+    documento: prospecto.documento || '',
     preferenciaContacto: prospecto.preferenciaContacto || '',
     detalle: prospecto.detalle || '',
     referente: prospecto.referente || '',
@@ -8720,6 +9388,7 @@ function FieldsProspecto({ prospecto, readOnly, onUpdate }) {
     setDraft({
       nombre: prospecto.nombre || '',
       telefono: prospecto.telefono || '',
+      documento: prospecto.documento || '',
       preferenciaContacto: prospecto.preferenciaContacto || '',
       detalle: prospecto.detalle || '',
       referente: prospecto.referente || '',
@@ -8744,6 +9413,14 @@ function FieldsProspecto({ prospecto, readOnly, onUpdate }) {
           <input type="tel" value={draft.telefono} readOnly={readOnly}
             onChange={e => upd('telefono', e.target.value)}
             onBlur={() => commit('telefono')} />
+        </div>
+        <div className="field-inline">
+          <label>DNI / Documento <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(para vincular al CRM)</span></label>
+          <input type="text" value={draft.documento} readOnly={readOnly}
+            inputMode="numeric"
+            placeholder="Sin puntos"
+            onChange={e => upd('documento', e.target.value)}
+            onBlur={() => commit('documento')} />
         </div>
         <div className="field-inline">
           <label>Preferencia</label>
@@ -9218,7 +9895,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 }
 
 // ── VIEW TABS (Lista | Calendario) ────────────────────────────
-function ViewTabs({ view, setView, showProd }) {
+function ViewTabs({ view, setView, showProd, showCalPagos }) {
   return (
     <div className="view-tabs">
       <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
@@ -9230,6 +9907,10 @@ function ViewTabs({ view, setView, showProd }) {
       {showProd && (
         <button className={`view-tab ${view === 'produccion' ? 'active' : ''}`}
           onClick={() => setView('produccion')}>Mi producción</button>
+      )}
+      {showCalPagos && (
+        <button className={`view-tab ${view === 'calendario_pagos' ? 'active' : ''}`}
+          onClick={() => setView('calendario_pagos')}>Calendario de pagos</button>
       )}
     </div>
   );
@@ -9732,6 +10413,540 @@ function ProduccionOLE({ target, selfUserId }) {
           <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Sin pólizas en este período.</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ── CALENDARIO DE PAGOS OLE (renovaciones por asesor) ──────────
+const CALPAGO_FREQ_MESES = { mensual: 1, trimestral: 3, semestral: 6, anual: 12 };
+const CALPAGO_FREQ_LABEL = { mensual: 'Mensual', trimestral: 'Trimestral', semestral: 'Semestral', anual: 'Anual' };
+function calpagoNormFreq(f) {
+  const x = (f || '').toString().trim().toUpperCase();
+  if (!x) return null;
+  if (x.startsWith('MONT') || x.startsWith('MENS')) return 'mensual';
+  if (x.startsWith('QUAR') || x.startsWith('TRIM')) return 'trimestral';
+  if (x.startsWith('SEMI') || x.startsWith('SEMES')) return 'semestral';
+  if (x.startsWith('ANN') || x.startsWith('ANU')) return 'anual';
+  return null;
+}
+function calpagoParseDMY(v) {
+  if (!v) return null;
+  const m = String(v).trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const d = new Date(+m[3], +m[2] - 1, +m[1]);
+  return isNaN(d) ? null : d;
+}
+function calpagoAddMonths(date, n) {
+  const day = date.getDate();
+  const d = new Date(date.getFullYear(), date.getMonth() + n, 1);
+  const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, last));
+  return d;
+}
+function calpagoDerivePagos(rd, meses, yStart, yEnd) {
+  const out = [];
+  const span = Math.ceil(12 / meses) + 2;
+  for (let k = -span; k <= span; k++) {
+    const occ = calpagoAddMonths(rd, k * meses);
+    if (occ >= yStart && occ <= yEnd) out.push(occ);
+  }
+  return out;
+}
+const CALPAGO_PAG = {
+  cliente: { bg: '#dbeafe', bd: '#2563EB', tx: '#1e40af', label: 'Cliente' },
+  ifs:     { bg: '#ede9fe', bd: '#7C3AED', tx: '#5b21b6', label: 'IFS' },
+  agente:  { bg: '#ffedd5', bd: '#EA580C', tx: '#9a3412', label: 'Agente' },
+};
+const CALPAGO_SIN = { bg: '#f1f5f9', bd: '#94a3b8', tx: '#475569', label: 'Sin definir' };
+const CALPAGO_MUT = { bg: '#f3f4f6', bd: '#d1d5db', tx: '#9ca3af', label: 'Mensual' };
+function calpagoStyle(pagador, freq) {
+  // Las mensuales que paga el cliente (o sin definir) van apagadas: ruido de fondo.
+  if (freq === 'mensual' && (!pagador || pagador === 'cliente')) return CALPAGO_MUT;
+  if (!pagador) return CALPAGO_SIN;
+  return CALPAGO_PAG[pagador] || CALPAGO_SIN;
+}
+const calpagoBadgeStyle = e => { const st = calpagoStyle(e.pagador, e.freq); return { background: st.bg, borderColor: st.bd, color: st.tx }; };
+function calpagoDayLabel(k) {
+  const p = k.split('-').map(Number);
+  const dt = new Date(p[0], p[1] - 1, p[2]);
+  return dt.toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+}
+const calpagoFmtPrima = n => (typeof n === 'number' && !isNaN(n)) ? ('$' + n.toLocaleString('es-AR')) : '';
+const calpagoPagoKey = (asesorId, poliza) => asesorId + '|' + poliza;
+function calpagoNextAnniversary(rd, from) {
+  if (!rd) return null;
+  from = from || new Date();
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  let d = new Date(from.getFullYear(), rd.getMonth(), rd.getDate());
+  if (d < today) d = new Date(from.getFullYear() + 1, rd.getMonth(), rd.getDate());
+  return d;
+}
+const calpagoNorm = str => (str || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+
+// Modal de edicion: quien paga + observaciones.
+function buildCalpagoRoster(agentes, isAdmin, selfUserId, selfNombre) {
+  if (!isAdmin || !Array.isArray(agentes) || !agentes.length) {
+    return [{ id: selfUserId, nombre: selfNombre || 'Mi producción', memberIds: [selfUserId] }];
+  }
+  // Agrupar por libro OLE compartido: mismo advisor_name_ole => una sola entrada
+  // (ej. Nadir y Federico comparten el libro de IFS, con pólizas idénticas).
+  const norm = v => (v || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
+  const groups = new Map();
+  agentes.forEach(a => {
+    const ole = norm(a.advisor_name_ole);
+    const key = ole ? ('ole:' + ole) : ('u:' + a.id);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(a);
+  });
+  const units = [];
+  groups.forEach(members => {
+    // canon DETERMINÍSTICO (mismo para todos los que ven el grupo): el pago y
+    // los comentarios se guardan en UN solo user_id → Nadir y Federico comparten
+    // totalmente el tablero (lo que uno edita, el otro lo ve). RLS lo permite por
+    // ser ambos admin.
+    const canon = members.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))[0];
+    let nombre;
+    if (members.length > 1) {
+      const oleN = norm(members[0].advisor_name_ole);
+      const firsts = members.map(m => (m.display_name || m.email || 'asesor').split(' ')[0]).join(' / ');
+      nombre = oleN.includes('INSURANCE FINANCIAL SOLUTION')
+        ? ('IFS (' + firsts + ')')
+        : members.map(m => m.display_name || m.email || 'asesor').join(' / ');
+    } else {
+      nombre = canon.display_name || canon.email || 'asesor';
+    }
+    units.push({ id: canon.id, nombre, memberIds: members.map(m => m.id) });
+  });
+  if (!units.some(u => u.memberIds.includes(selfUserId))) {
+    units.unshift({ id: selfUserId, nombre: selfNombre || 'Mi producción', memberIds: [selfUserId] });
+  }
+  units.sort((a, b) => {
+    const aSelf = a.memberIds.includes(selfUserId) ? 0 : 1;
+    const bSelf = b.memberIds.includes(selfUserId) ? 0 : 1;
+    if (aSelf !== bSelf) return aSelf - bSelf;
+    return a.nombre.localeCompare(b.nombre);
+  });
+  return units;
+}
+
+function CalpagoAsesorPicker({ roster, selIds, setSelIds }) {
+  const [open, setOpen] = useState(false);
+  const effCount = selIds ? roster.filter(a => selIds.has(a.id)).length : roster.length;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button type="button" className="calpago-asesor-btn" onClick={() => setOpen(o => !o)}>
+        {!selIds ? 'Todos' : (effCount + (effCount === 1 ? ' asesor' : ' asesores'))} ▾
+      </button>
+      {open && (
+        <div className="calpago-asesor-pop" onMouseLeave={() => setOpen(false)}>
+          <label className="calpago-chk" style={{ fontWeight: 700 }}>
+            <input type="checkbox" checked={!selIds} onChange={e => setSelIds(e.target.checked ? null : new Set())} />
+            Todos
+          </label>
+          <div className="calpago-asesor-list">
+            {roster.map(a => {
+              const on = !selIds || selIds.has(a.id);
+              return (
+                <label className="calpago-chk" key={a.id}>
+                  <input type="checkbox" checked={on} onChange={e => setSelIds(prev => {
+                    const base = prev ? new Set(prev) : new Set(roster.map(x => x.id));
+                    if (e.target.checked) base.add(a.id); else base.delete(a.id);
+                    return base.size === roster.length ? null : base;
+                  })} />
+                  {a.nombre}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
+  const [paga, setPaga] = useState(current ? (current.paga || null) : null);
+  const [obs, setObs] = useState(current ? (current.obs || '') : '');
+  return (
+    <div className="calpago-modal-ov" onClick={onClose}>
+      <div className="calpago-modal" onClick={e => e.stopPropagation()}>
+        <div className="calpago-modal-head">
+          <div style={{ minWidth: 0 }}>
+            <div className="calpago-modal-title">{ev.asegurado}</div>
+            {isAdmin && ev.asesorNombre && <div className="calpago-modal-sub" style={{ fontWeight: 700, opacity: 1, color: '#c4b5fd' }}>{ev.asesorNombre}</div>}
+            <div className="calpago-modal-sub">{[CALPAGO_FREQ_LABEL[ev.freq] || ev.freqRaw, ev.estado].filter(Boolean).join(' · ')}</div>
+            {calpagoFmtPrima(ev.prima) && <div className="calpago-modal-sub" style={{ fontSize: '0.95rem', fontWeight: 800, opacity: 1 }}>Prima: {calpagoFmtPrima(ev.prima)}</div>}
+            <div className="calpago-modal-sub">Vence: {ev.date ? ev.date.toLocaleDateString('es-AR') : '—'}</div>
+            <div className="calpago-modal-sub">Póliza: {ev.poliza}</div>
+          </div>
+          <button className="calpago-modal-x" onClick={onClose}>×</button>
+        </div>
+        <div className="calpago-modal-body">
+          <div className="calpago-modal-label">¿Quién paga?</div>
+          <div className="calpago-payopts">
+            {['cliente', 'ifs', 'agente'].map(pg => {
+              const c = CALPAGO_PAG[pg]; const on = paga === pg;
+              return <button key={pg} type="button" className="calpago-payopt"
+                style={on ? { background: c.bd, borderColor: c.bd, color: '#fff' } : { borderColor: c.bd, color: c.tx, background: '#fff' }}
+                onClick={() => setPaga(on ? null : pg)}>{c.label}</button>;
+            })}
+          </div>
+          <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
+          <textarea className="calpago-modal-obs" value={obs} onChange={e => setObs(e.target.value)} rows={3}
+            placeholder="Notas sobre esta póliza o su cobranza…" />
+        </div>
+        <div className="calpago-modal-foot">
+          <button type="button" className="calpago-btn-ghost" onClick={onClose}>Cancelar</button>
+          <button type="button" className="calpago-btn-primary" onClick={() => onSave(paga, obs)}>Guardar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
+  const idsKey = (effIds || []).slice().sort().join(',');
+
+  const [rows, setRows] = useState(null);
+  const [pagoMap, setPagoMap] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+  const [mode, setMode] = useState('mes');
+  const [cursor, setCursor] = useState(() => new Date());
+  const [eachPay, setEachPay] = useState(false);
+  const [selDay, setSelDay] = useState(null);
+  const [hover, setHover] = useState(null);
+  const [editing, setEditing] = useState(null);
+  const [freqF, setFreqF] = useState({ mensual: true, trimestral: true, semestral: true, anual: true });
+  const [pagF, setPagF] = useState({ cliente: true, ifs: true, agente: true, sin: true });
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    if (!effIds.length) { setRows([]); setLoading(false); return; }
+    let cancel = false;
+    setLoading(true); setErr(null); setSelDay(null);
+    Promise.all([
+      sb.from('ole_reportes').select('user_id,resumen,updated_at').in('user_id', effIds).eq('vista', 'anual'),
+      sb.from('ole_poliza_pago').select('user_id,poliza,paga,observaciones').in('user_id', effIds),
+    ]).then(([rep, pag]) => {
+      if (cancel) return;
+      if (rep.error) { setErr(rep.error.message); setRows([]); setLoading(false); return; }
+      setRows(rep.data || []);
+      const m = {};
+      if (!pag.error) (pag.data || []).forEach(x => { m[calpagoPagoKey(x.user_id, x.poliza)] = { paga: x.paga || null, obs: x.observaciones || '' }; });
+      setPagoMap(m);
+      setLoading(false);
+    });
+    return () => { cancel = true; };
+  }, [idsKey]);
+
+  const detalle = useMemo(() => {
+    if (!rows || !rows.length) return [];
+    const out = [];
+    rows.forEach(r => {
+      // 'cartera' = libro completo (todas las renovaciones). Fallback a 'detalle'
+      // (solo producción) para reportes viejos que aún no republicaron.
+      const d = r.resumen && (r.resumen.cartera || r.resumen.detalle);
+      if (Array.isArray(d)) d.forEach(p => out.push({ ...p, _asesorId: r.user_id }));
+    });
+    return out;
+  }, [rows]);
+  const updLast = useMemo(() => {
+    if (!rows || !rows.length) return '';
+    let mx = 0;
+    rows.forEach(r => { const t = r.updated_at ? Date.parse(r.updated_at) : 0; if (t > mx) mx = t; });
+    return mx ? new Date(mx).toLocaleDateString('es-AR') : '';
+  }, [rows]);
+
+  const year = cursor.getFullYear();
+  const { eventos, sinFecha } = useMemo(() => {
+    const yStart = new Date(year, 0, 1), yEnd = new Date(year, 11, 31);
+    const evs = []; let sf = 0;
+    detalle.forEach(p => {
+      const rd = calpagoParseDMY(p.fRenovacion);
+      if (!rd) { sf++; return; }
+      const freq = calpagoNormFreq(p.frecuencia);
+      const rec = pagoMap[calpagoPagoKey(p._asesorId, p.poliza)] || null;
+      const pagador = rec ? rec.paga : null;
+      const obs = rec ? (rec.obs || '') : '';
+      const mk = date => ({
+        poliza: p.poliza, asegurado: p.asegurado || '(sin nombre)', plan: p.plan || '',
+        prima: p.prima, estado: p.estado || '', tipo: p.tipo || '',
+        freq, freqRaw: p.frecuencia || '', date, pagador, obs,
+        asesorId: p._asesorId, asesorNombre: nombreDe[p._asesorId] || '',
+      });
+      // La renovación es un aniversario recurrente: se proyecta al AÑO que se
+      // está viendo (no al año literal del reporte). "Solo renovación" = una vez
+      // al año (aniversario); "cada pago" = las cuotas según frecuencia.
+      const stepM = !eachPay ? 12 : (freq ? CALPAGO_FREQ_MESES[freq] : 12);
+      calpagoDerivePagos(rd, stepM, yStart, yEnd).forEach(d => evs.push(mk(d)));
+    });
+    return { eventos: evs, sinFecha: sf };
+  }, [detalle, pagoMap, eachPay, year, nombreDe]);
+
+  const nq = calpagoNorm(q);
+  const shown = useMemo(() => eventos.filter(e => {
+    if (e.freq && !freqF[e.freq]) return false;
+    if (!pagF[e.pagador || 'sin']) return false;
+    return true;
+  }), [eventos, freqF, pagF]);
+  // Búsqueda sobre TODO el libro (todos los años, no solo el que se ve).
+  const searchResults = useMemo(() => {
+    if (!nq) return [];
+    const out = [];
+    detalle.forEach(p => {
+      const hay = calpagoNorm((p.asegurado || '') + ' ' + (nombreDe[p._asesorId] || '') + ' ' + (p.poliza || ''));
+      if (!hay.includes(nq)) return;
+      const rec = pagoMap[calpagoPagoKey(p._asesorId, p.poliza)] || null;
+      out.push({
+        poliza: p.poliza, asegurado: p.asegurado || '(sin nombre)', plan: p.plan || '',
+        prima: p.prima, estado: p.estado || '', tipo: p.tipo || '',
+        freq: calpagoNormFreq(p.frecuencia), freqRaw: p.frecuencia || '',
+        date: calpagoNextAnniversary(calpagoParseDMY(p.fRenovacion)), pagador: rec ? rec.paga : null, obs: rec ? (rec.obs || '') : '',
+        asesorId: p._asesorId, asesorNombre: nombreDe[p._asesorId] || '',
+      });
+    });
+    out.sort((a, b) => (a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity));
+    return out;
+  }, [detalle, nq, pagoMap, nombreDe]);
+  const byDay = useMemo(() => {
+    const m = {};
+    shown.forEach(e => { const k = dayKey(e.date); (m[k] = m[k] || []).push(e); });
+    return m;
+  }, [shown]);
+
+  const goPrev = () => setCursor(c => { const d = new Date(c); if (mode === 'anio') d.setFullYear(d.getFullYear() - 1); else if (mode === 'semana') d.setDate(d.getDate() - 7); else d.setMonth(d.getMonth() - 1); return d; });
+  const goNext = () => setCursor(c => { const d = new Date(c); if (mode === 'anio') d.setFullYear(d.getFullYear() + 1); else if (mode === 'semana') d.setDate(d.getDate() + 7); else d.setMonth(d.getMonth() + 1); return d; });
+  const goToday = () => setCursor(new Date());
+  const goToDate = d => { if (!d) return; setCursor(new Date(d)); setMode('mes'); setSelDay(dayKey(d)); };
+
+  async function savePago(asesorId, poliza, paga, obs) {
+    const cleanObs = (obs || '').trim();
+    const key = calpagoPagoKey(asesorId, poliza);
+    setPagoMap(m => { const n = { ...m }; if (!paga && !cleanObs) delete n[key]; else n[key] = { paga: paga || null, obs: cleanObs }; return n; });
+    try {
+      if (!paga && !cleanObs) await sb.from('ole_poliza_pago').delete().eq('user_id', asesorId).eq('poliza', poliza);
+      else await sb.from('ole_poliza_pago').upsert({ user_id: asesorId, poliza, paga: paga || null, observaciones: cleanObs || null, updated_at: new Date().toISOString() }, { onConflict: 'user_id,poliza' });
+    } catch (e) { /* optimista */ }
+  }
+
+  const renderChip = (e, key) => {
+    const st = calpagoStyle(e.pagador, e.freq);
+    const hasObs = !!(e.obs && e.obs.length);
+    return (
+      <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
+        style={{ background: st.bg, borderColor: st.bd, color: st.tx }}
+        onMouseEnter={ev => { const r = ev.currentTarget.getBoundingClientRect(); setHover({ e, x: r.left, y: r.bottom }); }}
+        onMouseLeave={() => setHover(null)}
+        onClick={ev => { ev.stopPropagation(); setHover(null); setEditing(e); }}>
+        {hasObs && <span className="calpago-chip-note" style={{ background: st.bd }}></span>}{e.asegurado}
+      </button>
+    );
+  };
+
+  const emptyBox = txt => <div className="calpago-empty" style={{ border: '1px solid var(--borde)', borderRadius: 12, background: 'var(--bg-card)' }}>{txt}</div>;
+
+  const titulo = mode === 'anio' ? String(year)
+    : mode === 'semana' ? ('Semana del ' + (() => { const w = new Date(cursor); w.setDate(w.getDate() - ((w.getDay() + 6) % 7)); return w.getDate() + ' ' + NOMBRES_MES[w.getMonth()]; })())
+    : (NOMBRES_MES[cursor.getMonth()] + ' ' + year);
+  const selEvs = selDay ? (byDay[selDay] || []) : [];
+  const winW = (typeof window !== 'undefined') ? window.innerWidth : 1200;
+
+  let cuerpo;
+  if (loading) cuerpo = emptyBox('Cargando calendario…');
+  else if (err) cuerpo = emptyBox('Error al cargar: ' + err);
+  else if (!detalle.length) cuerpo = emptyBox(isAdmin ? 'Ningún asesor seleccionado tiene un reporte publicado.' : 'Todavía no tenés un reporte de producción publicado.');
+  else cuerpo = (
+    <div>
+      <div className="cal-wrap">
+        <div className="cal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+            <div className="cal-title">{titulo}</div>
+            <div className="cal-sub-tabs">
+              {[['mes', 'Mes'], ['semana', 'Semana'], ['anio', 'Año']].map(mt => (
+                <button key={mt[0]} className={'cal-sub-tab' + (mode === mt[0] ? ' active' : '')} onClick={() => setMode(mt[0])}>{mt[1]}</button>
+              ))}
+            </div>
+          </div>
+          <div className="cal-nav">
+            <button className="cal-nav-btn cal-nav-arrow" onClick={goPrev}>‹</button>
+            <button className="cal-nav-btn" onClick={goToday}>Hoy</button>
+            <button className="cal-nav-btn cal-nav-arrow" onClick={goNext}>›</button>
+          </div>
+        </div>
+
+        {mode === 'mes' && (
+          <div className="calpago-grid">
+            {DOW_CORTOS.map(d => <div key={d} className="cal-dow">{d}</div>)}
+            {buildMonthGrid(year, cursor.getMonth()).map((cell, i) => {
+              const k = dayKey(cell.date);
+              const evs = byDay[k] || [];
+              const MAX = 3;
+              return (
+                <div key={i} className={'calpago-cell' + (cell.outOfMonth ? ' out' : '') + (isToday(cell.date) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
+                  <div className="calpago-daynum">{cell.date.getDate()}</div>
+                  {evs.slice(0, MAX).map((e, j) => renderChip(e, j))}
+                  {evs.length > MAX && <div className="calpago-more" onClick={ev => { ev.stopPropagation(); setSelDay(k); }}>+{evs.length - MAX} más</div>}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {mode === 'semana' && (
+          <div className="calpago-grid" style={{ gridAutoRows: 'minmax(210px, auto)' }}>
+            {(() => {
+              const w = new Date(cursor); w.setDate(w.getDate() - ((w.getDay() + 6) % 7));
+              return Array.from({ length: 7 }, (_, i) => {
+                const d = new Date(w); d.setDate(d.getDate() + i);
+                const k = dayKey(d);
+                const evs = byDay[k] || [];
+                return (
+                  <div key={i} className={'calpago-cell' + (isToday(d) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
+                    <div className="calpago-daynum">{DOW_CORTOS[i]} {d.getDate()}/{d.getMonth() + 1}</div>
+                    {evs.map((e, j) => renderChip(e, j))}
+                    {!evs.length && <div style={{ fontSize: '0.66rem', color: '#cbd5e1', marginTop: 6 }}>—</div>}
+                  </div>
+                );
+              });
+            })()}
+          </div>
+        )}
+
+        {mode === 'anio' && (
+          <div className="calpago-year" style={{ padding: 14 }}>
+            {Array.from({ length: 12 }, (_, mo) => (
+              <div key={mo} className="calpago-mini">
+                <div className="calpago-mini-title" onClick={() => { setCursor(new Date(year, mo, 1)); setMode('mes'); }}>{NOMBRES_MES[mo]}</div>
+                <div className="calpago-mini-grid">
+                  {DOW_CORTOS.map(d => <div key={d} className="calpago-mini-dow">{d[0]}</div>)}
+                  {buildMonthGrid(year, mo).map((cell, i) => {
+                    if (cell.outOfMonth) return <div key={i} className="calpago-mini-day"></div>;
+                    const k = dayKey(cell.date);
+                    const evs = byDay[k] || [];
+                    const has = evs.length > 0;
+                    const st = has ? calpagoStyle(evs[0].pagador, evs[0].freq) : null;
+                    return (
+                      <div key={i} className={'calpago-mini-day' + (has ? ' has' : '') + (isToday(cell.date) ? ' today' : '')}
+                        style={has ? { background: st.bg, color: st.tx, boxShadow: 'inset 0 -2px 0 ' + st.bd } : null}
+                        title={has ? (evs.length + ' pago(s)') : ''}
+                        onClick={has ? () => { setCursor(new Date(year, mo, cell.date.getDate())); setSelDay(k); setMode('mes'); } : undefined}>
+                        {cell.date.getDate()}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 8 }}>
+        Se dibuja con las pólizas del último reporte publicado{updLast ? (' (' + updLast + ')') : ''}. {sinFecha > 0 ? (sinFecha + ' póliza(s) sin fecha de renovación no se muestran.') : ''}
+      </div>
+
+      {selDay && (
+        <div className="calpago-detail">
+          <div className="calpago-detail-head">
+            <div className="calpago-detail-title">{calpagoDayLabel(selDay)}</div>
+            <button className="cal-nav-btn" style={{ background: '#eef2ff', color: '#3E4095', border: '1px solid #c7d2fe' }} onClick={() => setSelDay(null)}>Cerrar</button>
+          </div>
+          {selEvs.length ? selEvs.map((e, i) => (
+            <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => setEditing(e)}>
+              <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
+                <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[e.plan, CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')}{calpagoFmtPrima(e.prima) ? (' · ' + calpagoFmtPrima(e.prima)) : ''}</div>
+                {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#3E4095' }}>Editar</span>
+            </div>
+          )) : <div className="calpago-empty">No hay pagos este día.</div>}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div>
+      <div className="calpago-toolbar">
+        <div className="calpago-fgroup" style={{ position: 'relative' }}>
+          <input className="calpago-search" type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente o póliza…" />
+          {q && <button type="button" className="calpago-search-x" onClick={() => setQ('')}>×</button>}
+        </div>
+        <div className="calpago-toggle">
+          <button className={!eachPay ? 'active' : ''} onClick={() => setEachPay(false)}>Solo renovación</button>
+          <button className={eachPay ? 'active' : ''} onClick={() => setEachPay(true)}>Mostrar cada pago</button>
+        </div>
+        <div className="calpago-fgroup">
+          <span className="calpago-fgroup-label">Frecuencia</span>
+          {['mensual', 'trimestral', 'semestral', 'anual'].map(fk => (
+            <label className="calpago-chk" key={fk}>
+              <input type="checkbox" checked={freqF[fk]} onChange={e => setFreqF(x => ({ ...x, [fk]: e.target.checked }))} />
+              {CALPAGO_FREQ_LABEL[fk]}
+            </label>
+          ))}
+        </div>
+        <div className="calpago-fgroup">
+          <span className="calpago-fgroup-label">Paga</span>
+          {[['cliente', 'Cliente'], ['ifs', 'IFS'], ['agente', 'Agente'], ['sin', 'Sin definir']].map(pf => (
+            <label className="calpago-chk" key={pf[0]}>
+              <input type="checkbox" checked={pagF[pf[0]]} onChange={e => setPagF(x => ({ ...x, [pf[0]]: e.target.checked }))} />
+              {pf[1]}
+            </label>
+          ))}
+        </div>
+        <div className="calpago-legend">
+          {['cliente', 'ifs', 'agente'].map(k => { const c = CALPAGO_PAG[k]; return (
+            <span className="calpago-legend-item" key={k}><span className="calpago-dot" style={{ background: c.bg, borderColor: c.bd }}></span>{c.label}</span>
+          ); })}
+          <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_MUT.bg, borderColor: CALPAGO_MUT.bd }}></span>Mensual/cliente</span>
+        </div>
+      </div>
+
+      {nq && (
+        <div className="calpago-detail" style={{ marginBottom: 12 }}>
+          <div className="calpago-detail-head">
+            <div className="calpago-detail-title" style={{ textTransform: 'none' }}>Resultados de "{q}" · {searchResults.length}</div>
+            <button className="cal-nav-btn" style={{ background: '#eef2ff', color: '#3E4095', border: '1px solid #c7d2fe' }} onClick={() => setQ('')}>Limpiar</button>
+          </div>
+          {searchResults.length ? searchResults.map((e, i) => (
+            <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.date) goToDate(e.date); else setEditing(e); }}>
+              <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
+                <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')} · renueva {e.date ? e.date.toLocaleDateString('es-AR') : 'sin fecha'}</div>
+                {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
+              </div>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#3E4095' }}>{e.date ? 'Ir al calendario' : 'Editar'}</span>
+            </div>
+          )) : <div className="calpago-empty">Sin coincidencias en el libro.</div>}
+        </div>
+      )}
+
+      {cuerpo}
+
+      {editing && (
+        <CalpagoEditModal ev={editing} isAdmin={isAdmin} current={pagoMap[calpagoPagoKey(editing.asesorId, editing.poliza)] || null}
+          onSave={(paga, obs) => { savePago(editing.asesorId, editing.poliza, paga, obs); setEditing(null); }}
+          onClose={() => setEditing(null)} />
+      )}
+
+      {hover && (
+        <div className="calpago-pop" style={{ left: Math.max(8, Math.min(hover.x, winW - 285)), top: hover.y + 6 }}>
+          <div style={{ fontWeight: 700, color: '#1e1b4b', marginBottom: 4 }}>{hover.e.asegurado}</div>
+          {isAdmin && hover.e.asesorNombre && <div className="calpago-pop-row" style={{ color: '#7C3AED', fontWeight: 600 }}>{hover.e.asesorNombre}</div>}
+          <div className="calpago-pop-row">{[CALPAGO_FREQ_LABEL[hover.e.freq] || hover.e.freqRaw, hover.e.estado].filter(Boolean).join(' · ')}</div>
+          {calpagoFmtPrima(hover.e.prima) && <div className="calpago-pop-row" style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e1b4b' }}>Prima: {calpagoFmtPrima(hover.e.prima)}</div>}
+          <div className="calpago-pop-row">Vence: {hover.e.date.toLocaleDateString('es-AR')}</div>
+          <div className="calpago-pop-row">Póliza: {hover.e.poliza}</div>
+          <div style={{ marginTop: 6 }}>
+            <span className="calpago-badge" style={calpagoBadgeStyle(hover.e)}>{hover.e.pagador ? CALPAGO_PAG[hover.e.pagador].label : 'Sin definir'}</span>
+          </div>
+          {hover.e.obs && <div className="calpago-pop-obs">{hover.e.obs}</div>}
+        </div>
+      )}
     </div>
   );
 }
@@ -11246,7 +12461,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 // ── PROFILES API (compartido entre apps IFS) ──────────────────
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
-    .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, assistant_of_id, shares_calendar_with_assistant, created_at')
+    .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, ole_ver_calendario_pagos, assistant_of_id, shares_calendar_with_assistant, created_at')
     // Ocultar el usuario de ejemplo (demo) salvo que esté activado.
     .or('is_demo.eq.false,demo_active.eq.true')
     .order('role', { ascending: false })
@@ -11681,7 +12896,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '', ole_ver_produccion: true });
+  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '', ole_ver_produccion: true, ole_ver_calendario_pagos: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -11709,6 +12924,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
       role: p.role || 'agent',
       assistant_of_id: p.assistant_of_id || '',
       ole_ver_produccion: p.ole_ver_produccion !== false,
+      ole_ver_calendario_pagos: p.ole_ver_calendario_pagos === true,
     });
     setError(null);
   };
@@ -11724,6 +12940,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
         role: draft.role,
         assistant_of_id: draft.assistant_of_id || null,
         ole_ver_produccion: draft.ole_ver_produccion,
+        ole_ver_calendario_pagos: draft.ole_ver_calendario_pagos,
       });
       setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft, assistant_of_id: draft.assistant_of_id || null } : p));
       setEditingId(null);
@@ -11949,6 +13166,11 @@ function UsuariosSection({ currentUser, onViewAs }) {
                               onChange={e => setDraft(d => ({ ...d, ole_ver_produccion: e.target.checked }))} />
                             Mostrar producción
                           </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', cursor: 'pointer' }}>
+                            <input type="checkbox" checked={draft.ole_ver_calendario_pagos}
+                              onChange={e => setDraft(d => ({ ...d, ole_ver_calendario_pagos: e.target.checked }))} />
+                            Mostrar calendario de pagos
+                          </label>
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -11957,6 +13179,9 @@ function UsuariosSection({ currentUser, onViewAs }) {
                           </span>
                           {p.ole_ver_produccion === false && (
                             <span style={{ fontSize: 10, fontWeight: 700, color: '#92400e', background: '#fef3c7', borderRadius: 4, padding: '1px 5px', alignSelf: 'flex-start' }}>sin producción</span>
+                          )}
+                          {p.ole_ver_calendario_pagos === true && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#075985', background: '#e0f2fe', borderRadius: 4, padding: '1px 5px', alignSelf: 'flex-start' }}>calendario de pagos</span>
                           )}
                         </div>
                       )}
@@ -13551,7 +14776,7 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onConvertir }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -13783,75 +15008,18 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
         </div>
         <div className="modal-footer" style={{ justifyContent: 'flex-end' }}>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {!readOnly && <button type="button" className="btn-secondary" onClick={onConvertir}>Convertir a prospecto</button>}
+            {!readOnly && (
+              <CrmVinculoLanzador
+                anchor={{ type: 'tarea', id: tarea.id, nombreSugerido: tarea.titulo, documentoSugerido: '' }}
+                label="Convertir a cliente CRM"
+                className="btn-primary"
+              />
+            )}
             <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
             {!readOnly && <button type="submit" className="btn-primary" disabled={saving}>{saving ? 'Guardando…' : 'Guardar'}</button>}
           </div>
         </div>
       </form>
-    </div>
-  );
-}
-
-// ── MODAL CONVERTIR TAREA A PROSPECT ───────────────────────────
-function ConvertirTareaModal({ tarea, onCancel, onConfirm }) {
-  const [nombre, setNombre] = useState('');
-  const [apellido, setApellido] = useState('');
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onCancel]);
-
-  const confirmar = () => {
-    if (!nombre.trim() || !apellido.trim()) {
-      setError('Nombre y apellido son obligatorios.');
-      return;
-    }
-    onConfirm(nombre, apellido);
-  };
-
-  return (
-    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="convertir-tarea-title">
-        <div className="modal-header">
-          <h3 id="convertir-tarea-title">Convertir tarea a prospecto</h3>
-          <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
-        </div>
-        <div className="modal-body">
-          <div className="help-callout">
-            <strong>Tarea de origen:</strong>
-            {tarea.titulo || '(sin título)'}
-          </div>
-          <p style={{ fontSize: '0.88rem', color: 'var(--texto-suave)', margin: '4px 0 16px' }}>
-            Se va a crear un prospecto nuevo con los datos que cargues acá.
-            La observación de la tarea pasa a las notas del prospect.
-            Si la tarea tiene fecha, queda como próximo contacto.
-            <strong> La tarea se elimina al confirmar.</strong>
-          </p>
-          <div className="field-row">
-            <div className="field">
-              <label>Nombre <span className="req">*</span></label>
-              <input type="text" value={nombre} autoFocus
-                onChange={e => { setNombre(e.target.value); setError(''); }}
-                onKeyDown={e => e.key === 'Enter' && confirmar()} />
-            </div>
-            <div className="field">
-              <label>Apellido <span className="req">*</span></label>
-              <input type="text" value={apellido}
-                onChange={e => { setApellido(e.target.value); setError(''); }}
-                onKeyDown={e => e.key === 'Enter' && confirmar()} />
-            </div>
-          </div>
-          {error && <div className="field-error">{error}</div>}
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button className="btn-primary" onClick={confirmar}>Convertir</button>
-        </div>
-      </div>
     </div>
   );
 }
@@ -14104,7 +15272,15 @@ function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalend
             </p>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button type="button" className="btn-primary" onClick={onOpenProspect}
+            {event?.prospectoId && (
+              <CrmVinculoLanzador
+                anchor={{ type: 'prospecto', id: event.prospectoId, nombreSugerido: prospectName, documentoSugerido: '' }}
+                label="Convertir a cliente CRM"
+                className="btn-primary"
+                style={{ textAlign: 'center', padding: '12px 14px' }}
+              />
+            )}
+            <button type="button" className="btn-secondary" onClick={onOpenProspect}
               style={{ textAlign: 'left', padding: '12px 14px', lineHeight: 1.4 }}>
               <strong style={{ display: 'block', marginBottom: 3 }}>Abrir ficha del prospecto</strong>
               <span style={{ fontSize: '0.78rem', opacity: 0.92, fontWeight: 400 }}>
@@ -14724,6 +15900,20 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
               placeholder="Notas / agenda de la reunión..." rows={3} />
           </div>
           {err && <div className="field-error">{err}</div>}
+          {/* Vínculo con el CRM. Ancla = esta agenda; si la agenda cuelga de un
+              prospecto, el vínculo se resuelve sobre el prospecto (canónico); si
+              es suelta, sobre la propia agenda. Solo para agendas reales de
+              Abordaje (no eventos crudos de Google). */}
+          {!readOnly && !isGoogle && agenda.id && (
+            <div className="field" style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--borde)' }}>
+              <label style={{ display: 'block', marginBottom: 6 }}>Cliente en el CRM</label>
+              <CrmVinculoLanzador
+                anchor={{ type: 'agendado', id: agenda.id, nombreSugerido: titulo, documentoSugerido: '' }}
+                label="Crear / Vincular en CRM"
+                className="btn-secondary"
+              />
+            </div>
+          )}
         </div>
         <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
           {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
@@ -15110,7 +16300,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) {
