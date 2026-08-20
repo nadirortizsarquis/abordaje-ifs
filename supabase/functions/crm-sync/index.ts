@@ -98,7 +98,8 @@ const TIPO_LABELS: Record<string, string> = {
   llamar_15min: "Llamar en 15 min",
   llamar_tarde: "Llamar más tarde",
   llamar_manana: "Llamar mañana",
-  llamar_semana: "Llamar esta semana",
+  llamar_semana: "Llamar en una semana",
+  llamar_lunes: "Llamar próximo lunes",
   llamar_dentro_de: "Llamar dentro de",
   rechazado: "Rechazado",
 };
@@ -330,9 +331,34 @@ Deno.serve(async (req: Request) => {
     const isAdmin = profile?.role === "admin";
     const advisorEmail = (profile?.email || user.email || "").trim();
 
+    // Habilitación server-side (NO confiar solo en el gating del front): admins
+    // siempre; el resto según advisors.crm_sync_enabled (por profiles.advisor_id
+    // o, en fallback, por email). Las ops que tocan el CRM se bloquean si está
+    // deshabilitado — así el gating de UI no se puede saltear llamando la función.
+    let crmEnabled = isAdmin;
+    if (!crmEnabled) {
+      const { data: prof } = await supabase.from("profiles")
+        .select("advisor_id, email").eq("id", user.id).maybeSingle();
+      if (prof?.advisor_id) {
+        const { data: adv } = await supabase.from("advisors")
+          .select("crm_sync_enabled").eq("id", prof.advisor_id).maybeSingle();
+        crmEnabled = !!adv?.crm_sync_enabled;
+      } else if (prof?.email) {
+        const { data: adv } = await supabase.from("advisors")
+          .select("crm_sync_enabled").ilike("email", prof.email).maybeSingle();
+        crmEnabled = !!adv?.crm_sync_enabled;
+      }
+    }
+
     const body = await req.json().catch(() => ({}));
     const op: string = body?.op || "";
     if (!op) return jsonResponse({ error: "missing op" }, 400);
+
+    // Ops que leen/escriben contra el CRM: exigen habilitación server-side.
+    const CRM_OPS = new Set(["search", "lookup", "create", "sync"]);
+    if (CRM_OPS.has(op) && !crmEnabled) {
+      return jsonResponse({ error: "Sincronización con CRM deshabilitada para tu usuario." }, 403);
+    }
 
     // ── search ── typeahead de clientes del CRM (sin ancla; para vincular al
     // crear un prospecto/tarea). Scoping: admins ven todos; no-admins todavía no
@@ -392,6 +418,11 @@ Deno.serve(async (req: Request) => {
 
     // ── lookup ── candidatos en el CRM (no escribe) ──────────────────────────
     if (op === "lookup") {
+      // Scoping: igual que search, los no-admins no leen el CRM hasta que Bruno
+      // exponga la búsqueda scopeada por asesor (evita enumerar clientes ajenos).
+      if (!isAdmin) {
+        return jsonResponse({ ok: true, exact: [], fuzzy: [], documento: "", pendingScope: true });
+      }
       const crm = crmClient();
       const doc = (body.documento ?? anchor.identity.documento ?? "").trim();
       let exact: any[] = [];

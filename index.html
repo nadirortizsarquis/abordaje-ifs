@@ -129,9 +129,18 @@
     margin-left: auto;
     margin-right: auto;
   }
-  /* Footer global: encuadra el contenido con una línea del color del header
-     y deja un margen de respiro al final de cualquier vista. */
-  .app-footer { margin-top: 46px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+  /* El contenedor de la app ocupa al menos el alto del viewport (menos el header
+     fijo) y es flex column, para que el footer se ancle abajo con margin-top:auto.
+     Así, con poco contenido (ej. una búsqueda que vacía la lista) el footer no
+     "sube": queda siempre cerrando la página al fondo del monitor. */
+  #reactRoot {
+    display: flex;
+    flex-direction: column;
+    min-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 0px));
+  }
+  /* Footer global: encuadra el contenido con una línea del color del header.
+     margin-top:auto lo empuja al fondo; padding-top mantiene el respiro visual. */
+  .app-footer { margin-top: auto; padding-top: 46px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
   .app-footer-line { height: 4px; border-radius: 4px; background: linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 100%); }
   .app-footer-text { text-align: center; font-size: 0.72rem; font-weight: 600; color: var(--texto-suave); letter-spacing: 0.3px; margin-top: 10px; }
 
@@ -4573,7 +4582,8 @@ const TIPOS_CONTACTO = [
   { id: 'llamar_15min',      label: 'Llamar en 15 min',    color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
   { id: 'llamar_tarde',      label: 'Llamar por la tarde', color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
   { id: 'llamar_manana',     label: 'Llamar mañana',       color: '#a16207', bg: '#fef9c3', estado: 'pendiente',  input: 'none' },
-  { id: 'llamar_semana',     label: 'Llamar semana próx',  color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
+  { id: 'llamar_semana',     label: 'Llamar en una semana', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
+  { id: 'llamar_lunes',      label: 'Llamar próximo lunes', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
   { id: 'llamar_dentro_de',  label: 'Llamar dentro de…',   color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'plazo' },
   { id: 'rechazado',         label: 'RECHAZADO',           color: '#991b1b', bg: '#fee2e2', estado: 'rechazado',  input: 'none' }
 ];
@@ -4739,6 +4749,12 @@ function calcAgendadoPara(tipo, custom) {
     case 'llamar_semana': {
       const d = new Date();
       d.setDate(d.getDate() + 7); d.setHours(9, 0, 0, 0);
+      return dateToLocalIso(d);
+    }
+    case 'llamar_lunes': {
+      const d = new Date();
+      const add = (8 - d.getDay()) % 7 || 7; // días hasta el próximo lunes (si hoy es lunes, va al siguiente)
+      d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0);
       return dateToLocalIso(d);
     }
     case 'llamar_dentro_de':
