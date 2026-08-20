@@ -3965,7 +3965,7 @@ const storage = {
     const agenteId = await auth.getEffectiveAgenteId();
     const proximoContacto = input.proximoContacto || null;
     const fechaProx = proximoContacto && !proximoContacto.includes('T') ? proximoContacto : (proximoContacto ? proximoContacto.split('T')[0] : null);
-    const { data, error } = await sb.from('abordaje_prospectos').insert({
+    const row = {
       agente_id: agenteId,
       actor_id: user.id,
       nombre: input.nombre || '',
@@ -3976,7 +3976,15 @@ const storage = {
       observaciones: input.observaciones || '',
       estado: input.estado || 'nuevo',
       proximo_contacto: fechaProx
-    }).select().single();
+    };
+    // Vínculo directo con un cliente del CRM elegido en el alta (typeahead).
+    if (input.crmClientId) {
+      row.crm_client_id = input.crmClientId;
+      row.crm_linked_at = new Date().toISOString();
+      row.crm_linked_by = user.id;
+      if (input.documento) row.documento = input.documento;
+    }
+    const { data, error } = await sb.from('abordaje_prospectos').insert(row).select().single();
     if (error) throw error;
     return mapProspectoFromDB(data, []);
   },
@@ -4113,6 +4121,13 @@ const storage = {
     if ('orden' in patch) dbPatch.orden = patch.orden;
     if ('fijadaAt' in patch) dbPatch.fijada_at = patch.fijadaAt;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
+    // Vínculo directo con un cliente del CRM (typeahead al editar la tarea).
+    if ('crmClientId' in patch && patch.crmClientId) {
+      const u = await auth.getUser();
+      dbPatch.crm_client_id = patch.crmClientId;
+      dbPatch.crm_linked_at = new Date().toISOString();
+      dbPatch.crm_linked_by = u?.id || null;
+    }
     if (Object.keys(dbPatch).length === 0) return;
     // Solo marcamos actor cuando el cambio incluye campos user-visible. No
     // pisamos el actor original cuando el patch es puramente "mecánico":
@@ -4284,6 +4299,12 @@ function _crmMock(op, payload) {
     return Number.isFinite(n) ? (n % 2 === 0) : false;
   };
   switch (op) {
+    case 'search': {
+      const q = String(payload.q || '').trim().toLowerCase();
+      if (!q) return { ok: true, clients: [], scoped: true };
+      const all = [mkClient(200, 'Pablo Alberto Pastore', '25687459'), ...fuzzy, mkClient(300, 'Juan Perez', '20111222')];
+      return { ok: true, clients: all.filter(c => c.full_name.toLowerCase().includes(q) || (c.document_number || '').includes(q)), scoped: true };
+    }
     case 'status':
       return {
         ok: true, crm_client_id: _crmMockState.clientId,
@@ -4469,6 +4490,11 @@ const EventColorContext = createContext({
   setColor: async () => {},
   calendarColors: {},   // overrides por calendar de Google (kind agenda/tarea)
 });
+
+// ¿El usuario actual puede usar la sincronización con el CRM? Admins siempre;
+// el resto según advisors.crm_sync_enabled. Gatea el botón "Convertir a cliente
+// CRM" en prospectos/tareas/agendas (lo lee CrmVinculoLanzador).
+const CrmEnabledContext = createContext(false);
 
 function formatActorTimestamp(ts) {
   if (!ts) return null;
@@ -5719,6 +5745,29 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // asistente. La marca visual (★) en cards/listas se basa en actor_id.
   const isAssistant = !!agente?.assistant_of_id;
   const isAdminProd = agente?.role === 'admin';
+  // Sincronización con CRM habilitada para el usuario actual: admins siempre;
+  // el resto según su fila en advisors (crm_sync_enabled). Gatea el botón
+  // "Convertir a cliente CRM" (vía CrmEnabledContext).
+  const [crmSyncEnabled, setCrmSyncEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (isAdminProd) { if (!cancelled) setCrmSyncEnabled(true); return; }
+      try {
+        const { data: prof } = await sb.from('profiles').select('advisor_id, email').eq('id', user.id).maybeSingle();
+        let enabled = false;
+        if (prof?.advisor_id) {
+          const { data: adv } = await sb.from('advisors').select('crm_sync_enabled').eq('id', prof.advisor_id).maybeSingle();
+          enabled = !!adv?.crm_sync_enabled;
+        } else if (prof?.email) {
+          const { data: adv } = await sb.from('advisors').select('crm_sync_enabled').ilike('email', prof.email).maybeSingle();
+          enabled = !!adv?.crm_sync_enabled;
+        }
+        if (!cancelled) setCrmSyncEnabled(enabled);
+      } catch (_) { if (!cancelled) setCrmSyncEnabled(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [isAdminProd, user.id]);
   // Estado del selector de "Mi producción" (elevado para mostrarlo en la fila de tabs)
   const [prodTarget, setProdTarget] = useState(null);
   const [prodAgentes, setProdAgentes] = useState([]);
@@ -7298,6 +7347,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       setColor: handleSetEventColor,
       calendarColors: settings.calendarColors || {},
     }}>
+    <CrmEnabledContext.Provider value={crmSyncEnabled}>
       <HeaderActions
         user={user}
         agente={agente}
@@ -7732,6 +7782,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
         />
       )}
+    </CrmEnabledContext.Provider>
     </EventColorContext.Provider>
     </ActorContext.Provider>
   );
@@ -9229,10 +9280,14 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
 function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, className, style }) {
   const [open, setOpen] = useState(false);
   const [preparando, setPreparando] = useState(false);
+  // Gating: si la Sincronización con CRM está deshabilitada para el usuario, el
+  // botón queda gris/anulado (para asesores que todavía no tienen CRM).
+  const crmEnabled = useContext(CrmEnabledContext);
   // Antes de abrir el modal, persistimos los cambios pendientes de la tarjeta
   // (ej. un comentario recién tipeado en la tarea/agenda sin apretar Guardar),
   // así la sincronización ve la gestión actualizada y no una versión vieja.
   const abrir = async () => {
+    if (!crmEnabled) return;
     if (onBeforeOpen) {
       setPreparando(true);
       try { await onBeforeOpen(); } catch (_) {} finally { setPreparando(false); }
@@ -9241,7 +9296,11 @@ function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, 
   };
   return (
     <>
-      <button type="button" className={className || 'btn-secondary'} style={style} disabled={preparando} onClick={abrir}>
+      <button type="button" className={className || 'btn-secondary'}
+        style={{ ...style, ...(crmEnabled ? {} : { opacity: 0.5, cursor: 'not-allowed' }) }}
+        disabled={preparando || !crmEnabled}
+        title={crmEnabled ? undefined : 'Sincronización con CRM deshabilitada para tu usuario. Pedile a un admin que la active en Ajustes → Directorio.'}
+        onClick={abrir}>
         {preparando ? 'Guardando…' : (label || 'Cliente en el CRM')}
       </button>
       {open && (
@@ -9253,6 +9312,82 @@ function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, 
         />
       )}
     </>
+  );
+}
+
+// Typeahead "Cliente en el CRM" para el ALTA de prospecto/tarea: buscás por
+// nombre o DNI y elegís un cliente existente → queda vinculado directo, sin pasar
+// por el modal. Solo se muestra si el usuario tiene la Sincronización con CRM
+// habilitada. `value` = { id, full_name, document_number } | null.
+function CrmClientePicker({ value, onPick, onClear, label }) {
+  const crmEnabled = useContext(CrmEnabledContext);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [openList, setOpenList] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    if (value) return;
+    const term = q.trim();
+    if (term.length < 2) { setResults([]); setOpenList(false); return; }
+    let cancel = false;
+    setBusy(true); setErr(null);
+    const t = setTimeout(async () => {
+      try {
+        const r = await crmSync('search', { q: term });
+        if (cancel) return;
+        setResults(r.clients || []);
+        setOpenList(true);
+        if (r.pendingScope) setErr('Búsqueda scopeada por asesor pendiente de habilitar en el CRM.');
+      } catch (e) { if (!cancel) setErr(e.message); }
+      finally { if (!cancel) setBusy(false); }
+    }, 350);
+    return () => { cancel = true; clearTimeout(t); };
+  }, [q, value]);
+
+  if (!crmEnabled) return null;
+
+  if (value) {
+    return (
+      <div className="field">
+        <label>{label || 'Cliente en el CRM'}</label>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '8px 12px' }}>
+          <span style={{ fontSize: '0.86rem', color: 'var(--azul-oscuro)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {value.full_name || `Cliente #${value.id}`}{value.document_number ? ` · DNI ${value.document_number}` : ''}
+          </span>
+          <button type="button" className="btn-ghost" style={{ padding: 0, fontSize: '0.8rem', flex: '0 0 auto' }} onClick={onClear}>Quitar</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="field" style={{ position: 'relative' }}>
+      <label>{label || 'Cliente en el CRM'} <span style={{ fontWeight: 400, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>(opcional — si ya es cliente)</span></label>
+      <input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre o DNI en el CRM…" autoComplete="off" />
+      {busy && <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 4 }}>Buscando…</div>}
+      {err && <div style={{ fontSize: '0.74rem', color: '#b45309', marginTop: 4 }}>{err}</div>}
+      {openList && results.length > 0 && (
+        <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, top: '100%', marginTop: 4,
+          background: 'var(--bg-card)', border: '1px solid var(--borde)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto' }}>
+          {results.map(c => (
+            <div key={c.id} onClick={() => { onPick(c); setQ(''); setResults([]); setOpenList(false); }}
+              style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--borde)', fontSize: '0.84rem' }}
+              onMouseDown={e => e.preventDefault()}>
+              <div style={{ fontWeight: 600, color: 'var(--texto)' }}>{c.full_name || `Cliente #${c.id}`}</div>
+              <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)' }}>
+                #{c.id}{c.document_number ? ` · DNI ${c.document_number}` : ''}{c.primary_advisor?.full_name ? ` · ${c.primary_advisor.full_name}` : ''}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      {openList && !busy && results.length === 0 && q.trim().length >= 2 && !err && (
+        <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 4 }}>Sin coincidencias en el CRM.</div>
+      )}
+    </div>
   );
 }
 
@@ -9801,6 +9936,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
     nombre: '', telefono: '', preferenciaContacto: '',
     detalle: '', referente: '', observaciones: ''
   });
+  const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   const [errors, setErrors] = useState({});
   // Evita duplicados por doble Enter / doble tap mientras el save corre.
   const [saving, setSaving] = useState(false);
@@ -9826,7 +9962,9 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
       preferenciaContacto: form.preferenciaContacto,
       detalle: form.detalle.trim(),
       referente: form.referente.trim(),
-      observaciones: form.observaciones.trim()
+      observaciones: form.observaciones.trim(),
+      crmClientId: crmCliente?.id || null,
+      documento: crmCliente?.document_number || ''
     })).finally(() => setSaving(false));
   };
 
@@ -9855,6 +9993,11 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
               Se agendará para <strong>{slotLabel}</strong> apenas se guarde.
             </div>
           )}
+          <CrmClientePicker
+            value={crmCliente}
+            onPick={(c) => { setCrmCliente(c); if (!form.nombre.trim() && c.full_name) upd('nombre', c.full_name); }}
+            onClear={() => setCrmCliente(null)}
+          />
           <div className="field">
             <label>Nombre <span className="req">*</span></label>
             <input type="text" value={form.nombre}
@@ -12867,7 +13010,7 @@ function AsesoresSection() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th>
+              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th><th style={{ ...th, textAlign: 'center' }}>Sincronización con CRM</th>
             </tr></thead>
             <tbody>
               {advisors.map(a => (
@@ -12891,6 +13034,11 @@ function AsesoresSection() {
                     <input key={a.id + '|ole|' + (a.advisor_name_ole || '')} defaultValue={a.advisor_name_ole || ''} disabled={busy} placeholder="—"
                       onBlur={e => { const v = e.target.value.trim() || null; if (v === a.advisor_name_ole) return; if (confirmOle(a.advisor_name_ole, v)) patch(a.id, { advisor_name_ole: v }); else e.target.value = a.advisor_name_ole || ''; }}
                       style={{ ...adminInpStyle, width: 220 }} />
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    <input type="checkbox" checked={!!a.crm_sync_enabled} disabled={busy}
+                      onChange={e => patch(a.id, { crm_sync_enabled: e.target.checked })}
+                      title={a.crm_sync_enabled ? 'Habilitado — puede usar "Convertir a cliente CRM"' : 'Deshabilitado — el botón CRM le queda inhabilitado'} />
                   </td>
                 </tr>
               ))}
@@ -14819,6 +14967,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     compania: tarea.compania || null,
   });
   const [nuevaEntrada, setNuevaEntrada] = useState('');
+  const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
   const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -14857,6 +15006,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
+      crmClientId: crmCliente?.id || undefined,
     })).finally(() => setSaving(false));
   };
 
@@ -14992,6 +15142,13 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
               )}
             </div>
           </div>
+          {!readOnly && (
+            <CrmClientePicker
+              value={crmCliente}
+              onPick={(c) => { setCrmCliente(c); if (!form.titulo.trim() && c.full_name) upd('titulo', c.full_name); }}
+              onClear={() => setCrmCliente(null)}
+            />
+          )}
           {!readOnly && (
             <>
               <div className="msg-shortcut-row" aria-label="Atajos de bitácora">

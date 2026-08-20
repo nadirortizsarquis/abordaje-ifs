@@ -334,6 +334,24 @@ Deno.serve(async (req: Request) => {
     const op: string = body?.op || "";
     if (!op) return jsonResponse({ error: "missing op" }, 400);
 
+    // ── search ── typeahead de clientes del CRM (sin ancla; para vincular al
+    // crear un prospecto/tarea). Scoping: admins ven todos; no-admins todavía no
+    // (hasta que el CRM exponga una búsqueda scopeada por advisor_email — así no
+    // se filtran clientes de otros asesores).
+    if (op === "search") {
+      const q = String(body?.q ?? "").trim();
+      if (!q) return jsonResponse({ ok: true, clients: [], scoped: isAdmin });
+      if (!isAdmin) {
+        // Sin scoping seguro todavía: no devolvemos nada para no exponer
+        // clientes de otros asesores. Se habilita con el search de Bruno.
+        return jsonResponse({ ok: true, clients: [], scoped: false, pendingScope: true });
+      }
+      const crm = crmClient();
+      const r = await crm(`/clients/?search=${encodeURIComponent(q)}`);
+      const clients = (r?.results ?? []).slice(0, 15);
+      return jsonResponse({ ok: true, clients, scoped: true });
+    }
+
     // Ancla: prospecto/tarea/agendado (compat: prospecto_id -> prospecto).
     let anchorType: string = body?.anchor_type || "";
     let anchorId: string = body?.anchor_id || "";
