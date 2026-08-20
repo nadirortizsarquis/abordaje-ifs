@@ -7619,6 +7619,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           readOnly={readOnly}
           onClose={() => setTareaEditando(null)}
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
+          onPersist={(patch) => handleUpdateTarea(tareaEditando.id, patch)}
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
         />
@@ -8914,10 +8915,10 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
 
   const doSync = async () => {
     await run('sync', {}, async (r) => {
-      if (r.action === 'noop') { setNotice('No hay gestión nueva para volcar.'); }
+      if (r.action === 'noop') { setNotice('Ya está todo sincronizado — no hay gestión nueva para volcar.'); }
       else {
         const d = r.detalle || {};
-        setNotice(`Volcado a la bitácora: ${r.synced} ítem(s) (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
+        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
       }
       await fetchStatus();
     });
@@ -9225,12 +9226,23 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
 
 // Lanzador reutilizable del modal CRM para cualquier ancla (tarea, agenda, etc.).
 // El modal resuelve por sí mismo el estado (op status) — el lanzador es solo el botón.
-function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, className, style }) {
+function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, className, style }) {
   const [open, setOpen] = useState(false);
+  const [preparando, setPreparando] = useState(false);
+  // Antes de abrir el modal, persistimos los cambios pendientes de la tarjeta
+  // (ej. un comentario recién tipeado en la tarea/agenda sin apretar Guardar),
+  // así la sincronización ve la gestión actualizada y no una versión vieja.
+  const abrir = async () => {
+    if (onBeforeOpen) {
+      setPreparando(true);
+      try { await onBeforeOpen(); } catch (_) {} finally { setPreparando(false); }
+    }
+    setOpen(true);
+  };
   return (
     <>
-      <button type="button" className={className || 'btn-secondary'} style={style} onClick={() => setOpen(true)}>
-        {label || 'Cliente en el CRM'}
+      <button type="button" className={className || 'btn-secondary'} style={style} disabled={preparando} onClick={abrir}>
+        {preparando ? 'Guardando…' : (label || 'Cliente en el CRM')}
       </button>
       {open && (
         <CrmModal
@@ -14776,7 +14788,7 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -14825,6 +14837,26 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
     })).finally(() => setSaving(false));
+  };
+
+  // Persiste los cambios pendientes SIN cerrar el modal, para que al abrir el
+  // CRM la sincronización vea la gestión actualizada (ej. un comentario recién
+  // tipeado sin apretar Guardar). Reusa el mismo patch que Guardar.
+  const persistParaCrm = async () => {
+    if (!onPersist) return;
+    const built = buildObsConBitacora().trim();
+    await onPersist({
+      titulo: form.titulo.trim(),
+      columnaId: form.columnaId,
+      fechaRecordatorio: form.fechaRecordatorio || null,
+      horaRecordatorio: form.horaRecordatorio || null,
+      observacion: built,
+      compania: form.compania || null,
+    });
+    // Reflejar en el form: la entrada nueva ya quedó dentro de observacion,
+    // así un Guardar posterior no la vuelve a agregar.
+    setForm(f => ({ ...f, observacion: built }));
+    setNuevaEntrada('');
   };
 
   // Quick-date: setea fecha/hora y guarda en un solo tap.
@@ -15013,6 +15045,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 anchor={{ type: 'tarea', id: tarea.id, nombreSugerido: tarea.titulo, documentoSugerido: '' }}
                 label="Convertir a cliente CRM"
                 className="btn-primary"
+                onBeforeOpen={persistParaCrm}
               />
             )}
             <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
