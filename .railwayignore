@@ -1,0 +1,7 @@
+node_modules
+public
+*.xlsx
+*.xls
+*.pdf
+index.backup-*.html
+.DS_Store
