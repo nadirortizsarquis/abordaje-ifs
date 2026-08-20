@@ -14086,6 +14086,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
   const esAdmin = agente?.role === 'admin';
   const [showMaintenance, setShowMaintenance] = useState(false);
+  const [tab, setTab] = useState('general');
   return (
     <div style={adminOverlayStyle} onClick={onCancel}>
       <div style={adminModalStyle} onClick={e => e.stopPropagation()}
@@ -14102,7 +14103,21 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
           <button onClick={onCancel} style={adminCloseBtn}>Cerrar</button>
         </header>
 
+        {esAdmin && (
+          <div style={{ display: 'flex', gap: 4, padding: '0 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flex: '0 0 auto' }}>
+            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio']].map(([k, label]) => (
+              <button key={k} type="button" onClick={() => setTab(k)}
+                style={{ border: 'none', background: 'none', padding: '12px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                  color: tab === k ? '#1e1b4b' : '#9ca3af',
+                  borderBottom: tab === k ? '2px solid #4338ca' : '2px solid transparent', marginBottom: -1 }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <div style={{ overflowY: 'auto', flex: 1 }}>
+          {tab === 'general' && (<>
           <section style={adminSectionStyle}>
             <h3 style={adminSectionTitleStyle}>⚙ Configuración de Abordaje</h3>
             <p style={adminSectionDescStyle}>
@@ -14166,11 +14181,17 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onUnlinkOAuth={onUnlinkOAuth}
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
           />
+          </>)}
 
-          {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
-          {esAdmin && <AsesoresSection />}
-          {esAdmin && <DemoUserToggle />}
-          {esAdmin && <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />}
+          {esAdmin && tab === 'usuarios' && (<>
+            <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />
+            <DemoUserToggle />
+            <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />
+          </>)}
+
+          {esAdmin && tab === 'directorio' && (
+            <AsesoresSection />
+          )}
         </div>
       </div>
       {showMaintenance && <MaintenancePaymentsModal onClose={() => setShowMaintenance(false)} />}
