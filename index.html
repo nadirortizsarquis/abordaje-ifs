@@ -7295,12 +7295,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
 
-  const filtrados = useMemo(
-    () => aplicarFiltros(state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
-    [state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha]
-  );
-  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || (filterEtiqueta?.length || 0) > 0 || ordenFecha !== 'ninguno';
-
   // Handler común para click en notifs y en buscador.
   // IMPORTANTE: declarado ANTES del early return de loading para no violar
   // Rules of Hooks (un useCallback debe llamarse siempre en el mismo orden).
@@ -7569,20 +7563,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
       {view === 'calendario' && (
         <>
-          <FilterBar
-            filterEstado={filterEstado}
-            setFilterEstado={setFilterEstado}
-            filterFecha={filterFecha}
-            setFilterFecha={setFilterFecha}
-            filterEtiqueta={filterEtiqueta}
-            setFilterEtiqueta={setFilterEtiqueta}
-            ordenFecha={ordenFecha}
-            setOrdenFecha={setOrdenFecha}
-            mostrandoCount={filtrados.length}
-            totalCount={state.prospectos.length}
-          />
+          {/* El Calendario NO se filtra: los filtros son exclusivos de la Lista
+              de Abordaje. Antes recibía `filtrados` y su propia FilterBar, lo que
+              hacía que al filtrar la Lista los eventos de prospectos excluidos
+              aparecieran como "prospecto eliminado" (el filtro se interpretaba
+              como baja). Ahora usa la lista COMPLETA (state.prospectos). */}
           <CalendarioView
-            prospectos={filtrados}
+            prospectos={state.prospectos}
             tareasState={state.tareas}
             agendados={state.agendados}
             settings={settings}
