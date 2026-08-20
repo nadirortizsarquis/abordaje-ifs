@@ -4875,6 +4875,21 @@ function ultimoContactoTipo(p) {
   return last?.tipo || null;
 }
 
+// Buscador propio de la Lista de Abordaje (independiente del buscador global del
+// header y de los filtros). Matchea nombre/teléfono/documento/detalle/referente/
+// observaciones, sin acentos y case-insensitive.
+function buscarEnProspectos(prospectos, q) {
+  const t = (q || '').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  if (!t) return prospectos;
+  const norm = s => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return prospectos.filter(p =>
+    norm(p.nombre).includes(t) || norm(p.telefono).includes(t) ||
+    norm(p.documento).includes(t) || norm(p.detalle).includes(t) ||
+    norm(p.observaciones).includes(t) || norm(p.referente).includes(t)
+  );
+}
+
 function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = [], ordenFecha = 'ninguno') {
   const hoy = new Date();
   // filterEtiqueta es array (vacío = todas). Aceptamos también el formato
@@ -6057,6 +6072,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Solapa dentro de la vista Lista: 'abordaje' (default, prospects activos)
   // o 'archivo' (prospects archivados). No persiste — al recargar arranca en 'abordaje'.
   const [vistaLista, setVistaLista] = useState('abordaje');
+  // Buscador propio de la Lista de Abordaje (independiente del buscador global
+  // del header y de los filtros). Solo afecta la vista Lista.
+  const [listaBusqueda, setListaBusqueda] = useState('');
   // Selección bulk en la solapa Archivo (Set de ids). Se limpia al cambiar de
   // solapa o al ejecutar bulk desarchivar.
   const [archivoSel, setArchivoSel] = useState(() => new Set());
@@ -7446,7 +7464,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             const prospectosVista = state.prospectos.filter(p =>
               vistaLista === 'archivo' ? p.archivado : !p.archivado
             );
-            const filtradosVista = aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha);
+            const filtradosVista = buscarEnProspectos(
+              aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
+              listaBusqueda
+            );
             const archivadosCount = state.prospectos.filter(p => p.archivado).length;
             const enArchivo = vistaLista === 'archivo';
             return (
@@ -7465,6 +7486,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                   vistaLista={vistaLista}
                   setVistaLista={setVistaLista}
                   archivadosCount={archivadosCount}
+                  busqueda={listaBusqueda}
+                  setBusqueda={setListaBusqueda}
                   extraActions={
                     <>
                       {!enArchivo && (
@@ -7946,7 +7969,7 @@ function EmptyState({ onAdd }) {
 // Por default los filtros van plegados — ocupan menos espacio en pantalla.
 // Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
 // toggle muestra un badge con la cantidad activos y queda destacado.
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0 }) {
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0, busqueda = '', setBusqueda = null }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
   const filtrosCount =
     (filterEstado !== 'todos' ? 1 : 0)
@@ -7992,6 +8015,19 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
         <div className="filter-count">
           {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
         </div>
+        {setBusqueda && (
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <input type="search" value={busqueda} onChange={e => setBusqueda(e.target.value)}
+              placeholder="Buscar en la lista…" aria-label="Buscar en la lista de Abordaje"
+              style={{ height: 32, padding: '0 28px 0 12px', borderRadius: 999, border: '1px solid var(--borde)',
+                fontSize: '0.82rem', minWidth: 150, background: 'var(--bg-card)', color: 'var(--texto)' }} />
+            {busqueda && (
+              <button type="button" onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda"
+                style={{ position: 'absolute', right: 8, border: 'none', background: 'none', cursor: 'pointer',
+                  color: 'var(--texto-suave)', fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
+            )}
+          </div>
+        )}
         {extraActions && <div className="filter-bar-extras">{extraActions}</div>}
       </div>
       {open && (
@@ -10623,7 +10659,7 @@ function calpagoNextAnniversary(rd, from) {
   if (d < today) d = new Date(from.getFullYear() + 1, rd.getMonth(), rd.getDate());
   return d;
 }
-const calpagoNorm = str => (str || '').toString().normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const calpagoNorm = str => (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 // Modal de edicion: quien paga + observaciones.
 function buildCalpagoRoster(agentes, isAdmin, selfUserId, selfNombre) {
