@@ -6069,6 +6069,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   useEffect(() => {
     try { localStorage.setItem('abordaje_view', view); } catch {}
   }, [view]);
+  // Contador de invitaciones pendientes de "Calendario compartido" (badge en la solapa).
+  const [calCompPending, setCalCompPending] = useState(0);
+  const [calCompTick, setCalCompTick] = useState(0);
+  useEffect(() => {
+    if (isAssistant || agente?.compartir_calendario !== true || !user?.id) { setCalCompPending(0); return; }
+    let vivo = true;
+    sb.from('abordaje_calendar_meeting_invites')
+      .select('id', { count: 'exact', head: true })
+      .eq('invitee_id', user.id).eq('status', 'pending')
+      .then(({ count }) => { if (vivo) setCalCompPending(count || 0); });
+    return () => { vivo = false; };
+  }, [isAssistant, agente?.compartir_calendario, user?.id, calCompTick, view]);
   const [filterEstado, setFilterEstado] = useState('todos');
   const [filterFecha, setFilterFecha] = useState('todos');
   const [filterEtiqueta, setFilterEtiqueta] = useState([]); // array de tipo.id ó 'sin_etiqueta'
@@ -7429,7 +7441,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -7631,7 +7643,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )}
 
       {view === 'calendario_compartido' && !isAssistant && agente?.compartir_calendario === true && (
-        <CalendarioCompartidoView settings={settings} />
+        <CalendarioCompartidoView settings={settings} meId={user?.id} onInvitesChanged={() => setCalCompTick(t => t + 1)} />
       )}
 
       <footer className="app-footer">
@@ -10093,7 +10105,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 }
 
 // ── VIEW TABS (Lista | Calendario) ────────────────────────────
-function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) {
+function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido, calCompPending }) {
   return (
     <div className="view-tabs">
       <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
@@ -10104,7 +10116,11 @@ function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) 
         onClick={() => setView('calendario')}>Calendario</button>
       {showCalCompartido && (
         <button className={`view-tab ${view === 'calendario_compartido' ? 'active' : ''}`}
-          onClick={() => setView('calendario_compartido')}>Calendario compartido</button>
+          onClick={() => setView('calendario_compartido')}>
+          Calendario compartido{calCompPending > 0 ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18, padding: '0 5px', marginLeft: 6, borderRadius: 9, background: '#e11d48', color: '#fff', fontSize: 11, fontWeight: 800, verticalAlign: 'middle' }}>{calCompPending}</span>
+          ) : null}
+        </button>
       )}
       {showProd && (
         <button className={`view-tab ${view === 'produccion' ? 'active' : ''}`}
@@ -10132,8 +10148,9 @@ async function sharedCal(op, payload = {}) {
 }
 
 const CALCOMP_PALETTE = ['#0098DA', '#e11d48', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#ca8a04', '#4f46e5', '#db2777', '#059669'];
+const CALCOMP_DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 
-function CalendarioCompartidoView({ settings }) {
+function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
   const [owners, setOwners] = useState([]);
   const [selected, setSelected] = useState(null);   // Set de ownerIds; null = todos
   const [mode, setMode] = useState('ocupado');       // 'ocupado' | 'disponible'
@@ -10143,13 +10160,23 @@ function CalendarioCompartidoView({ settings }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const bodyRef = useRef(null);
+  // Eventos compartidos (meetings) + invitaciones + nombres de participantes.
+  const [meetings, setMeetings] = useState([]);
+  const [mInvites, setMInvites] = useState([]);   // invitaciones visibles (mías + de mis meetings)
+  const [people, setPeople] = useState({});       // id -> nombre
+  const [mTick, setMTick] = useState(0);          // fuerza recarga de meetings
+  const [slotDraft, setSlotDraft] = useState(null);   // { date, startMin } para crear
+  const [openMeeting, setOpenMeeting] = useState(null);
 
   useEffect(() => {
     sharedCal('owners').then(d => setOwners(d.owners || [])).catch(e => setError(e.message));
-  }, []);
+    sharedCal('meeting_people').then(d => {
+      const map = {}; (d.people || []).forEach(p => { map[p.id] = p.name; }); setPeople(map);
+    }).catch(() => {});
+  }, [mTick]);
 
   const colorOf = (id) => CALCOMP_PALETTE[Math.max(0, owners.findIndex(o => o.id === id)) % CALCOMP_PALETTE.length];
-  const nameOf = (id) => (owners.find(o => o.id === id)?.name) || 'Agente';
+  const nameOf = (id) => people[id] || (owners.find(o => o.id === id)?.name) || (id === meId ? 'Vos' : 'Agente');
   const activeOwners = owners.filter(o => !selected || selected.has(o.id));
 
   const nDays = settings.includeWeekends ? 7 : 5;
@@ -10165,6 +10192,29 @@ function CalendarioCompartidoView({ settings }) {
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
   }, [owners, weekStart]);
+
+  // Meetings de la semana (RLS filtra a los que participo: creador o invitado).
+  useEffect(() => {
+    const tMin = new Date(weekStart); tMin.setHours(0, 0, 0, 0);
+    const tMax = new Date(weekStart); tMax.setDate(tMax.getDate() + 7); tMax.setHours(0, 0, 0, 0);
+    let vivo = true;
+    (async () => {
+      const { data: ms } = await sb.from('abordaje_calendar_meetings').select('*')
+        .lt('start_at', tMax.toISOString()).gt('end_at', tMin.toISOString()).order('start_at');
+      if (!vivo) return;
+      setMeetings(ms || []);
+      const ids = (ms || []).map(m => m.id);
+      if (ids.length) {
+        const { data: iv } = await sb.from('abordaje_calendar_meeting_invites').select('*').in('meeting_id', ids);
+        if (vivo) setMInvites(iv || []);
+      } else setMInvites([]);
+    })();
+    return () => { vivo = false; };
+  }, [weekStart, mTick]);
+
+  const reloadMeetings = () => { setMTick(t => t + 1); onInvitesChanged && onInvitesChanged(); };
+  const myInvite = (mId) => mInvites.find(i => i.meeting_id === mId && i.invitee_id === meId);
+  const invitesOf = (mId) => mInvites.filter(i => i.meeting_id === mId);
 
   const wsMin = (settings.workStartHour || 8) * 60 + (settings.workStartMin || 0);
   const weMin = (settings.workEndHour || 20) * 60 + (settings.workEndMin || 0);
@@ -10213,6 +10263,35 @@ function CalendarioCompartidoView({ settings }) {
 
   const goWeek = (delta) => setWeekStart(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta * 7); return d; });
   const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+  // Meetings de un día, con layout de carriles para solapamientos.
+  const dayMeetings = (d) => {
+    const items = meetings
+      .filter(m => sameDay(m.start_at, d))
+      .map(m => ({ m, s: minutesOf(m.start_at), e: Math.max(minutesOf(m.start_at) + 15, minutesOf(m.end_at)) }))
+      .sort((a, b) => a.s - b.s || a.e - b.e);
+    // asignación greedy de carriles
+    const laneEnds = [];
+    items.forEach(it => {
+      let lane = laneEnds.findIndex(end => end <= it.s);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.e); } else laneEnds[lane] = it.e;
+      it.lane = lane;
+    });
+    const lanes = Math.max(1, laneEnds.length);
+    return items.map(it => ({ ...it, lanes }));
+  };
+
+  // Click en la grilla → crear evento a esa hora (snap a 30', floor).
+  const onGridClick = (d, e) => {
+    if (e.target.closest('.calcomp-meeting')) return; // click sobre un evento existente
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const totalMin = Math.max(0, Math.min(DAY_MAX - 1, (y / HOUR_HEIGHT) * 60));
+    const min = Math.min(DAY_MAX - 30, Math.floor(totalMin / 30) * 30);
+    setSlotDraft({ date: new Date(d), startMin: min });
+  };
+
+  const inviteCandidates = owners; // los agentes cuyo calendario puedo ver
 
   return (
     <div style={{ padding: '4px 0 20px' }}>
@@ -10280,16 +10359,17 @@ function CalendarioCompartidoView({ settings }) {
                 const busy = dayBusy(d);
                 const free = mode === 'disponible' ? dayFree(d) : [];
                 const nOwn = Math.max(1, activeOwners.length);
+                const mtgs = dayMeetings(d);
                 return (
-                  <div key={di} className="cal-day-col">
+                  <div key={di} className="cal-day-col clickable" style={{ cursor: 'cell' }} onClick={(e) => onGridClick(d, e)}>
                     {hours.map(h => <div key={h} className="cal-hour-cell" style={{ height: HOUR_HEIGHT }} />)}
                     {/* atenuación fuera del horario laboral */}
                     {wsMin > DAY_MIN && <div className="cal-offhours" style={{ top: 0, height: yOf(wsMin) }} />}
                     {weMin < DAY_MAX && <div className="cal-offhours" style={{ top: yOf(weMin), height: gridH - yOf(weMin) }} />}
                     <div className="cal-workhours-line" style={{ top: yOf(wsMin) }} />
                     <div className="cal-workhours-line" style={{ top: yOf(weMin) }} />
-                    {/* En modo disponible, base tenue roja dentro del horario laboral (verde = libre encima) */}
-                    {mode === 'disponible' && <div style={{ position: 'absolute', left: 0, right: 0, top: yOf(wsMin), height: yOf(weMin) - yOf(wsMin), background: '#fecaca', opacity: 0.30, zIndex: 1 }} />}
+                    {/* En modo disponible, base gris dentro del horario laboral = ocupado (verde = libre encima) */}
+                    {mode === 'disponible' && <div style={{ position: 'absolute', left: 0, right: 0, top: yOf(wsMin), height: yOf(weMin) - yOf(wsMin), background: '#94a3b8', opacity: 0.28, zIndex: 1 }} />}
                     {mode === 'ocupado'
                       ? busy.map((b, i) => {
                           const oi = Math.max(0, activeOwners.findIndex(o => o.id === b.ownerId));
@@ -10307,6 +10387,36 @@ function CalendarioCompartidoView({ settings }) {
                             left: 2, right: 2, background: '#22c55e', opacity: 0.32, borderRadius: 4, border: '1px solid #16a34a', zIndex: 3,
                           }} />
                         ))}
+                    {/* Eventos compartidos (meetings): SI muestran título + contorno distinto */}
+                    {mtgs.map(({ m, s, e, lane, lanes }) => {
+                      const inv = myInvite(m.id);
+                      const soyCreador = m.creator_id === meId;
+                      const pendiente = !soyCreador && inv && inv.status === 'pending';
+                      const rechazado = !soyCreador && inv && inv.status === 'declined';
+                      const bordeColor = pendiente ? '#d97706' : '#1e1b4b';
+                      return (
+                        <div key={m.id} className="calcomp-meeting" title={m.title}
+                          onClick={(ev) => { ev.stopPropagation(); setOpenMeeting(m); }}
+                          style={{
+                            position: 'absolute', top: yOf(s), height: Math.max(16, yOf(e) - yOf(s)),
+                            left: `calc(${(lane / lanes) * 100}% + 1px)`, width: `calc(${100 / lanes}% - 2px)`,
+                            background: rechazado ? '#f8fafc' : '#eef2ffee', border: `2px ${pendiente ? 'dashed' : 'solid'} ${bordeColor}`,
+                            borderRadius: 6, zIndex: 6, cursor: 'pointer', overflow: 'hidden', padding: '2px 4px',
+                            fontSize: '0.66rem', fontWeight: 700, lineHeight: 1.15, color: '#1e1b4b',
+                            opacity: rechazado ? 0.6 : 1, boxShadow: '0 1px 3px rgba(30,27,75,0.18)',
+                          }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+                            {pendiente && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', flex: '0 0 6px' }} />}
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
+                          </div>
+                          {(yOf(e) - yOf(s)) > 28 && (
+                            <div style={{ fontWeight: 500, color: '#4b5563', fontSize: '0.6rem' }}>
+                              {pad2(Math.floor(s / 60))}:{pad2(s % 60)}{soyCreador ? '' : ` · ${nameOf(m.creator_id)}`}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 );
               })}
@@ -10318,9 +10428,208 @@ function CalendarioCompartidoView({ settings }) {
               ? 'Cada barra = un espacio ocupado (sin título ni datos). Cada color, un agente.'
               : 'En verde, los espacios en que TODOS los agentes seleccionados están libres (para coordinar reuniones).'}
             {' '}No se muestran recordatorios de tareas ni de llamados. El día se muestra completo; la franja marcada es el horario laboral (la disponibilidad se calcula dentro de esa franja).
+            {' '}Los recuadros con <strong style={{ color: '#1e1b4b' }}>contorno</strong> son eventos compartidos: hacé click en cualquier lugar de la grilla para crear uno e invitar agentes.
           </div>
         </>
       )}
+
+      {slotDraft && (
+        <CrearMeetingModal
+          draft={slotDraft} meId={meId} owners={inviteCandidates}
+          onClose={() => setSlotDraft(null)}
+          onCreated={() => { setSlotDraft(null); reloadMeetings(); }}
+        />
+      )}
+      {openMeeting && (
+        <MeetingDetalleModal
+          meeting={openMeeting} meId={meId}
+          myInvite={myInvite(openMeeting.id)} invitees={invitesOf(openMeeting.id)} nameOf={nameOf}
+          onClose={() => setOpenMeeting(null)}
+          onChanged={() => { setOpenMeeting(null); reloadMeetings(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Modal: crear evento compartido (desde la grilla del Calendario compartido) ──
+function CrearMeetingModal({ draft, meId, owners, onClose, onCreated }) {
+  const startDate = new Date(draft.date); startDate.setHours(Math.floor(draft.startMin / 60), draft.startMin % 60, 0, 0);
+  const [title, setTitle] = useState('');
+  const [hora, setHora] = useState(`${pad2(startDate.getHours())}:${pad2(startDate.getMinutes())}`);
+  const [dur, setDur] = useState(60);
+  const [invited, setInvited] = useState(() => new Set());
+  const [agenda, setAgenda] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const toggle = (id) => setInvited(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
+  const fechaLabel = `${CALCOMP_DOW[startDate.getDay()]} ${startDate.getDate()} ${NOMBRES_MES[startDate.getMonth()].slice(0, 3)}`;
+
+  const guardar = async () => {
+    if (busy) return;
+    if (!title.trim()) { setError('Poné un título.'); return; }
+    const [hh, mm] = hora.split(':').map(Number);
+    const start = new Date(draft.date); start.setHours(hh || 0, mm || 0, 0, 0);
+    const end = new Date(start.getTime() + dur * 60000);
+    setBusy(true); setError(null);
+    try {
+      const { data: m, error: e1 } = await sb.from('abordaje_calendar_meetings')
+        .insert({ creator_id: meId, title: title.trim(), start_at: start.toISOString(), end_at: end.toISOString(), creator_agenda: agenda })
+        .select('id').single();
+      if (e1) throw e1;
+      const ids = [...invited];
+      if (ids.length) {
+        const { error: e2 } = await sb.from('abordaje_calendar_meeting_invites')
+          .insert(ids.map(invitee_id => ({ meeting_id: m.id, invitee_id })));
+        if (e2) throw e2;
+      }
+      onCreated();
+    } catch (e) { setError(e.message || String(e)); setBusy(false); }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(460px, 96vw)', maxHeight: '90vh', overflow: 'auto', padding: 22, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b', marginBottom: 2 }}>Nuevo evento compartido</div>
+        <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 16 }}>{fechaLabel}</div>
+
+        <label style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Título</label>
+        <input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="Ej: Reunión con cliente"
+          style={{ width: '100%', padding: '9px 11px', border: '1px solid #d1d5db', borderRadius: 9, fontSize: 14, marginTop: 5, marginBottom: 14, boxSizing: 'border-box' }} />
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 14 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Hora</label>
+            <input type="time" value={hora} onChange={e => setHora(e.target.value)}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 9, fontSize: 14, marginTop: 5, boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 12, fontWeight: 700, color: '#374151' }}>Duración</label>
+            <select value={dur} onChange={e => setDur(Number(e.target.value))}
+              style={{ width: '100%', padding: '8px 10px', border: '1px solid #d1d5db', borderRadius: 9, fontSize: 14, marginTop: 5, boxSizing: 'border-box' }}>
+              {[30, 45, 60, 90, 120, 180].map(x => <option key={x} value={x}>{x} min</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Invitar agentes</div>
+        {owners.length === 0 ? (
+          <div style={{ fontSize: 12.5, color: '#9ca3af', marginBottom: 12 }}>No hay agentes con quienes compartís calendario.</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginBottom: 14 }}>
+            {owners.map(o => {
+              const on = invited.has(o.id);
+              return (
+                <button key={o.id} type="button" onClick={() => toggle(o.id)}
+                  style={{ border: `1.5px solid ${on ? '#4338ca' : '#d1d5db'}`, background: on ? '#eef2ff' : '#fff', color: on ? '#3730a3' : '#374151',
+                    borderRadius: 999, padding: '5px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+                  {on ? '✓ ' : ''}{o.name}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13, color: '#374151', cursor: 'pointer', padding: '8px 0', borderTop: '1px solid #f3f4f6' }}>
+          <input type="checkbox" checked={agenda} onChange={e => setAgenda(e.target.checked)} />
+          <span>Agendarlo también en <strong>mi calendario</strong></span>
+        </label>
+
+        {error && <div style={{ color: '#dc2626', fontSize: 12.5, marginTop: 6 }}>{error}</div>}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
+          <button onClick={onClose} disabled={busy} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: 9, fontSize: 13.5, fontWeight: 600, cursor: 'pointer' }}>Cancelar</button>
+          <button onClick={guardar} disabled={busy} style={{ padding: '9px 18px', border: 'none', background: '#4338ca', color: '#fff', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Creando…' : 'Crear e invitar'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Modal: detalle de un evento compartido (aceptar/rechazar o gestionar) ──────
+function MeetingDetalleModal({ meeting, meId, myInvite, invitees, nameOf, onClose, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const soyCreador = meeting.creator_id === meId;
+  const start = new Date(meeting.start_at), end = new Date(meeting.end_at);
+  const fechaLabel = `${CALCOMP_DOW[start.getDay()]} ${start.getDate()} ${NOMBRES_MES[start.getMonth()].slice(0, 3)} · ${pad2(start.getHours())}:${pad2(start.getMinutes())} - ${pad2(end.getHours())}:${pad2(end.getMinutes())}`;
+
+  const responder = async (status) => {
+    if (busy || !myInvite) return;
+    setBusy(true); setError(null);
+    const { error } = await sb.from('abordaje_calendar_meeting_invites')
+      .update({ status, responded_at: new Date().toISOString() }).eq('id', myInvite.id);
+    if (error) { setError(error.message); setBusy(false); return; }
+    onChanged();
+  };
+  const eliminar = async () => {
+    if (busy || !soyCreador) return;
+    if (!window.confirm('¿Eliminar este evento? Se quita para vos y para los invitados.')) return;
+    setBusy(true); setError(null);
+    const { error } = await sb.from('abordaje_calendar_meetings').delete().eq('id', meeting.id);
+    if (error) { setError(error.message); setBusy(false); return; }
+    onChanged();
+  };
+
+  const STATUS_LABEL = { pending: 'Pendiente', accepted: 'Aceptó', declined: 'Rechazó' };
+  const STATUS_COLOR = { pending: '#d97706', accepted: '#16a34a', declined: '#dc2626' };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, width: 'min(440px, 96vw)', maxHeight: '90vh', overflow: 'auto', padding: 22, boxShadow: '0 20px 60px rgba(0,0,0,0.3)' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+          <div style={{ width: 5, alignSelf: 'stretch', minHeight: 34, background: '#1e1b4b', borderRadius: 3 }} />
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16.5, fontWeight: 800, color: '#1e1b4b' }}>{meeting.title}</div>
+            <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 2 }}>{fechaLabel}</div>
+            <div style={{ fontSize: 12.5, color: '#6b7280', marginTop: 2 }}>Creado por <strong>{soyCreador ? 'vos' : nameOf(meeting.creator_id)}</strong></div>
+          </div>
+        </div>
+
+        {soyCreador ? (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 8 }}>Invitados</div>
+            {invitees.length === 0 ? (
+              <div style={{ fontSize: 12.5, color: '#9ca3af' }}>Sin invitados.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {invitees.map(iv => (
+                  <div key={iv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 13 }}>
+                    <span style={{ color: '#1e1b4b', fontWeight: 600 }}>{nameOf(iv.invitee_id)}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: STATUS_COLOR[iv.status] }}>{STATUS_LABEL[iv.status]}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {error && <div style={{ color: '#dc2626', fontSize: 12.5, marginTop: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 18 }}>
+              <button onClick={eliminar} disabled={busy} style={{ padding: '9px 14px', border: '1px solid #fecaca', background: '#fff', color: '#dc2626', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>Eliminar</button>
+              <button onClick={onClose} style={{ padding: '9px 16px', border: '1px solid #d1d5db', background: '#fff', borderRadius: 9, fontSize: 13.5, fontWeight: 600, cursor: 'pointer' }}>Cerrar</button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ marginTop: 16 }}>
+            {myInvite && (
+              <div style={{ fontSize: 13, color: '#374151', marginBottom: 12 }}>
+                Tu respuesta: <strong style={{ color: STATUS_COLOR[myInvite.status] }}>{STATUS_LABEL[myInvite.status]}</strong>
+                {myInvite.status === 'accepted' && <span style={{ color: '#6b7280' }}> · aparece en tu calendario</span>}
+              </div>
+            )}
+            {error && <div style={{ color: '#dc2626', fontSize: 12.5, marginBottom: 10 }}>{error}</div>}
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => responder('accepted')} disabled={busy || (myInvite && myInvite.status === 'accepted')}
+                style={{ flex: 1, padding: '10px', border: 'none', background: '#16a34a', color: '#fff', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', opacity: (myInvite && myInvite.status === 'accepted') ? 0.5 : 1 }}>Aceptar</button>
+              <button onClick={() => responder('declined')} disabled={busy || (myInvite && myInvite.status === 'declined')}
+                style={{ flex: 1, padding: '10px', border: '1px solid #fecaca', background: '#fff', color: '#dc2626', borderRadius: 9, fontSize: 13.5, fontWeight: 700, cursor: 'pointer', opacity: (myInvite && myInvite.status === 'declined') ? 0.5 : 1 }}>Rechazar</button>
+            </div>
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <button onClick={onClose} style={{ padding: '7px 16px', border: 'none', background: 'transparent', color: '#6b7280', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>Cerrar</button>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

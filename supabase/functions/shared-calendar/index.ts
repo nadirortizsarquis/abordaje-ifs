@@ -211,6 +211,25 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, blocks, noAccess });
     }
 
+    // Resuelve nombres de TODOS los que participan en meetings del caller (creador
+    // o invitado), para poder mostrar "X te invitó" aunque no sea un owner tuyo.
+    // Seguro: solo devuelve gente que comparte un meeting con vos.
+    if (op === "meeting_people") {
+      const { data: mine } = await supabase.from("abordaje_calendar_meetings").select("id, creator_id").eq("creator_id", user.id);
+      const { data: invited } = await supabase.from("abordaje_calendar_meeting_invites").select("meeting_id").eq("invitee_id", user.id);
+      const meetingIds = [...new Set([...(mine ?? []).map((m: any) => m.id), ...(invited ?? []).map((i: any) => i.meeting_id)])];
+      const ids = new Set<string>([user.id]);
+      if (meetingIds.length) {
+        const { data: ms } = await supabase.from("abordaje_calendar_meetings").select("creator_id").in("id", meetingIds);
+        (ms ?? []).forEach((m: any) => ids.add(m.creator_id));
+        const { data: iv } = await supabase.from("abordaje_calendar_meeting_invites").select("invitee_id").in("meeting_id", meetingIds);
+        (iv ?? []).forEach((i: any) => ids.add(i.invitee_id));
+      }
+      const { data: profs } = await supabase.from("profiles").select("id, display_name, email").in("id", [...ids]);
+      const people = (profs ?? []).map((p: any) => ({ id: p.id, name: p.display_name || p.email || "Agente" }));
+      return jsonResponse({ ok: true, people });
+    }
+
     return jsonResponse({ error: `unknown op: ${op}` }, 400);
   } catch (err) {
     console.error("shared-calendar error:", err);
