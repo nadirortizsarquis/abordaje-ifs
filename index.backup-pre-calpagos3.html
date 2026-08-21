@@ -129,20 +129,6 @@
     margin-left: auto;
     margin-right: auto;
   }
-  /* El contenedor de la app ocupa al menos el alto del viewport (menos el header
-     fijo) y es flex column, para que el footer se ancle abajo con margin-top:auto.
-     Así, con poco contenido (ej. una búsqueda que vacía la lista) el footer no
-     "sube": queda siempre cerrando la página al fondo del monitor. */
-  #reactRoot {
-    display: flex;
-    flex-direction: column;
-    min-height: calc(100dvh - var(--header-h) - env(safe-area-inset-top, 0px));
-  }
-  /* Footer global: encuadra el contenido con una línea del color del header.
-     margin-top:auto lo empuja al fondo; padding-top mantiene el respiro visual. */
-  .app-footer { margin-top: auto; padding-top: 46px; padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
-  .app-footer-line { height: 4px; border-radius: 4px; background: linear-gradient(135deg, #1e1b4b 0%, #1e3a5f 100%); }
-  .app-footer-text { text-align: center; font-size: 0.72rem; font-weight: 600; color: var(--texto-suave); letter-spacing: 0.3px; margin-top: 10px; }
 
   .main-head {
     display: flex; align-items: center; justify-content: space-between;
@@ -2350,8 +2336,6 @@
   .calpago-paysel button.on { color: white; border-color: transparent; }
   .calpago-empty { padding: 26px; text-align: center; color: var(--texto-suave); font-size: 0.86rem; }
   .calpago-chip-note { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
-  .calpago-search { border: 1px solid var(--borde); border-radius: 8px; padding: 6px 26px 6px 11px; font-size: 0.82rem; min-width: 210px; background: var(--bg-card); color: var(--texto); font-family: inherit; }
-  .calpago-search-x { position: absolute; right: 7px; top: 50%; transform: translateY(-50%); border: none; background: transparent; color: var(--texto-suave); font-size: 1.05rem; cursor: pointer; line-height: 1; }
   .calpago-asesor-btn { border: 1px solid var(--borde); background: var(--bg-card); border-radius: 8px; font-size: 0.8rem; font-weight: 700; color: var(--texto); padding: 6px 12px; cursor: pointer; }
   .calpago-asesor-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.16); padding: 10px 12px; min-width: 230px; }
   .calpago-asesor-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; max-height: 280px; overflow: auto; border-top: 1px solid var(--borde); padding-top: 6px; }
@@ -3974,7 +3958,7 @@ const storage = {
     const agenteId = await auth.getEffectiveAgenteId();
     const proximoContacto = input.proximoContacto || null;
     const fechaProx = proximoContacto && !proximoContacto.includes('T') ? proximoContacto : (proximoContacto ? proximoContacto.split('T')[0] : null);
-    const row = {
+    const { data, error } = await sb.from('abordaje_prospectos').insert({
       agente_id: agenteId,
       actor_id: user.id,
       nombre: input.nombre || '',
@@ -3985,15 +3969,7 @@ const storage = {
       observaciones: input.observaciones || '',
       estado: input.estado || 'nuevo',
       proximo_contacto: fechaProx
-    };
-    // Vínculo directo con un cliente del CRM elegido en el alta (typeahead).
-    if (input.crmClientId) {
-      row.crm_client_id = input.crmClientId;
-      row.crm_linked_at = new Date().toISOString();
-      row.crm_linked_by = user.id;
-      if (input.documento) row.documento = input.documento;
-    }
-    const { data, error } = await sb.from('abordaje_prospectos').insert(row).select().single();
+    }).select().single();
     if (error) throw error;
     return mapProspectoFromDB(data, []);
   },
@@ -4130,13 +4106,6 @@ const storage = {
     if ('orden' in patch) dbPatch.orden = patch.orden;
     if ('fijadaAt' in patch) dbPatch.fijada_at = patch.fijadaAt;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
-    // Vínculo directo con un cliente del CRM (typeahead al editar la tarea).
-    if ('crmClientId' in patch && patch.crmClientId) {
-      const u = await auth.getUser();
-      dbPatch.crm_client_id = patch.crmClientId;
-      dbPatch.crm_linked_at = new Date().toISOString();
-      dbPatch.crm_linked_by = u?.id || null;
-    }
     if (Object.keys(dbPatch).length === 0) return;
     // Solo marcamos actor cuando el cambio incluye campos user-visible. No
     // pisamos el actor original cuando el patch es puramente "mecánico":
@@ -4308,12 +4277,6 @@ function _crmMock(op, payload) {
     return Number.isFinite(n) ? (n % 2 === 0) : false;
   };
   switch (op) {
-    case 'search': {
-      const q = String(payload.q || '').trim().toLowerCase();
-      if (!q) return { ok: true, clients: [], scoped: true };
-      const all = [mkClient(200, 'Pablo Alberto Pastore', '25687459'), ...fuzzy, mkClient(300, 'Juan Perez', '20111222')];
-      return { ok: true, clients: all.filter(c => c.full_name.toLowerCase().includes(q) || (c.document_number || '').includes(q)), scoped: true };
-    }
     case 'status':
       return {
         ok: true, crm_client_id: _crmMockState.clientId,
@@ -4500,11 +4463,6 @@ const EventColorContext = createContext({
   calendarColors: {},   // overrides por calendar de Google (kind agenda/tarea)
 });
 
-// ¿El usuario actual puede usar la sincronización con el CRM? Admins siempre;
-// el resto según advisors.crm_sync_enabled. Gatea el botón "Convertir a cliente
-// CRM" en prospectos/tareas/agendas (lo lee CrmVinculoLanzador).
-const CrmEnabledContext = createContext(false);
-
 function formatActorTimestamp(ts) {
   if (!ts) return null;
   try {
@@ -4582,8 +4540,7 @@ const TIPOS_CONTACTO = [
   { id: 'llamar_15min',      label: 'Llamar en 15 min',    color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
   { id: 'llamar_tarde',      label: 'Llamar por la tarde', color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
   { id: 'llamar_manana',     label: 'Llamar mañana',       color: '#a16207', bg: '#fef9c3', estado: 'pendiente',  input: 'none' },
-  { id: 'llamar_semana',     label: 'Llamar en una semana', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
-  { id: 'llamar_lunes',      label: 'Llamar próximo lunes', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
+  { id: 'llamar_semana',     label: 'Llamar semana próx',  color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
   { id: 'llamar_dentro_de',  label: 'Llamar dentro de…',   color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'plazo' },
   { id: 'rechazado',         label: 'RECHAZADO',           color: '#991b1b', bg: '#fee2e2', estado: 'rechazado',  input: 'none' }
 ];
@@ -4751,12 +4708,6 @@ function calcAgendadoPara(tipo, custom) {
       d.setDate(d.getDate() + 7); d.setHours(9, 0, 0, 0);
       return dateToLocalIso(d);
     }
-    case 'llamar_lunes': {
-      const d = new Date();
-      const add = (8 - d.getDay()) % 7 || 7; // días hasta el próximo lunes (si hoy es lunes, va al siguiente)
-      d.setDate(d.getDate() + add); d.setHours(9, 0, 0, 0);
-      return dateToLocalIso(d);
-    }
     case 'llamar_dentro_de':
     case 'fecha_exacta':
     case 'agendado':
@@ -4889,21 +4840,6 @@ function ultimoContactoTipo(p) {
     if (!last || (c.createdAt || '') > (last.createdAt || '')) last = c;
   }
   return last?.tipo || null;
-}
-
-// Buscador propio de la Lista de Abordaje (independiente del buscador global del
-// header y de los filtros). Matchea nombre/teléfono/documento/detalle/referente/
-// observaciones, sin acentos y case-insensitive.
-function buscarEnProspectos(prospectos, q) {
-  const t = (q || '').toString().trim().toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  if (!t) return prospectos;
-  const norm = s => (s || '').toString().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  return prospectos.filter(p =>
-    norm(p.nombre).includes(t) || norm(p.telefono).includes(t) ||
-    norm(p.documento).includes(t) || norm(p.detalle).includes(t) ||
-    norm(p.observaciones).includes(t) || norm(p.referente).includes(t)
-  );
 }
 
 function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = [], ordenFecha = 'ninguno') {
@@ -5776,43 +5712,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // asistente. La marca visual (★) en cards/listas se basa en actor_id.
   const isAssistant = !!agente?.assistant_of_id;
   const isAdminProd = agente?.role === 'admin';
-  // Sincronización con CRM habilitada para el usuario actual: admins siempre;
-  // el resto según su fila en advisors (crm_sync_enabled). Gatea el botón
-  // "Convertir a cliente CRM" (vía CrmEnabledContext).
-  const [crmSyncEnabled, setCrmSyncEnabled] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (isAdminProd) { if (!cancelled) setCrmSyncEnabled(true); return; }
-      try {
-        const { data: prof } = await sb.from('profiles').select('advisor_id, email').eq('id', user.id).maybeSingle();
-        let enabled = false;
-        if (prof?.advisor_id) {
-          const { data: adv } = await sb.from('advisors').select('crm_sync_enabled').eq('id', prof.advisor_id).maybeSingle();
-          enabled = !!adv?.crm_sync_enabled;
-        } else if (prof?.email) {
-          const { data: adv } = await sb.from('advisors').select('crm_sync_enabled').ilike('email', prof.email).maybeSingle();
-          enabled = !!adv?.crm_sync_enabled;
-        }
-        if (!cancelled) setCrmSyncEnabled(enabled);
-      } catch (_) { if (!cancelled) setCrmSyncEnabled(false); }
-    })();
-    return () => { cancelled = true; };
-  }, [isAdminProd, user.id]);
   // Estado del selector de "Mi producción" (elevado para mostrarlo en la fila de tabs)
   const [prodTarget, setProdTarget] = useState(null);
   const [prodAgentes, setProdAgentes] = useState([]);
-  // Calendario de pagos: filtro multi-asesor elevado a App (mismo patrón que prodTarget).
-  const [calPagoSel, setCalPagoSel] = useState(null);   // null = Todos
-  const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
-  const calPagoEffIds = useMemo(() => {
-    const selfId = agente?.id || user?.id;
-    if (!isAdminProd) return selfId ? [selfId] : [];
-    if (!calPagoSel) return calRoster.map(a => a.id);
-    const arr = calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
-    return arr.length ? arr : (selfId ? [selfId] : []);
-  }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
-  const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
   useEffect(() => {
     if (!agente) return;
     setProdTarget(viewAs
@@ -5821,7 +5723,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [agente?.id, viewAs?.id]);
   useEffect(() => {
     if (!isAdminProd) return;
-    sb.from('profiles').select('id, display_name, email, advisor_name_ole').is('assistant_of_id', null)
+    sb.from('profiles').select('id, display_name, email').is('assistant_of_id', null)
       .or('is_demo.eq.false,demo_active.eq.true')
       .order('display_name', { ascending: true }).then(({ data }) => setProdAgentes(data || []));
   }, [isAdminProd]);
@@ -5935,7 +5837,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,compartir_calendario').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -6088,9 +5990,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Solapa dentro de la vista Lista: 'abordaje' (default, prospects activos)
   // o 'archivo' (prospects archivados). No persiste — al recargar arranca en 'abordaje'.
   const [vistaLista, setVistaLista] = useState('abordaje');
-  // Buscador propio de la Lista de Abordaje (independiente del buscador global
-  // del header y de los filtros). Solo afecta la vista Lista.
-  const [listaBusqueda, setListaBusqueda] = useState('');
   // Selección bulk en la solapa Archivo (Set de ids). Se limpia al cambiar de
   // solapa o al ejecutar bulk desarchivar.
   const [archivoSel, setArchivoSel] = useState(() => new Set());
@@ -7329,6 +7228,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
 
+  const filtrados = useMemo(
+    () => aplicarFiltros(state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
+    [state.prospectos, filterEstado, filterFecha, filterEtiqueta, ordenFecha]
+  );
+  const hayFiltros = filterEstado !== 'todos' || filterFecha !== 'todos' || (filterEtiqueta?.length || 0) > 0 || ordenFecha !== 'ninguno';
+
   // Handler común para click en notifs y en buscador.
   // IMPORTANTE: declarado ANTES del early return de loading para no violar
   // Rules of Hooks (un useCallback debe llamarse siempre en el mismo orden).
@@ -7375,7 +7280,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       setColor: handleSetEventColor,
       calendarColors: settings.calendarColors || {},
     }}>
-    <CrmEnabledContext.Provider value={crmSyncEnabled}>
       <HeaderActions
         user={user}
         agente={agente}
@@ -7429,7 +7333,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -7446,12 +7350,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             {prodAgentes.map(a => <option key={a.id} value={a.id}>{a.display_name || a.email}</option>)}
           </select>
         )}
-        {view === 'calendario_pagos' && isAdminProd && calRoster.length > 1 && (
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Asesores</span>
-        )}
-        {view === 'calendario_pagos' && isAdminProd && calRoster.length > 1 && (
-          <CalpagoAsesorPicker roster={calRoster} selIds={calPagoSel} setSelIds={setCalPagoSel} />
-        )}
         {view === 'tareas' && (
           <label className="kanban-autoorden" style={{ marginLeft: 'auto' }}
             title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
@@ -7466,7 +7364,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
-        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} />
+        <CalendarioPagosOLE
+          selfUserId={agente?.id || user?.id}
+          selfNombre={agente?.display_name || user?.email || 'Mi producción'}
+          isAdmin={isAdminProd}
+          agentes={prodAgentes} />
       )}
 
       {view === 'lista' && (
@@ -7480,10 +7382,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             const prospectosVista = state.prospectos.filter(p =>
               vistaLista === 'archivo' ? p.archivado : !p.archivado
             );
-            const filtradosVista = buscarEnProspectos(
-              aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
-              listaBusqueda
-            );
+            const filtradosVista = aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha);
             const archivadosCount = state.prospectos.filter(p => p.archivado).length;
             const enArchivo = vistaLista === 'archivo';
             return (
@@ -7502,8 +7401,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                   vistaLista={vistaLista}
                   setVistaLista={setVistaLista}
                   archivadosCount={archivadosCount}
-                  busqueda={listaBusqueda}
-                  setBusqueda={setListaBusqueda}
                   extraActions={
                     <>
                       {!enArchivo && (
@@ -7602,13 +7499,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 
       {view === 'calendario' && (
         <>
-          {/* El Calendario NO se filtra: los filtros son exclusivos de la Lista
-              de Abordaje. Antes recibía `filtrados` y su propia FilterBar, lo que
-              hacía que al filtrar la Lista los eventos de prospectos excluidos
-              aparecieran como "prospecto eliminado" (el filtro se interpretaba
-              como baja). Ahora usa la lista COMPLETA (state.prospectos). */}
+          <FilterBar
+            filterEstado={filterEstado}
+            setFilterEstado={setFilterEstado}
+            filterFecha={filterFecha}
+            setFilterFecha={setFilterFecha}
+            filterEtiqueta={filterEtiqueta}
+            setFilterEtiqueta={setFilterEtiqueta}
+            ordenFecha={ordenFecha}
+            setOrdenFecha={setOrdenFecha}
+            mostrandoCount={filtrados.length}
+            totalCount={state.prospectos.length}
+          />
           <CalendarioView
-            prospectos={state.prospectos}
+            prospectos={filtrados}
             tareasState={state.tareas}
             agendados={state.agendados}
             settings={settings}
@@ -7629,15 +7533,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           />
         </>
       )}
-
-      {view === 'calendario_compartido' && !isAssistant && agente?.compartir_calendario === true && (
-        <CalendarioCompartidoView settings={settings} />
-      )}
-
-      <footer className="app-footer">
-        <div className="app-footer-line"></div>
-        <div className="app-footer-text">IFS · Planificador de Abordaje</div>
-      </footer>
 
       {showAddModal && (
         <NuevoProspectoModal
@@ -7699,7 +7594,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           readOnly={readOnly}
           onClose={() => setTareaEditando(null)}
           onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
-          onPersist={(patch) => handleUpdateTarea(tareaEditando.id, patch)}
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
         />
@@ -7812,7 +7706,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
         />
       )}
-    </CrmEnabledContext.Provider>
     </EventColorContext.Provider>
     </ActorContext.Provider>
   );
@@ -7989,7 +7882,7 @@ function EmptyState({ onAdd }) {
 // Por default los filtros van plegados — ocupan menos espacio en pantalla.
 // Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
 // toggle muestra un badge con la cantidad activos y queda destacado.
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0, busqueda = '', setBusqueda = null }) {
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0 }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
   const filtrosCount =
     (filterEstado !== 'todos' ? 1 : 0)
@@ -8035,19 +7928,6 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
         <div className="filter-count">
           {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
         </div>
-        {setBusqueda && (
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-            <input type="search" value={busqueda} onChange={e => setBusqueda(e.target.value)}
-              placeholder="Buscar en la lista…" aria-label="Buscar en la lista de Abordaje"
-              style={{ height: 32, padding: '0 28px 0 12px', borderRadius: 999, border: '1px solid var(--borde)',
-                fontSize: '0.82rem', minWidth: 150, background: 'var(--bg-card)', color: 'var(--texto)' }} />
-            {busqueda && (
-              <button type="button" onClick={() => setBusqueda('')} aria-label="Limpiar búsqueda"
-                style={{ position: 'absolute', right: 8, border: 'none', background: 'none', cursor: 'pointer',
-                  color: 'var(--texto-suave)', fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>
-            )}
-          </div>
-        )}
         {extraActions && <div className="filter-bar-extras">{extraActions}</div>}
       </div>
       {open && (
@@ -9009,10 +8889,10 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
 
   const doSync = async () => {
     await run('sync', {}, async (r) => {
-      if (r.action === 'noop') { setNotice('Ya está todo sincronizado — no hay gestión nueva para volcar.'); }
+      if (r.action === 'noop') { setNotice('No hay gestión nueva para volcar.'); }
       else {
         const d = r.detalle || {};
-        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
+        setNotice(`Volcado a la bitácora: ${r.synced} ítem(s) (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
       }
       await fetchStatus();
     });
@@ -9320,31 +9200,12 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
 
 // Lanzador reutilizable del modal CRM para cualquier ancla (tarea, agenda, etc.).
 // El modal resuelve por sí mismo el estado (op status) — el lanzador es solo el botón.
-function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, className, style }) {
+function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, className, style }) {
   const [open, setOpen] = useState(false);
-  const [preparando, setPreparando] = useState(false);
-  // Gating: si la Sincronización con CRM está deshabilitada para el usuario, el
-  // botón queda gris/anulado (para asesores que todavía no tienen CRM).
-  const crmEnabled = useContext(CrmEnabledContext);
-  // Antes de abrir el modal, persistimos los cambios pendientes de la tarjeta
-  // (ej. un comentario recién tipeado en la tarea/agenda sin apretar Guardar),
-  // así la sincronización ve la gestión actualizada y no una versión vieja.
-  const abrir = async () => {
-    if (!crmEnabled) return;
-    if (onBeforeOpen) {
-      setPreparando(true);
-      try { await onBeforeOpen(); } catch (_) {} finally { setPreparando(false); }
-    }
-    setOpen(true);
-  };
   return (
     <>
-      <button type="button" className={className || 'btn-secondary'}
-        style={{ ...style, ...(crmEnabled ? {} : { opacity: 0.5, cursor: 'not-allowed' }) }}
-        disabled={preparando || !crmEnabled}
-        title={crmEnabled ? undefined : 'Sincronización con CRM deshabilitada para tu usuario. Pedile a un admin que la active en Ajustes → Directorio.'}
-        onClick={abrir}>
-        {preparando ? 'Guardando…' : (label || 'Cliente en el CRM')}
+      <button type="button" className={className || 'btn-secondary'} style={style} onClick={() => setOpen(true)}>
+        {label || 'Cliente en el CRM'}
       </button>
       {open && (
         <CrmModal
@@ -9355,82 +9216,6 @@ function CrmVinculoLanzador({ anchor, label, onLinked, onSaveDni, onBeforeOpen, 
         />
       )}
     </>
-  );
-}
-
-// Typeahead "Cliente en el CRM" para el ALTA de prospecto/tarea: buscás por
-// nombre o DNI y elegís un cliente existente → queda vinculado directo, sin pasar
-// por el modal. Solo se muestra si el usuario tiene la Sincronización con CRM
-// habilitada. `value` = { id, full_name, document_number } | null.
-function CrmClientePicker({ value, onPick, onClear, label }) {
-  const crmEnabled = useContext(CrmEnabledContext);
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [openList, setOpenList] = useState(false);
-  const [err, setErr] = useState(null);
-
-  useEffect(() => {
-    if (value) return;
-    const term = q.trim();
-    if (term.length < 2) { setResults([]); setOpenList(false); return; }
-    let cancel = false;
-    setBusy(true); setErr(null);
-    const t = setTimeout(async () => {
-      try {
-        const r = await crmSync('search', { q: term });
-        if (cancel) return;
-        setResults(r.clients || []);
-        setOpenList(true);
-        if (r.pendingScope) setErr('Búsqueda scopeada por asesor pendiente de habilitar en el CRM.');
-      } catch (e) { if (!cancel) setErr(e.message); }
-      finally { if (!cancel) setBusy(false); }
-    }, 350);
-    return () => { cancel = true; clearTimeout(t); };
-  }, [q, value]);
-
-  if (!crmEnabled) return null;
-
-  if (value) {
-    return (
-      <div className="field">
-        <label>{label || 'Cliente en el CRM'}</label>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
-          background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '8px 12px' }}>
-          <span style={{ fontSize: '0.86rem', color: 'var(--azul-oscuro)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {value.full_name || `Cliente #${value.id}`}{value.document_number ? ` · DNI ${value.document_number}` : ''}
-          </span>
-          <button type="button" className="btn-ghost" style={{ padding: 0, fontSize: '0.8rem', flex: '0 0 auto' }} onClick={onClear}>Quitar</button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="field" style={{ position: 'relative' }}>
-      <label>{label || 'Cliente en el CRM'} <span style={{ fontWeight: 400, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>(opcional — si ya es cliente)</span></label>
-      <input type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar por nombre o DNI en el CRM…" autoComplete="off" />
-      {busy && <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 4 }}>Buscando…</div>}
-      {err && <div style={{ fontSize: '0.74rem', color: '#b45309', marginTop: 4 }}>{err}</div>}
-      {openList && results.length > 0 && (
-        <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, top: '100%', marginTop: 4,
-          background: 'var(--bg-card)', border: '1px solid var(--borde)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto' }}>
-          {results.map(c => (
-            <div key={c.id} onClick={() => { onPick(c); setQ(''); setResults([]); setOpenList(false); }}
-              style={{ padding: '9px 12px', cursor: 'pointer', borderBottom: '1px solid var(--borde)', fontSize: '0.84rem' }}
-              onMouseDown={e => e.preventDefault()}>
-              <div style={{ fontWeight: 600, color: 'var(--texto)' }}>{c.full_name || `Cliente #${c.id}`}</div>
-              <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)' }}>
-                #{c.id}{c.document_number ? ` · DNI ${c.document_number}` : ''}{c.primary_advisor?.full_name ? ` · ${c.primary_advisor.full_name}` : ''}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-      {openList && !busy && results.length === 0 && q.trim().length >= 2 && !err && (
-        <div style={{ fontSize: '0.74rem', color: 'var(--texto-suave)', marginTop: 4 }}>Sin coincidencias en el CRM.</div>
-      )}
-    </div>
   );
 }
 
@@ -9979,7 +9764,6 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
     nombre: '', telefono: '', preferenciaContacto: '',
     detalle: '', referente: '', observaciones: ''
   });
-  const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   const [errors, setErrors] = useState({});
   // Evita duplicados por doble Enter / doble tap mientras el save corre.
   const [saving, setSaving] = useState(false);
@@ -10005,9 +9789,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
       preferenciaContacto: form.preferenciaContacto,
       detalle: form.detalle.trim(),
       referente: form.referente.trim(),
-      observaciones: form.observaciones.trim(),
-      crmClientId: crmCliente?.id || null,
-      documento: crmCliente?.document_number || ''
+      observaciones: form.observaciones.trim()
     })).finally(() => setSaving(false));
   };
 
@@ -10036,11 +9818,6 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
               Se agendará para <strong>{slotLabel}</strong> apenas se guarde.
             </div>
           )}
-          <CrmClientePicker
-            value={crmCliente}
-            onPick={(c) => { setCrmCliente(c); if (!form.nombre.trim() && c.full_name) upd('nombre', c.full_name); }}
-            onClear={() => setCrmCliente(null)}
-          />
           <div className="field">
             <label>Nombre <span className="req">*</span></label>
             <input type="text" value={form.nombre}
@@ -10093,7 +9870,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 }
 
 // ── VIEW TABS (Lista | Calendario) ────────────────────────────
-function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) {
+function ViewTabs({ view, setView, showProd, showCalPagos }) {
   return (
     <div className="view-tabs">
       <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
@@ -10102,10 +9879,6 @@ function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) 
         onClick={() => setView('tareas')}>Tareas</button>
       <button className={`view-tab ${view === 'calendario' ? 'active' : ''}`}
         onClick={() => setView('calendario')}>Calendario</button>
-      {showCalCompartido && (
-        <button className={`view-tab ${view === 'calendario_compartido' ? 'active' : ''}`}
-          onClick={() => setView('calendario_compartido')}>Calendario compartido</button>
-      )}
       {showProd && (
         <button className={`view-tab ${view === 'produccion' ? 'active' : ''}`}
           onClick={() => setView('produccion')}>Mi producción</button>
@@ -10113,213 +9886,6 @@ function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) 
       {showCalPagos && (
         <button className={`view-tab ${view === 'calendario_pagos' ? 'active' : ''}`}
           onClick={() => setView('calendario_pagos')}>Calendario de pagos</button>
-      )}
-    </div>
-  );
-}
-
-// ── CALENDARIO COMPARTIDO ────────────────────────────────────────────────────
-// Wrapper de la edge function shared-calendar (ocupados anonimizados).
-async function sharedCal(op, payload = {}) {
-  const { data, error } = await sb.functions.invoke('shared-calendar', { body: { op, ...payload } });
-  if (error) {
-    let msg = error.message || 'Error';
-    try { const b = await error.context.json(); if (b?.error) msg = b.error; } catch (_) {}
-    throw new Error(msg);
-  }
-  if (data && data.ok === false && data.error) throw new Error(data.error);
-  return data;
-}
-
-const CALCOMP_PALETTE = ['#0098DA', '#e11d48', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#ca8a04', '#4f46e5', '#db2777', '#059669'];
-
-function CalendarioCompartidoView({ settings }) {
-  const [owners, setOwners] = useState([]);
-  const [selected, setSelected] = useState(null);   // Set de ownerIds; null = todos
-  const [mode, setMode] = useState('ocupado');       // 'ocupado' | 'disponible'
-  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
-  const [blocks, setBlocks] = useState([]);
-  const [noAccess, setNoAccess] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const bodyRef = useRef(null);
-
-  useEffect(() => {
-    sharedCal('owners').then(d => setOwners(d.owners || [])).catch(e => setError(e.message));
-  }, []);
-
-  const colorOf = (id) => CALCOMP_PALETTE[Math.max(0, owners.findIndex(o => o.id === id)) % CALCOMP_PALETTE.length];
-  const nameOf = (id) => (owners.find(o => o.id === id)?.name) || 'Agente';
-  const activeOwners = owners.filter(o => !selected || selected.has(o.id));
-
-  const nDays = settings.includeWeekends ? 7 : 5;
-  const days = useMemo(() => Array.from({ length: nDays }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; }), [weekStart, nDays]);
-
-  useEffect(() => {
-    if (!owners.length) { setBlocks([]); setLoading(false); return; }
-    const tMin = new Date(weekStart); tMin.setHours(0, 0, 0, 0);
-    const tMax = new Date(weekStart); tMax.setDate(tMax.getDate() + 7); tMax.setHours(0, 0, 0, 0);
-    setLoading(true); setError(null);
-    sharedCal('busy', { timeMin: tMin.toISOString(), timeMax: tMax.toISOString() })
-      .then(d => { setBlocks(d.blocks || []); setNoAccess(d.noAccess || []); })
-      .catch(e => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [owners, weekStart]);
-
-  const wsMin = (settings.workStartHour || 8) * 60 + (settings.workStartMin || 0);
-  const weMin = (settings.workEndHour || 20) * 60 + (settings.workEndMin || 0);
-  // La grilla muestra el día completo (0-24) igual que el calendario normal, para
-  // no esconder eventos cargados fuera del horario laboral. El horario laboral se
-  // marca con líneas punteadas + atenuación. La DISPONIBILIDAD sí se acota al
-  // horario laboral (no tiene sentido "libre a las 3am").
-  const HOUR_HEIGHT = 56;
-  const DAY_MIN = 0, DAY_MAX = 24 * 60;
-  const gridH = HOUR_HEIGHT * 24;
-  const yOf = (min) => (min / 60) * HOUR_HEIGHT;
-  const hours = []; for (let h = 0; h < 24; h++) hours.push(h);
-  const gridCols = `var(--cal-hour-col-w, 60px) repeat(${nDays}, minmax(var(--cal-day-min-w, 0px), 1fr))`;
-
-  // Auto-scroll al inicio del horario laboral al montar (como el calendario normal).
-  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = Math.max(0, yOf(wsMin) - 12); }, [owners.length]);
-
-  const sameDay = (iso, d) => { const x = new Date(iso); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth() && x.getDate() === d.getDate(); };
-  const minutesOf = (iso) => { const x = new Date(iso); return x.getHours() * 60 + x.getMinutes(); };
-
-  // Bloques ocupados por día (horario real, día completo) de los owners activos.
-  const dayBusy = (d) => {
-    const activeIds = new Set(activeOwners.map(o => o.id));
-    return blocks
-      .filter(b => activeIds.has(b.ownerId) && sameDay(b.start, d))
-      .map(b => ({ ownerId: b.ownerId, s: Math.max(DAY_MIN, minutesOf(b.start)), e: Math.min(DAY_MAX, minutesOf(b.end)) }))
-      .filter(b => b.e > b.s);
-  };
-
-  // Huecos libres comunes (todos los owners activos libres) en un día.
-  const dayFree = (d) => {
-    const busy = dayBusy(d).map(b => [b.s, b.e]).sort((a, b) => a[0] - b[0]);
-    const merged = [];
-    for (const [s, e] of busy) { if (merged.length && s <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e); else merged.push([s, e]); }
-    const free = []; let cur = wsMin;
-    for (const [s, e] of merged) { if (s > cur) free.push([cur, s]); cur = Math.max(cur, e); }
-    if (cur < weMin) free.push([cur, weMin]);
-    return free;
-  };
-
-  const toggleOwner = (id) => setSelected(prev => {
-    const base = prev ? new Set(prev) : new Set(owners.map(o => o.id));
-    if (base.has(id)) base.delete(id); else base.add(id);
-    return base.size === owners.length ? null : base;
-  });
-
-  const goWeek = (delta) => setWeekStart(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta * 7); return d; });
-  const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
-
-  return (
-    <div style={{ padding: '4px 0 20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <button className="btn-mini" onClick={() => goWeek(-1)}>‹</button>
-          <button className="btn-mini" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoy</button>
-          <button className="btn-mini" onClick={() => goWeek(1)}>›</button>
-          <span style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--texto)', marginLeft: 6 }}>
-            {days[0].getDate()} {NOMBRES_MES[days[0].getMonth()].slice(0, 3)} – {days[days.length - 1].getDate()} {NOMBRES_MES[days[days.length - 1].getMonth()].slice(0, 3)}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto', background: '#eef2ff', borderRadius: 999, padding: 3 }}>
-          {[['ocupado', 'Ocupado'], ['disponible', 'Disponible']].map(([k, label]) => (
-            <button key={k} type="button" onClick={() => setMode(k)}
-              style={{ border: 'none', borderRadius: 999, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
-                background: mode === k ? '#4338ca' : 'transparent', color: mode === k ? '#fff' : '#4338ca' }}>{label}</button>
-          ))}
-        </div>
-      </div>
-
-      {owners.length === 0 ? (
-        <div className="empty" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--texto-suave)' }}>
-          Todavía no hay agentes que compartan su calendario con vos. El admin lo configura en Ajustes → Compartidos.
-        </div>
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            {owners.map(o => {
-              const on = !selected || selected.has(o.id);
-              const sinAcceso = noAccess.includes(o.id);
-              return (
-                <button key={o.id} type="button" onClick={() => toggleOwner(o.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${on ? colorOf(o.id) : 'var(--borde)'}`,
-                    background: on ? colorOf(o.id) + '18' : '#fff', borderRadius: 999, padding: '4px 12px', fontSize: '0.8rem', cursor: 'pointer',
-                    opacity: on ? 1 : 0.5 }}>
-                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: colorOf(o.id) }} />
-                  {o.name}{sinAcceso ? ' (sin acceso)' : ''}
-                </button>
-              );
-            })}
-          </div>
-
-          {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
-          {loading && <div style={{ fontSize: 13, color: 'var(--texto-suave)', marginBottom: 8 }}>Cargando disponibilidad…</div>}
-
-          <div className="cal-week-wrap" style={{ border: '1px solid var(--borde)', borderRadius: 10 }}>
-            <div className="cal-week-header" style={{ gridTemplateColumns: gridCols }}>
-              <div className="cal-week-corner" />
-              {days.map((d, di) => {
-                const esHoy = new Date().toDateString() === d.toDateString();
-                return (
-                  <div key={di} className={`cal-week-day-h ${esHoy ? 'today' : ''}`}>
-                    <span className="dow">{DOW[d.getDay()]}</span>
-                    <span className="num">{d.getDate()}</span>
-                  </div>
-                );
-              })}
-            </div>
-            <div ref={bodyRef} className="cal-week-body" style={{ gridTemplateColumns: gridCols }}>
-              <div className="cal-hours-col">
-                {hours.map(h => <div key={h} className="cal-hour-label" style={{ height: HOUR_HEIGHT }}>{pad2(h)}:00</div>)}
-              </div>
-              {days.map((d, di) => {
-                const busy = dayBusy(d);
-                const free = mode === 'disponible' ? dayFree(d) : [];
-                const nOwn = Math.max(1, activeOwners.length);
-                return (
-                  <div key={di} className="cal-day-col">
-                    {hours.map(h => <div key={h} className="cal-hour-cell" style={{ height: HOUR_HEIGHT }} />)}
-                    {/* atenuación fuera del horario laboral */}
-                    {wsMin > DAY_MIN && <div className="cal-offhours" style={{ top: 0, height: yOf(wsMin) }} />}
-                    {weMin < DAY_MAX && <div className="cal-offhours" style={{ top: yOf(weMin), height: gridH - yOf(weMin) }} />}
-                    <div className="cal-workhours-line" style={{ top: yOf(wsMin) }} />
-                    <div className="cal-workhours-line" style={{ top: yOf(weMin) }} />
-                    {/* En modo disponible, base tenue roja dentro del horario laboral (verde = libre encima) */}
-                    {mode === 'disponible' && <div style={{ position: 'absolute', left: 0, right: 0, top: yOf(wsMin), height: yOf(weMin) - yOf(wsMin), background: '#fecaca', opacity: 0.30, zIndex: 1 }} />}
-                    {mode === 'ocupado'
-                      ? busy.map((b, i) => {
-                          const oi = Math.max(0, activeOwners.findIndex(o => o.id === b.ownerId));
-                          return (
-                            <div key={i} title="Ocupado" style={{
-                              position: 'absolute', top: yOf(b.s), height: Math.max(4, yOf(b.e) - yOf(b.s)),
-                              left: `calc(${(oi / nOwn) * 100}% + 1px)`, width: `calc(${100 / nOwn}% - 2px)`,
-                              background: colorOf(b.ownerId), opacity: 0.82, borderRadius: 4, zIndex: 3,
-                            }} />
-                          );
-                        })
-                      : free.map((f, i) => (
-                          <div key={i} title="Disponible (todos libres)" style={{
-                            position: 'absolute', top: yOf(f[0]), height: Math.max(4, yOf(f[1]) - yOf(f[0])),
-                            left: 2, right: 2, background: '#22c55e', opacity: 0.32, borderRadius: 4, border: '1px solid #16a34a', zIndex: 3,
-                          }} />
-                        ))}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 10, lineHeight: 1.5 }}>
-            {mode === 'ocupado'
-              ? 'Cada barra = un espacio ocupado (sin título ni datos). Cada color, un agente.'
-              : 'En verde, los espacios en que TODOS los agentes seleccionados están libres (para coordinar reuniones).'}
-            {' '}No se muestran recordatorios de tareas ni de llamados. El día se muestra completo; la franja marcada es el horario laboral (la disponibilidad se calcula dentro de esa franja).
-          </div>
-        </>
       )}
     </div>
   );
@@ -10882,97 +10448,8 @@ function calpagoDayLabel(k) {
 }
 const calpagoFmtPrima = n => (typeof n === 'number' && !isNaN(n)) ? ('$' + n.toLocaleString('es-AR')) : '';
 const calpagoPagoKey = (asesorId, poliza) => asesorId + '|' + poliza;
-function calpagoNextAnniversary(rd, from) {
-  if (!rd) return null;
-  from = from || new Date();
-  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  let d = new Date(from.getFullYear(), rd.getMonth(), rd.getDate());
-  if (d < today) d = new Date(from.getFullYear() + 1, rd.getMonth(), rd.getDate());
-  return d;
-}
-const calpagoNorm = str => (str || '').toString().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 // Modal de edicion: quien paga + observaciones.
-function buildCalpagoRoster(agentes, isAdmin, selfUserId, selfNombre) {
-  if (!isAdmin || !Array.isArray(agentes) || !agentes.length) {
-    return [{ id: selfUserId, nombre: selfNombre || 'Mi producción', memberIds: [selfUserId] }];
-  }
-  // Agrupar por libro OLE compartido: mismo advisor_name_ole => una sola entrada
-  // (ej. Nadir y Federico comparten el libro de IFS, con pólizas idénticas).
-  const norm = v => (v || '').toString().trim().toUpperCase().replace(/\s+/g, ' ');
-  const groups = new Map();
-  agentes.forEach(a => {
-    const ole = norm(a.advisor_name_ole);
-    const key = ole ? ('ole:' + ole) : ('u:' + a.id);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(a);
-  });
-  const units = [];
-  groups.forEach(members => {
-    // canon DETERMINÍSTICO (mismo para todos los que ven el grupo): el pago y
-    // los comentarios se guardan en UN solo user_id → Nadir y Federico comparten
-    // totalmente el tablero (lo que uno edita, el otro lo ve). RLS lo permite por
-    // ser ambos admin.
-    const canon = members.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)))[0];
-    let nombre;
-    if (members.length > 1) {
-      const oleN = norm(members[0].advisor_name_ole);
-      const firsts = members.map(m => (m.display_name || m.email || 'asesor').split(' ')[0]).join(' / ');
-      nombre = oleN.includes('INSURANCE FINANCIAL SOLUTION')
-        ? ('IFS (' + firsts + ')')
-        : members.map(m => m.display_name || m.email || 'asesor').join(' / ');
-    } else {
-      nombre = canon.display_name || canon.email || 'asesor';
-    }
-    units.push({ id: canon.id, nombre, memberIds: members.map(m => m.id) });
-  });
-  if (!units.some(u => u.memberIds.includes(selfUserId))) {
-    units.unshift({ id: selfUserId, nombre: selfNombre || 'Mi producción', memberIds: [selfUserId] });
-  }
-  units.sort((a, b) => {
-    const aSelf = a.memberIds.includes(selfUserId) ? 0 : 1;
-    const bSelf = b.memberIds.includes(selfUserId) ? 0 : 1;
-    if (aSelf !== bSelf) return aSelf - bSelf;
-    return a.nombre.localeCompare(b.nombre);
-  });
-  return units;
-}
-
-function CalpagoAsesorPicker({ roster, selIds, setSelIds }) {
-  const [open, setOpen] = useState(false);
-  const effCount = selIds ? roster.filter(a => selIds.has(a.id)).length : roster.length;
-  return (
-    <div style={{ position: 'relative' }}>
-      <button type="button" className="calpago-asesor-btn" onClick={() => setOpen(o => !o)}>
-        {!selIds ? 'Todos' : (effCount + (effCount === 1 ? ' asesor' : ' asesores'))} ▾
-      </button>
-      {open && (
-        <div className="calpago-asesor-pop" onMouseLeave={() => setOpen(false)}>
-          <label className="calpago-chk" style={{ fontWeight: 700 }}>
-            <input type="checkbox" checked={!selIds} onChange={e => setSelIds(e.target.checked ? null : new Set())} />
-            Todos
-          </label>
-          <div className="calpago-asesor-list">
-            {roster.map(a => {
-              const on = !selIds || selIds.has(a.id);
-              return (
-                <label className="calpago-chk" key={a.id}>
-                  <input type="checkbox" checked={on} onChange={e => setSelIds(prev => {
-                    const base = prev ? new Set(prev) : new Set(roster.map(x => x.id));
-                    if (e.target.checked) base.add(a.id); else base.delete(a.id);
-                    return base.size === roster.length ? null : base;
-                  })} />
-                  {a.nombre}
-                </label>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
   const [paga, setPaga] = useState(current ? (current.paga || null) : null);
   const [obs, setObs] = useState(current ? (current.obs || '') : '');
@@ -10982,11 +10459,8 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
         <div className="calpago-modal-head">
           <div style={{ minWidth: 0 }}>
             <div className="calpago-modal-title">{ev.asegurado}</div>
-            {isAdmin && ev.asesorNombre && <div className="calpago-modal-sub" style={{ fontWeight: 700, opacity: 1, color: '#c4b5fd' }}>{ev.asesorNombre}</div>}
-            <div className="calpago-modal-sub">{[CALPAGO_FREQ_LABEL[ev.freq] || ev.freqRaw, ev.estado].filter(Boolean).join(' · ')}</div>
-            {calpagoFmtPrima(ev.prima) && <div className="calpago-modal-sub" style={{ fontSize: '0.95rem', fontWeight: 800, opacity: 1 }}>Prima: {calpagoFmtPrima(ev.prima)}</div>}
-            <div className="calpago-modal-sub">Vence: {ev.date ? ev.date.toLocaleDateString('es-AR') : '—'}</div>
-            <div className="calpago-modal-sub">Póliza: {ev.poliza}</div>
+            <div className="calpago-modal-sub">{[ev.plan, CALPAGO_FREQ_LABEL[ev.freq] || ev.freqRaw, ev.estado].filter(Boolean).join(' · ')}{calpagoFmtPrima(ev.prima) ? (' · ' + calpagoFmtPrima(ev.prima)) : ''}</div>
+            <div className="calpago-modal-sub">Póliza {ev.poliza} · vence {ev.date.toLocaleDateString('es-AR')}{isAdmin && ev.asesorNombre ? (' · ' + ev.asesorNombre) : ''}</div>
           </div>
           <button className="calpago-modal-x" onClick={onClose}>×</button>
         </div>
@@ -11013,8 +10487,25 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
   );
 }
 
-function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
-  const idsKey = (effIds || []).slice().sort().join(',');
+function CalendarioPagosOLE({ selfUserId, selfNombre, isAdmin, agentes }) {
+  const roster = useMemo(() => {
+    const list = (isAdmin && Array.isArray(agentes) && agentes.length)
+      ? agentes.map(a => ({ id: a.id, nombre: a.display_name || a.email || 'asesor' }))
+      : [];
+    if (!list.some(a => a.id === selfUserId)) list.unshift({ id: selfUserId, nombre: selfNombre || 'Mi producción' });
+    return list;
+  }, [agentes, isAdmin, selfUserId, selfNombre]);
+  const nombreDe = useMemo(() => { const m = {}; roster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [roster]);
+
+  const [selIds, setSelIds] = useState(null);      // null = Todos
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const effIds = useMemo(() => {
+    if (!isAdmin) return [selfUserId];
+    if (!selIds) return roster.map(a => a.id);
+    const arr = roster.map(a => a.id).filter(id => selIds.has(id));
+    return arr.length ? arr : [selfUserId];
+  }, [isAdmin, selIds, roster, selfUserId]);
+  const idsKey = effIds.slice().sort().join(',');
 
   const [rows, setRows] = useState(null);
   const [pagoMap, setPagoMap] = useState({});
@@ -11028,7 +10519,6 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
   const [editing, setEditing] = useState(null);
   const [freqF, setFreqF] = useState({ mensual: true, trimestral: true, semestral: true, anual: true });
   const [pagF, setPagF] = useState({ cliente: true, ifs: true, agente: true, sin: true });
-  const [q, setQ] = useState('');
 
   useEffect(() => {
     if (!effIds.length) { setRows([]); setLoading(false); return; }
@@ -11053,9 +10543,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
     if (!rows || !rows.length) return [];
     const out = [];
     rows.forEach(r => {
-      // 'cartera' = libro completo (todas las renovaciones). Fallback a 'detalle'
-      // (solo producción) para reportes viejos que aún no republicaron.
-      const d = r.resumen && (r.resumen.cartera || r.resumen.detalle);
+      const d = r.resumen && r.resumen.detalle;
       if (Array.isArray(d)) d.forEach(p => out.push({ ...p, _asesorId: r.user_id }));
     });
     return out;
@@ -11084,40 +10572,17 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
         freq, freqRaw: p.frecuencia || '', date, pagador, obs,
         asesorId: p._asesorId, asesorNombre: nombreDe[p._asesorId] || '',
       });
-      // La renovación es un aniversario recurrente: se proyecta al AÑO que se
-      // está viendo (no al año literal del reporte). "Solo renovación" = una vez
-      // al año (aniversario); "cada pago" = las cuotas según frecuencia.
-      const stepM = !eachPay ? 12 : (freq ? CALPAGO_FREQ_MESES[freq] : 12);
-      calpagoDerivePagos(rd, stepM, yStart, yEnd).forEach(d => evs.push(mk(d)));
+      if (!eachPay || !freq || freq === 'anual') evs.push(mk(rd));
+      else calpagoDerivePagos(rd, CALPAGO_FREQ_MESES[freq], yStart, yEnd).forEach(d => evs.push(mk(d)));
     });
     return { eventos: evs, sinFecha: sf };
   }, [detalle, pagoMap, eachPay, year, nombreDe]);
 
-  const nq = calpagoNorm(q);
   const shown = useMemo(() => eventos.filter(e => {
     if (e.freq && !freqF[e.freq]) return false;
     if (!pagF[e.pagador || 'sin']) return false;
     return true;
   }), [eventos, freqF, pagF]);
-  // Búsqueda sobre TODO el libro (todos los años, no solo el que se ve).
-  const searchResults = useMemo(() => {
-    if (!nq) return [];
-    const out = [];
-    detalle.forEach(p => {
-      const hay = calpagoNorm((p.asegurado || '') + ' ' + (nombreDe[p._asesorId] || '') + ' ' + (p.poliza || ''));
-      if (!hay.includes(nq)) return;
-      const rec = pagoMap[calpagoPagoKey(p._asesorId, p.poliza)] || null;
-      out.push({
-        poliza: p.poliza, asegurado: p.asegurado || '(sin nombre)', plan: p.plan || '',
-        prima: p.prima, estado: p.estado || '', tipo: p.tipo || '',
-        freq: calpagoNormFreq(p.frecuencia), freqRaw: p.frecuencia || '',
-        date: calpagoNextAnniversary(calpagoParseDMY(p.fRenovacion)), pagador: rec ? rec.paga : null, obs: rec ? (rec.obs || '') : '',
-        asesorId: p._asesorId, asesorNombre: nombreDe[p._asesorId] || '',
-      });
-    });
-    out.sort((a, b) => (a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity));
-    return out;
-  }, [detalle, nq, pagoMap, nombreDe]);
   const byDay = useMemo(() => {
     const m = {};
     shown.forEach(e => { const k = dayKey(e.date); (m[k] = m[k] || []).push(e); });
@@ -11127,7 +10592,6 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
   const goPrev = () => setCursor(c => { const d = new Date(c); if (mode === 'anio') d.setFullYear(d.getFullYear() - 1); else if (mode === 'semana') d.setDate(d.getDate() - 7); else d.setMonth(d.getMonth() - 1); return d; });
   const goNext = () => setCursor(c => { const d = new Date(c); if (mode === 'anio') d.setFullYear(d.getFullYear() + 1); else if (mode === 'semana') d.setDate(d.getDate() + 7); else d.setMonth(d.getMonth() + 1); return d; });
   const goToday = () => setCursor(new Date());
-  const goToDate = d => { if (!d) return; setCursor(new Date(d)); setMode('mes'); setSelDay(dayKey(d)); };
 
   async function savePago(asesorId, poliza, paga, obs) {
     const cleanObs = (obs || '').trim();
@@ -11139,14 +10603,14 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
     } catch (e) { /* optimista */ }
   }
 
-  const renderChip = (e, key) => {
+  const Chip = ({ e }) => {
     const st = calpagoStyle(e.pagador, e.freq);
     const hasObs = !!(e.obs && e.obs.length);
     return (
-      <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
+      <button className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
         style={{ background: st.bg, borderColor: st.bd, color: st.tx }}
         onMouseEnter={ev => { const r = ev.currentTarget.getBoundingClientRect(); setHover({ e, x: r.left, y: r.bottom }); }}
-        onMouseLeave={() => setHover(null)}
+        onMouseLeave={() => setHover(h => (h && h.e === e ? null : h))}
         onClick={ev => { ev.stopPropagation(); setHover(null); setEditing(e); }}>
         {hasObs && <span className="calpago-chip-note" style={{ background: st.bd }}></span>}{e.asegurado}
       </button>
@@ -11160,6 +10624,38 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
     : (NOMBRES_MES[cursor.getMonth()] + ' ' + year);
   const selEvs = selDay ? (byDay[selDay] || []) : [];
   const winW = (typeof window !== 'undefined') ? window.innerWidth : 1200;
+
+  const filtro = isAdmin ? (
+    <div className="calpago-fgroup" style={{ position: 'relative' }}>
+      <span className="calpago-fgroup-label">Asesores</span>
+      <button type="button" className="calpago-asesor-btn" onClick={() => setPickerOpen(o => !o)}>
+        {!selIds ? 'Todos' : (effIds.length + (effIds.length === 1 ? ' asesor' : ' asesores'))} ▾
+      </button>
+      {pickerOpen && (
+        <div className="calpago-asesor-pop" onMouseLeave={() => setPickerOpen(false)}>
+          <label className="calpago-chk" style={{ fontWeight: 700 }}>
+            <input type="checkbox" checked={!selIds} onChange={e => setSelIds(e.target.checked ? null : new Set())} />
+            Todos
+          </label>
+          <div className="calpago-asesor-list">
+            {roster.map(a => {
+              const on = !selIds || selIds.has(a.id);
+              return (
+                <label className="calpago-chk" key={a.id}>
+                  <input type="checkbox" checked={on} onChange={e => setSelIds(prev => {
+                    const base = prev ? new Set(prev) : new Set(roster.map(x => x.id));
+                    if (e.target.checked) base.add(a.id); else base.delete(a.id);
+                    return base.size === roster.length ? null : base;
+                  })} />
+                  {a.nombre}
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  ) : null;
 
   let cuerpo;
   if (loading) cuerpo = emptyBox('Cargando calendario…');
@@ -11194,7 +10690,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
               return (
                 <div key={i} className={'calpago-cell' + (cell.outOfMonth ? ' out' : '') + (isToday(cell.date) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
                   <div className="calpago-daynum">{cell.date.getDate()}</div>
-                  {evs.slice(0, MAX).map((e, j) => renderChip(e, j))}
+                  {evs.slice(0, MAX).map((e, j) => <Chip key={j} e={e} />)}
                   {evs.length > MAX && <div className="calpago-more" onClick={ev => { ev.stopPropagation(); setSelDay(k); }}>+{evs.length - MAX} más</div>}
                 </div>
               );
@@ -11213,7 +10709,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
                 return (
                   <div key={i} className={'calpago-cell' + (isToday(d) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
                     <div className="calpago-daynum">{DOW_CORTOS[i]} {d.getDate()}/{d.getMonth() + 1}</div>
-                    {evs.map((e, j) => renderChip(e, j))}
+                    {evs.map((e, j) => <Chip key={j} e={e} />)}
                     {!evs.length && <div style={{ fontSize: '0.66rem', color: '#cbd5e1', marginTop: 6 }}>—</div>}
                   </div>
                 );
@@ -11280,10 +10776,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
   return (
     <div>
       <div className="calpago-toolbar">
-        <div className="calpago-fgroup" style={{ position: 'relative' }}>
-          <input className="calpago-search" type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente o póliza…" />
-          {q && <button type="button" className="calpago-search-x" onClick={() => setQ('')}>×</button>}
-        </div>
+        {filtro}
         <div className="calpago-toggle">
           <button className={!eachPay ? 'active' : ''} onClick={() => setEachPay(false)}>Solo renovación</button>
           <button className={eachPay ? 'active' : ''} onClick={() => setEachPay(true)}>Mostrar cada pago</button>
@@ -11314,26 +10807,6 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
         </div>
       </div>
 
-      {nq && (
-        <div className="calpago-detail" style={{ marginBottom: 12 }}>
-          <div className="calpago-detail-head">
-            <div className="calpago-detail-title" style={{ textTransform: 'none' }}>Resultados de "{q}" · {searchResults.length}</div>
-            <button className="cal-nav-btn" style={{ background: '#eef2ff', color: '#3E4095', border: '1px solid #c7d2fe' }} onClick={() => setQ('')}>Limpiar</button>
-          </div>
-          {searchResults.length ? searchResults.map((e, i) => (
-            <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.date) goToDate(e.date); else setEditing(e); }}>
-              <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
-                <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')} · renueva {e.date ? e.date.toLocaleDateString('es-AR') : 'sin fecha'}</div>
-                {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
-              </div>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#3E4095' }}>{e.date ? 'Ir al calendario' : 'Editar'}</span>
-            </div>
-          )) : <div className="calpago-empty">Sin coincidencias en el libro.</div>}
-        </div>
-      )}
-
       {cuerpo}
 
       {editing && (
@@ -11347,9 +10820,8 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
           <div style={{ fontWeight: 700, color: '#1e1b4b', marginBottom: 4 }}>{hover.e.asegurado}</div>
           {isAdmin && hover.e.asesorNombre && <div className="calpago-pop-row" style={{ color: '#7C3AED', fontWeight: 600 }}>{hover.e.asesorNombre}</div>}
           <div className="calpago-pop-row">{[CALPAGO_FREQ_LABEL[hover.e.freq] || hover.e.freqRaw, hover.e.estado].filter(Boolean).join(' · ')}</div>
-          {calpagoFmtPrima(hover.e.prima) && <div className="calpago-pop-row" style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e1b4b' }}>Prima: {calpagoFmtPrima(hover.e.prima)}</div>}
-          <div className="calpago-pop-row">Vence: {hover.e.date.toLocaleDateString('es-AR')}</div>
-          <div className="calpago-pop-row">Póliza: {hover.e.poliza}</div>
+          {calpagoFmtPrima(hover.e.prima) && <div className="calpago-pop-row">Prima: {calpagoFmtPrima(hover.e.prima)}</div>}
+          <div className="calpago-pop-row">Vence: {hover.e.date.toLocaleDateString('es-AR')} · Póliza {hover.e.poliza}</div>
           <div style={{ marginTop: 6 }}>
             <span className="calpago-badge" style={calpagoBadgeStyle(hover.e)}>{hover.e.pagador ? CALPAGO_PAG[hover.e.pagador].label : 'Sin definir'}</span>
           </div>
@@ -13264,7 +12736,7 @@ function AsesoresSection() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th><th style={{ ...th, textAlign: 'center' }}>Sincronización con CRM</th>
+              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th>
             </tr></thead>
             <tbody>
               {advisors.map(a => (
@@ -13289,186 +12761,12 @@ function AsesoresSection() {
                       onBlur={e => { const v = e.target.value.trim() || null; if (v === a.advisor_name_ole) return; if (confirmOle(a.advisor_name_ole, v)) patch(a.id, { advisor_name_ole: v }); else e.target.value = a.advisor_name_ole || ''; }}
                       style={{ ...adminInpStyle, width: 220 }} />
                   </td>
-                  <td style={{ ...td, textAlign: 'center' }}>
-                    <input type="checkbox" checked={!!a.crm_sync_enabled} disabled={busy}
-                      onChange={e => patch(a.id, { crm_sync_enabled: e.target.checked })}
-                      title={a.crm_sync_enabled ? 'Habilitado — puede usar "Convertir a cliente CRM"' : 'Deshabilitado — el botón CRM le queda inhabilitado'} />
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-    </section>
-  );
-}
-
-// ── AJUSTES ADMIN: CALENDARIOS COMPARTIDOS (matriz de autorización) ──────────
-// Fila = agente DUEÑO de su calendario. Check master (izq) = su consentimiento.
-// Columnas = agentes que pueden VER ese calendario. Check [fila owner][col viewer]
-// = owner autoriza a viewer a ver su calendario (ocupado/disponible, sin detalles).
-function CalendariosCompartidosSection() {
-  const [agents, setAgents] = useState([]);
-  const [shares, setShares] = useState([]);   // [{owner_id, viewer_id}]
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  const load = async () => {
-    setLoading(true); setError(null);
-    const [{ data: profs }, { data: sh }] = await Promise.all([
-      sb.from('profiles').select('id, display_name, email, compartir_calendario')
-        .is('assistant_of_id', null).or('is_demo.eq.false,demo_active.eq.true')
-        .order('display_name', { ascending: true }),
-      sb.from('abordaje_calendar_shares').select('owner_id, viewer_id'),
-    ]);
-    setAgents(profs || []);
-    setShares(sh || []);
-    setLoading(false);
-  };
-  useEffect(() => { load(); }, []);
-
-  const shareSet = useMemo(() => new Set((shares || []).map(s => `${s.owner_id}|${s.viewer_id}`)), [shares]);
-  const shortName = (a) => (a.display_name || a.email || '?').split(/\s+/)[0];
-
-  const toggleShare = async (ownerId, viewerId) => {
-    if (ownerId === viewerId || busy) return;
-    const key = `${ownerId}|${viewerId}`;
-    const exists = shareSet.has(key);
-    setBusy(true); setError(null);
-    setShares(prev => exists
-      ? prev.filter(s => !(s.owner_id === ownerId && s.viewer_id === viewerId))
-      : [...prev, { owner_id: ownerId, viewer_id: viewerId }]);
-    try {
-      if (exists) {
-        const { error } = await sb.from('abordaje_calendar_shares').delete().eq('owner_id', ownerId).eq('viewer_id', viewerId);
-        if (error) throw error;
-      } else {
-        const { error } = await sb.from('abordaje_calendar_shares').insert({ owner_id: ownerId, viewer_id: viewerId });
-        if (error) throw error;
-      }
-    } catch (e) { setError(e.message || String(e)); await load(); }
-    finally { setBusy(false); }
-  };
-
-  const toggleMaster = async (agentId, val) => {
-    if (busy) return;
-    setBusy(true); setError(null);
-    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, compartir_calendario: val } : a));
-    try {
-      // Vía RPC SECURITY DEFINER: el update directo a profiles gatilla la recursión
-      // de la RLS (update_own_metadata). La RPC valida authz (admin o uno mismo).
-      const { error } = await sb.rpc('set_compartir_calendario', { target_id: agentId, val });
-      if (error) throw error;
-    } catch (e) { setError(e.message || String(e)); await load(); }
-    finally { setBusy(false); }
-  };
-
-  const wrap = { marginTop: 22, padding: '18px 20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14 };
-  const th = { padding: '7px 8px', fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' };
-  const td = { padding: '6px 8px', fontSize: 13, borderBottom: '1px solid #f3f4f6', textAlign: 'center' };
-  // Anchos fijos de las dos columnas ancla (para poder fijarlas a la izquierda).
-  const COMPARTE_W = 74, AGENTE_W = 168;
-  const stickTop = { position: 'sticky', top: 0, zIndex: 2, background: '#f9fafb' };            // header de nombres
-  const stickLeftHead = { ...stickTop, zIndex: 4, background: '#f3f4f6' };                       // esquina (fija arriba + izq)
-  const stickLeftCell = { position: 'sticky', zIndex: 1, background: '#fff' };                    // celdas ancla del cuerpo
-
-  return (
-    <section style={wrap}>
-      <div style={{ fontSize: 15, fontWeight: 800, color: '#1e1b4b', marginBottom: 4 }}>Calendarios compartidos</div>
-      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>
-        Cada <strong>fila</strong> es un agente (dueño de su calendario). El check <strong>"Comparte"</strong> de la izquierda
-        es su consentimiento: si está en verde participa y ve la solapa "Calendario compartido". Las <strong>columnas</strong>
-        marcan a quién <strong>autoriza a ver</strong> su calendario. En "Calendario compartido" solo se ven espacios
-        <strong> ocupado / disponible</strong> (sin título ni datos), y no se muestran los recordatorios de tareas/llamados.
-      </div>
-      {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
-      {loading ? <div style={{ fontSize: 13, color: '#9ca3af' }}>Cargando…</div> : (
-        agents.length === 0 ? <div style={{ fontSize: 13, color: '#9ca3af' }}>No hay agentes.</div> : (
-          <div style={{ overflow: 'auto', maxHeight: '62vh', border: '1px solid #f3f4f6', borderRadius: 8 }}>
-            <table style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
-              <thead>
-                <tr>
-                  <th style={{ ...th, ...stickLeftHead, left: 0, width: COMPARTE_W, minWidth: COMPARTE_W, textAlign: 'center', borderBottom: '2px solid #e5e7eb' }}>Comparte</th>
-                  <th style={{ ...th, ...stickLeftHead, left: COMPARTE_W, width: AGENTE_W, minWidth: AGENTE_W, textAlign: 'left', borderBottom: '2px solid #e5e7eb', boxShadow: '2px 0 0 #e5e7eb' }}>Agente</th>
-                  {agents.map(v => (
-                    <th key={v.id} style={{ ...th, ...stickTop, textAlign: 'center', borderBottom: '2px solid #e5e7eb' }} title={`Puede ver: ${v.display_name || v.email}`}>{shortName(v)}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {agents.map(owner => (
-                  <tr key={owner.id}>
-                    <td style={{ ...td, ...stickLeftCell, left: 0, width: COMPARTE_W, minWidth: COMPARTE_W }}>
-                      <input type="checkbox" checked={!!owner.compartir_calendario} disabled={busy}
-                        onChange={e => toggleMaster(owner.id, e.target.checked)}
-                        title={owner.compartir_calendario ? 'Comparte / participa — click para desactivar' : 'No participa — click para activar'} />
-                    </td>
-                    <td style={{ ...td, ...stickLeftCell, left: COMPARTE_W, width: AGENTE_W, minWidth: AGENTE_W, maxWidth: AGENTE_W, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontWeight: 600, color: '#1e1b4b', boxShadow: '2px 0 0 #f3f4f6' }} title={owner.display_name || owner.email}>
-                      {owner.display_name || owner.email}
-                    </td>
-                    {agents.map(viewer => (
-                      <td key={viewer.id} style={td}>
-                        {owner.id === viewer.id ? (
-                          <span style={{ color: '#d1d5db' }}>—</span>
-                        ) : (
-                          <input type="checkbox" disabled={busy || !owner.compartir_calendario}
-                            checked={shareSet.has(`${owner.id}|${viewer.id}`)}
-                            onChange={() => toggleShare(owner.id, viewer.id)}
-                            title={!owner.compartir_calendario ? `${shortName(owner)} tiene "Comparte" desactivado` : `${shortName(owner)} → ${shortName(viewer)}`} />
-                        )}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      )}
-    </section>
-  );
-}
-
-// ── AJUSTES GENERAL: toggle de consentimiento de Calendario compartido ──────
-// Para no-admins (los admin lo manejan desde la matriz). Opt-in: si está ON,
-// participa (comparte y puede ver) y le aparece la solapa "Calendario compartido".
-function CalendarioCompartidoGeneralSection({ userId }) {
-  const [enabled, setEnabled] = useState(null);   // null = cargando
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  useEffect(() => {
-    let vivo = true;
-    sb.from('profiles').select('compartir_calendario').eq('id', userId).maybeSingle()
-      .then(({ data }) => { if (vivo) setEnabled(!!data?.compartir_calendario); });
-    return () => { vivo = false; };
-  }, [userId]);
-  const toggle = async () => {
-    if (busy || enabled === null) return;
-    const val = !enabled;
-    setBusy(true); setError(null); setEnabled(val);
-    try {
-      const { error } = await sb.rpc('set_compartir_calendario', { target_id: userId, val });
-      if (error) throw error;
-    } catch (e) { setError(e.message || String(e)); setEnabled(!val); }
-    finally { setBusy(false); }
-  };
-  return (
-    <section style={adminSectionStyle}>
-      <h3 style={adminSectionTitleStyle}>Calendario compartido</h3>
-      <p style={adminSectionDescStyle}>
-        Autorizá el uso de "Calendario compartido": vas a poder ver los espacios ocupado/disponible
-        de los agentes que el admin te configuró, y ellos podrán ver los tuyos. Nunca se muestran
-        títulos ni datos de las reuniones — solo si el espacio está ocupado o libre. Si lo apagás, no participás.
-      </p>
-      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
-        <div className={`toggle-switch ${enabled ? 'on' : ''}`} onClick={toggle} role="switch" aria-checked={!!enabled} />
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
-          {enabled === null ? 'Cargando…' : enabled ? 'Activado — compartís y podés ver' : 'Desactivado'}
-        </div>
-      </div>
-      {error && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{error}</div>}
     </section>
   );
 }
@@ -14657,7 +13955,6 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
   const esAdmin = agente?.role === 'admin';
   const [showMaintenance, setShowMaintenance] = useState(false);
-  const [tab, setTab] = useState('general');
   return (
     <div style={adminOverlayStyle} onClick={onCancel}>
       <div style={adminModalStyle} onClick={e => e.stopPropagation()}
@@ -14674,21 +13971,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
           <button onClick={onCancel} style={adminCloseBtn}>Cerrar</button>
         </header>
 
-        {esAdmin && (
-          <div style={{ display: 'flex', gap: 4, padding: '0 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flex: '0 0 auto' }}>
-            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio'], ['compartidos', 'Compartidos']].map(([k, label]) => (
-              <button key={k} type="button" onClick={() => setTab(k)}
-                style={{ border: 'none', background: 'none', padding: '12px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                  color: tab === k ? '#1e1b4b' : '#9ca3af',
-                  borderBottom: tab === k ? '2px solid #4338ca' : '2px solid transparent', marginBottom: -1 }}>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {tab === 'general' && (<>
           <section style={adminSectionStyle}>
             <h3 style={adminSectionTitleStyle}>⚙ Configuración de Abordaje</h3>
             <p style={adminSectionDescStyle}>
@@ -14752,24 +14035,11 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onUnlinkOAuth={onUnlinkOAuth}
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
           />
-          {!esAdmin && currentUser?.id && (
-            <CalendarioCompartidoGeneralSection userId={currentUser.id} />
-          )}
-          </>)}
 
-          {esAdmin && tab === 'usuarios' && (<>
-            <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />
-            <DemoUserToggle />
-            <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />
-          </>)}
-
-          {esAdmin && tab === 'directorio' && (
-            <AsesoresSection />
-          )}
-
-          {esAdmin && tab === 'compartidos' && (
-            <CalendariosCompartidosSection />
-          )}
+          {esAdmin && <UsuariosSection currentUser={currentUser} onViewAs={onViewAs} />}
+          {esAdmin && <AsesoresSection />}
+          {esAdmin && <DemoUserToggle />}
+          {esAdmin && <MantenimientoSection onOpenPanel={() => setShowMaintenance(true)} />}
         </div>
       </div>
       {showMaintenance && <MaintenancePaymentsModal onClose={() => setShowMaintenance(false)} />}
@@ -15387,7 +14657,7 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -15397,7 +14667,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     compania: tarea.compania || null,
   });
   const [nuevaEntrada, setNuevaEntrada] = useState('');
-  const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
   const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -15436,28 +14705,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
-      crmClientId: crmCliente?.id || undefined,
     })).finally(() => setSaving(false));
-  };
-
-  // Persiste los cambios pendientes SIN cerrar el modal, para que al abrir el
-  // CRM la sincronización vea la gestión actualizada (ej. un comentario recién
-  // tipeado sin apretar Guardar). Reusa el mismo patch que Guardar.
-  const persistParaCrm = async () => {
-    if (!onPersist) return;
-    const built = buildObsConBitacora().trim();
-    await onPersist({
-      titulo: form.titulo.trim(),
-      columnaId: form.columnaId,
-      fechaRecordatorio: form.fechaRecordatorio || null,
-      horaRecordatorio: form.horaRecordatorio || null,
-      observacion: built,
-      compania: form.compania || null,
-    });
-    // Reflejar en el form: la entrada nueva ya quedó dentro de observacion,
-    // así un Guardar posterior no la vuelve a agregar.
-    setForm(f => ({ ...f, observacion: built }));
-    setNuevaEntrada('');
   };
 
   // Quick-date: setea fecha/hora y guarda en un solo tap.
@@ -15573,13 +14821,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
             </div>
           </div>
           {!readOnly && (
-            <CrmClientePicker
-              value={crmCliente}
-              onPick={(c) => { setCrmCliente(c); if (!form.titulo.trim() && c.full_name) upd('titulo', c.full_name); }}
-              onClear={() => setCrmCliente(null)}
-            />
-          )}
-          {!readOnly && (
             <>
               <div className="msg-shortcut-row" aria-label="Atajos de bitácora">
                 <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Mandé mensaje hoy')}>Mandé mensaje hoy</button>
@@ -15653,7 +14894,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 anchor={{ type: 'tarea', id: tarea.id, nombreSugerido: tarea.titulo, documentoSugerido: '' }}
                 label="Convertir a cliente CRM"
                 className="btn-primary"
-                onBeforeOpen={persistParaCrm}
               />
             )}
             <button type="button" className="btn-secondary" onClick={onClose}>{readOnly ? 'Cerrar' : 'Cancelar'}</button>
@@ -16941,7 +16181,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) {
