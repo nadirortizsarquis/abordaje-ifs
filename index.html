@@ -6072,6 +6072,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Contador de invitaciones pendientes de "Calendario compartido" (badge en la solapa).
   const [calCompPending, setCalCompPending] = useState(0);
   const [calCompTick, setCalCompTick] = useState(0);
+  const [calMeetingOpen, setCalMeetingOpen] = useState(null);   // id del meeting abierto desde el calendario común
   useEffect(() => {
     if (isAssistant || agente?.compartir_calendario !== true || !user?.id) { setCalCompPending(0); return; }
     let vivo = true;
@@ -7638,12 +7639,23 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onResetCalendarColors={handleResetCalendarColors}
             onMoveEvent={readOnly ? null : handleMoveEvent}
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
+            meId={user?.id}
+            meetingsTick={calCompTick}
+            onSelectMeeting={(m) => setCalMeetingOpen(m.id)}
           />
         </>
       )}
 
       {view === 'calendario_compartido' && !isAssistant && agente?.compartir_calendario === true && (
         <CalendarioCompartidoView settings={settings} meId={user?.id} onInvitesChanged={() => setCalCompTick(t => t + 1)} />
+      )}
+
+      {calMeetingOpen && (
+        <MeetingDetalleLoader
+          meetingId={calMeetingOpen} meId={user?.id}
+          onClose={() => setCalMeetingOpen(null)}
+          onChanged={() => { setCalMeetingOpen(null); setCalCompTick(t => t + 1); }}
+        />
       )}
 
       <footer className="app-footer">
@@ -10393,24 +10405,26 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
                       const soyCreador = m.creator_id === meId;
                       const pendiente = !soyCreador && inv && inv.status === 'pending';
                       const rechazado = !soyCreador && inv && inv.status === 'declined';
-                      const bordeColor = pendiente ? '#d97706' : '#1e1b4b';
+                      const outlineColor = pendiente ? '#d97706' : CAL_COLOR_MEETING.border;
                       return (
                         <div key={m.id} className="calcomp-meeting" title={m.title}
                           onClick={(ev) => { ev.stopPropagation(); setOpenMeeting(m); }}
                           style={{
                             position: 'absolute', top: yOf(s), height: Math.max(16, yOf(e) - yOf(s)),
                             left: `calc(${(lane / lanes) * 100}% + 1px)`, width: `calc(${100 / lanes}% - 2px)`,
-                            background: rechazado ? '#f8fafc' : '#eef2ffee', border: `2px ${pendiente ? 'dashed' : 'solid'} ${bordeColor}`,
-                            borderRadius: 6, zIndex: 6, cursor: 'pointer', overflow: 'hidden', padding: '2px 4px',
-                            fontSize: '0.66rem', fontWeight: 700, lineHeight: 1.15, color: '#1e1b4b',
-                            opacity: rechazado ? 0.6 : 1, boxShadow: '0 1px 3px rgba(30,27,75,0.18)',
+                            background: rechazado ? '#f8fafc' : CAL_COLOR_MEETING.bg,
+                            borderLeft: `3px solid ${CAL_COLOR_MEETING.border}`,
+                            outline: `2px ${pendiente ? 'dashed' : 'solid'} ${outlineColor}`, outlineOffset: '-1px',
+                            borderRadius: 6, zIndex: 6, cursor: 'pointer', overflow: 'hidden', padding: '2px 5px',
+                            fontSize: '0.72rem', fontWeight: 700, lineHeight: 1.2, color: CAL_COLOR_MEETING.color,
+                            opacity: rechazado ? 0.55 : 1, boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
                           }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
                             {pendiente && <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#d97706', flex: '0 0 6px' }} />}
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.title}</span>
                           </div>
-                          {(yOf(e) - yOf(s)) > 28 && (
-                            <div style={{ fontWeight: 500, color: '#4b5563', fontSize: '0.6rem' }}>
+                          {(yOf(e) - yOf(s)) > 30 && (
+                            <div style={{ fontWeight: 500, color: '#4b5563', fontSize: '0.64rem' }}>
                               {pad2(Math.floor(s / 60))}:{pad2(s % 60)}{soyCreador ? '' : ` · ${nameOf(m.creator_id)}`}
                             </div>
                           )}
@@ -10631,6 +10645,41 @@ function MeetingDetalleModal({ meeting, meId, myInvite, invitees, nameOf, onClos
         )}
       </div>
     </div>
+  );
+}
+
+// ── Loader del detalle de meeting (para abrir desde el calendario común) ──────
+// Trae el meeting + sus invitaciones + nombres, y renderiza el mismo modal de
+// detalle que la vista de Calendario compartido.
+function MeetingDetalleLoader({ meetingId, meId, onClose, onChanged }) {
+  const [meeting, setMeeting] = useState(null);
+  const [invitees, setInvitees] = useState([]);
+  const [people, setPeople] = useState({});
+  const [notFound, setNotFound] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    (async () => {
+      const { data: m } = await sb.from('abordaje_calendar_meetings').select('*').eq('id', meetingId).maybeSingle();
+      if (!vivo) return;
+      if (!m) { setNotFound(true); return; }
+      setMeeting(m);
+      const { data: iv } = await sb.from('abordaje_calendar_meeting_invites').select('*').eq('meeting_id', meetingId);
+      if (vivo) setInvitees(iv || []);
+      sharedCal('meeting_people').then(d => {
+        if (!vivo) return; const map = {}; (d.people || []).forEach(p => { map[p.id] = p.name; }); setPeople(map);
+      }).catch(() => {});
+    })();
+    return () => { vivo = false; };
+  }, [meetingId]);
+  if (notFound) { onClose && onClose(); return null; }
+  if (!meeting) return null;
+  const nameOf = (id) => people[id] || (id === meId ? 'Vos' : 'Agente');
+  return (
+    <MeetingDetalleModal
+      meeting={meeting} meId={meId}
+      myInvite={invitees.find(i => i.invitee_id === meId)} invitees={invitees} nameOf={nameOf}
+      onClose={onClose} onChanged={onChanged}
+    />
   );
 }
 
@@ -11894,6 +11943,9 @@ const CAL_COLOR_GRIS     = { color: '#374151', bg: '#e5e7eb', border: '#374151' 
 const CAL_COLOR_AZUL     = { color: '#1e40af', bg: '#dbeafe', border: '#1e40af' };
 const CAL_COLOR_AMARILLO = { color: '#a16207', bg: '#fef9c3', border: '#a16207' };
 const CAL_COLOR_VIOLETA  = { color: '#6d28d9', bg: 'rgba(124,58,237,0.14)', border: '#7c3aed' };
+// Eventos compartidos (meetings) — mismo lenguaje visual que el resto, pero con
+// un contorno completo (outline) que los identifica como reunión compartida.
+const CAL_COLOR_MEETING  = { color: '#3730a3', bg: 'rgba(67,56,202,0.13)', border: '#4338ca' };
 
 // Convierte un color HEX (#RRGGBB) en una versión clarita (bg) y oscura (text).
 function deriveColorsFromGcalHex(hex) {
@@ -11919,6 +11971,8 @@ function colorCalendarEvento(e, colorsMap, calendarColors) {
   if (overrideId && EVENT_COLOR_PALETTE[overrideId]) {
     return EVENT_COLOR_PALETTE[overrideId];
   }
+  // Eventos compartidos (meetings): color propio, gana sobre las reglas por tipo.
+  if (e?.kind === 'meeting') return CAL_COLOR_MEETING;
   // 2. Override por calendar de Google (configurado en CalendarPicker).
   //    Cada calendar puede definir un color para "agendas" (kind=agenda/prospecto)
   //    y otro para "tareas" (kind=tarea). Gana sobre las reglas automáticas
@@ -12000,10 +12054,27 @@ function formatLargeDate(d) {
 // un calendario vacío durante el round-trip completo a Google.
 const _gcalViewCache = new Map();
 
-function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings, calendarColors, onSetCalendarColor, onResetCalendarColors }) {
+function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot, gcalReloadKey, onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onMoveEvent, onSlotClick, onGcalActorIdsLoaded, onOpenSettings, calendarColors, onSetCalendarColor, onResetCalendarColors, meId, meetingsTick, onSelectMeeting }) {
   const [mode, setMode] = useState('semana'); // 'mes' | 'semana' | 'hoy' — default 'semana' de la semana actual
   const [cursor, setCursor] = useState(() => startOfWeek(new Date()));
   const [selectedDay, setSelectedDay] = useState(null);
+  // Eventos compartidos (meetings) que van a MI calendario: los que creé con
+  // "agendar en mi calendario" + aquellos a los que fui invitado y acepté.
+  const [myMeetings, setMyMeetings] = useState([]);
+  useEffect(() => {
+    if (!meId) { setMyMeetings([]); return; }
+    let vivo = true;
+    (async () => {
+      const desde = new Date(); desde.setMonth(desde.getMonth() - 2);
+      const { data: ms } = await sb.from('abordaje_calendar_meetings').select('*').gte('end_at', desde.toISOString());
+      const { data: iv } = await sb.from('abordaje_calendar_meeting_invites').select('meeting_id, status').eq('invitee_id', meId);
+      if (!vivo) return;
+      const acceptedIds = new Set((iv || []).filter(x => x.status === 'accepted').map(x => x.meeting_id));
+      const mine = (ms || []).filter(m => (m.creator_id === meId && m.creator_agenda) || acceptedIds.has(m.id));
+      setMyMeetings(mine);
+    })();
+    return () => { vivo = false; };
+  }, [meId, meetingsTick]);
   // Eventos de Google Calendar para modo piloto. Se refrescan al cambiar
   // rango o cuando el padre bumpea `gcalReloadKey` (post create/update/delete).
   const [gcalEvents, setGcalEvents] = useState([]);
@@ -12105,13 +12176,29 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     });
   }, [gcalEvents]);
 
+  // Eventos compartidos → formato interno del calendario (con contorno propio).
+  const meetingEvents = useMemo(() => (myMeetings || []).map(m => {
+    const start = new Date(m.start_at), end = new Date(m.end_at);
+    return {
+      id: 'meeting_' + m.id,
+      kind: 'meeting',
+      meetingData: m,
+      label: m.title,
+      fecha: m.start_at,
+      tipo: 'meeting',
+      observacion: m.notes || '',
+      duracionMin: Math.max(15, Math.round((end - start) / 60000)),
+      actorId: null, agenteId: m.creator_id,
+      updatedAt: m.updated_at || null,
+    };
+  }), [myMeetings]);
+
   const events = useMemo(() => {
-    if (isPilot) {
-      const filtered = (gcalEvents || []).filter(ev => !ev._gcalId || !hiddenCalendars.has(ev._gcalId));
-      return extractGcalEventsForCalendar(filtered, prospectos, tareasState?.items);
-    }
-    return extractCalendarEvents(prospectos, tareasState, agendados);
-  }, [isPilot, gcalEvents, prospectos, tareasState, agendados, hiddenCalendars]);
+    const base = isPilot
+      ? extractGcalEventsForCalendar((gcalEvents || []).filter(ev => !ev._gcalId || !hiddenCalendars.has(ev._gcalId)), prospectos, tareasState?.items)
+      : extractCalendarEvents(prospectos, tareasState, agendados);
+    return [...base, ...meetingEvents].sort((a, b) => a.fecha.localeCompare(b.fecha));
+  }, [isPilot, gcalEvents, prospectos, tareasState, agendados, hiddenCalendars, meetingEvents]);
   const eventsByKey = useMemo(() => eventsByDayKey(events), [events]);
 
   // Dispatcher: cada evento del calendario sabe a dónde abre cuando se clickea.
@@ -12124,6 +12211,10 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
     // confuso: el modal mostraría datos de OTRO evento (el actual de la tarea).
     if (e.isOrphan && onSelectOrphan) {
       onSelectOrphan(e);
+      return;
+    }
+    if (e.kind === 'meeting') {
+      if (onSelectMeeting && e.meetingData) onSelectMeeting(e.meetingData);
       return;
     }
     if (e.kind === 'tarea' && onSelectTarea) {
@@ -12141,7 +12232,7 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       if (onSelectProspectoEvent) onSelectProspectoEvent(e);
       else if (onSelectProspecto) onSelectProspecto(e.prospectoId);
     }
-  }, [onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, tareasState]);
+  }, [onSelectProspecto, onSelectProspectoEvent, onSelectTarea, onSelectAgenda, onSelectOrphan, onSelectMeeting, tareasState]);
 
   // Cuando cambia el mode, ajustar cursor a un anchor sensato
   useEffect(() => {
@@ -12829,7 +12920,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
 
   const onEventPointerDown = (e, ev) => {
     if (e.button !== 0) return;
-    if (!onMoveEvent || ev.kind === 'prospecto') {
+    if (!onMoveEvent || ev.kind === 'prospecto' || ev.kind === 'meeting') {
       // Sin handler de move o evento no-arrastrable: click directo, sin drag.
       return;
     }
@@ -12992,17 +13083,21 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                 const leftPct  = col * widthPct;
                 const isCrowded = totalCols > 1;
                 const isProspect = e.kind === 'prospecto';
+                const isMeeting = e.kind === 'meeting';
                 const isDragging = drag?.event?.id === e.id && drag?.active;
                 return (
                   <div key={e.id}
-                    className={`cal-week-event ${vencido ? 'vencido' : ''} ${isCrowded ? 'crowded' : ''} ${dIdx >= ndays - 2 ? 'tooltip-left' : ''} ${isProspect && onMoveEvent ? 'no-drag' : ''} ${isDragging ? 'dragging' : ''}`}
+                    className={`cal-week-event ${vencido ? 'vencido' : ''} ${isCrowded ? 'crowded' : ''} ${dIdx >= ndays - 2 ? 'tooltip-left' : ''} ${(isProspect || isMeeting) && onMoveEvent ? 'no-drag' : ''} ${isDragging ? 'dragging' : ''}`}
                     style={{
                       top: top, height,
                       left: `calc(${leftPct}% + 3px)`,
                       width: `calc(${widthPct}% - 6px)`,
                       background: cfg.bg,
                       borderLeftColor: cfg.border,
-                      color: cfg.color
+                      color: cfg.color,
+                      // Contorno completo que identifica a las reuniones compartidas.
+                      outline: isMeeting ? `2px solid ${cfg.border}` : undefined,
+                      outlineOffset: isMeeting ? '-1px' : undefined,
                     }}
                     onPointerDown={(pe) => onEventPointerDown(pe, e)}
                     onContextMenu={onCtxMenu}
@@ -13012,8 +13107,8 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
                       // re-abrirlo (justDraggedRef se setea por 300ms tras un tap).
                       if (justDraggedRef.current) return;
                       // Solo dispara click directo si NO está el drag activo
-                      // (i.e. evento no arrastrable como prospect, o no hay onMoveEvent).
-                      if (!onMoveEvent || isProspect) onSelectEvent(e);
+                      // (i.e. evento no arrastrable como prospect/meeting, o no hay onMoveEvent).
+                      if (!onMoveEvent || isProspect || isMeeting) onSelectEvent(e);
                     }}
                     title={isProspect && onMoveEvent ? 'Cita agendada desde prospecto — editala desde su ficha' : undefined}
                   >
