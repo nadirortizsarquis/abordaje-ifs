@@ -16081,7 +16081,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
         <div className="modal-body sectioned">
           {/* ── Sección: Tarea ── */}
           <div className="modal-section">
-            <h4>Tarea</h4>
             <div className="field">
               <label>Título</label>
               <input type="text" value={form.titulo} readOnly={readOnly}
@@ -16092,7 +16091,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
 
           {/* ── Sección: Recordatorio ── */}
           <div className="modal-section">
-            <h4>Recordatorio</h4>
             {!readOnly && (
               <>
                 <div className="quick-date-title">Recordatorio rápido</div>
@@ -16118,7 +16116,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 </div>
               </>
             )}
-            <div className="field-row" style={{ gridTemplateColumns: '150px 1fr' }}>
+            <div className="field-row" style={{ gridTemplateColumns: '150px 130px 1fr' }}>
               <div className="field">
                 <label>Fecha</label>
                 <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
@@ -16133,18 +16131,17 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                     onChange={(v) => upd('horaRecordatorio', v)} />
                 )}
               </div>
-            </div>
-            <div className="field">
-              <label>Columna</label>
-              <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
-                {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
-              </select>
+              <div className="field">
+                <label>Columna</label>
+                <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
+                  {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
           {/* ── Sección: Seguimiento (CRM + bitácora) ── */}
           <div className="modal-section">
-            <h4>Seguimiento</h4>
             {!readOnly && (
               <CrmClientePicker
                 value={crmCliente}
