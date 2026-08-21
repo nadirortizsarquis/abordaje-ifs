@@ -1,6 +1,6 @@
 # Planificador de Abordaje IFS — Estado actual
 
-Estado vigente al 2026-06-11. Para la historia completa del proyecto y las
+Estado vigente al 2026-08-21. Para la historia completa del proyecto y las
 fases de migración ver `CHANGELOG.md`.
 
 ## Stack
@@ -53,6 +53,18 @@ fases de migración ver `CHANGELOG.md`.
   (en la carpeta del proyecto, sin trackear). Botón "Descargar PDF" en el
   modal (`exportarRelevamientoPDF`) — **v1 funcional, Nadir quiere pulir
   el diseño del PDF más adelante** (pendiente declarado 2026-06-12).
+- **Calendarios compartidos (2026-08-21).** Coordinación de reuniones entre
+  asesores sin exponer datos. Opt-in por `profiles.compartir_calendario`
+  (toggle propio en Ajustes → General; matriz admin owner→viewer en Ajustes →
+  Compartidos). Solapa "Calendario compartido" (`CalendarioCompartidoView`):
+  grilla con el formato del calendario normal, modo Ocupado (bloques anónimos
+  por color, sin título) / Disponible (verde = todos libres). Eventos
+  compartidos con invitaciones (viven en Abordaje, no tocan Google): crear
+  desde la grilla o invitar desde los modales de agenda / cita de prospecto
+  (solo tipo agendado) vía `MeetingInviteSection`. Identificador = contorno
+  indigo. Aceptar/rechazar en el detalle; badge (N) en la solapa; al aceptar
+  aparece en el calendario normal (render-only, sin duplicar el ocupado).
+  Modal de tarea reestilado (más ancho + secciones tipo ficha de prospecto).
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
@@ -80,6 +92,7 @@ detalle en `supabase/README.md`.
 | `delete-user` | v8 | Baja de usuarios (megaadmin only). |
 | `update-user-email` | v6 | Cambio de email (admin). Guard: solo el megaadmin puede cambiar el email de otro admin. |
 | `update-user-password` | v8 | Cambio de password (admin). Guard: solo el megaadmin puede cambiar el password de otro admin. |
+| `shared-calendar` | v2 | Calendario compartido. Ops `owners` / `busy` (ocupados anonimizados, sin título) / `meeting_people` (nombres de participantes). Exige `compartir_calendario` ON. |
 
 Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 
@@ -103,6 +116,11 @@ Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
   agregados 2026-05-21)
 - `abordaje_agendados` (legacy, solo non-piloto)
 - `abordaje_event_colors` (overrides visuales del calendar)
+- `abordaje_calendar_shares` (matriz owner→viewer del calendario compartido)
+  + `profiles.compartir_calendario` + RPC `set_compartir_calendario`
+- `abordaje_calendar_meetings` + `abordaje_calendar_meeting_invites`
+  (eventos compartidos + invitaciones; `source_ref` liga el meeting espejo al
+  evento origen; helpers `can_see_meeting`/`is_meeting_creator`/`is_meeting_invitee`)
 - ~~`calendar_sync_watches`~~ (dropeada 2026-05-21, era legacy del refactor
   viejo y no se usaba en ninguna parte)
 
