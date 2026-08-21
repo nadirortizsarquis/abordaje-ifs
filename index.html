@@ -16088,12 +16088,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 onChange={e => upd('titulo', e.target.value)}
                 placeholder="Ej: Cotización Pérez, Llamar a Juan" />
             </div>
-            <div className="field">
-              <label>Columna</label>
-              <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
-                {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
-              </select>
-            </div>
           </div>
 
           {/* ── Sección: Recordatorio ── */}
@@ -16124,7 +16118,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 </div>
               </>
             )}
-            <div className="field-row">
+            <div className="field-row" style={{ gridTemplateColumns: '150px 1fr' }}>
               <div className="field">
                 <label>Fecha</label>
                 <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
@@ -16139,6 +16133,12 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                     onChange={(v) => upd('horaRecordatorio', v)} />
                 )}
               </div>
+            </div>
+            <div className="field">
+              <label>Columna</label>
+              <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
+                {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
+              </select>
             </div>
           </div>
 
