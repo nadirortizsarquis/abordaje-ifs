@@ -426,6 +426,24 @@
   }
   .modal-footer > div { flex-wrap: wrap; }
 
+  /* ── MODAL EN SECCIONES (estética tipo ficha de prospecto) ── */
+  /* El body deja de tener padding propio: cada .modal-section aporta el suyo
+     y se separan con un borde, igual que las .panel-section del prospecto. */
+  .modal-body.sectioned { padding: 0; }
+  .modal-section {
+    padding: 20px 28px;
+    border-bottom: 1px solid var(--borde);
+  }
+  .modal-section:last-child { border-bottom: none; }
+  .modal-section > h4 {
+    font-size: 0.74rem;
+    font-weight: 700;
+    color: var(--texto-suave);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 14px;
+  }
+
   /* ── BOTONES RÁPIDOS DE FECHA (TareaModal) ── */
   .quick-date-title {
     font-size: 0.72rem;
@@ -16054,130 +16072,142 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form className="modal" role="dialog" aria-modal="true" aria-labelledby="tarea-modal-title"
+        style={{ maxWidth: 680 }}
         onSubmit={(e) => { e.preventDefault(); if (!readOnly) guardar(); }}>
         <div className="modal-header">
           <h3 id="tarea-modal-title">{readOnly ? 'Detalle de tarea' : 'Editar tarea'}</h3>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
-        <div className="modal-body">
-          {!readOnly && (
-            <>
-              <div className="quick-date-title">Recordatorio rápido</div>
-              <div className="quick-date-row" aria-label="Recordatorio rápido">
-                <button type="button" className="btn-quick-date" onClick={quickHoy}
-                  title="Recordatorio hoy en ~3 horas">
-                  Hoy<small>en 3 hs</small>
-                </button>
-                <button type="button" className="btn-quick-date" onClick={quickManana}
-                  title="Recordatorio mañana 9:00">
-                  Mañana<small>9:00</small>
-                </button>
-                <button type="button" className="btn-quick-date" onClick={quickProxSemana}
-                  title="Recordatorio próximo lunes 9:00">
-                  Próx semana<small>lun 9:00</small>
-                </button>
-                {form.fechaRecordatorio && (
-                  <button type="button" className="btn-quick-date muted" onClick={quickQuitar}
-                    title="Quitar la fecha, sacar del calendar — la tarea sigue en el Kanban">
-                    Quitar<small>recordatorio</small>
-                  </button>
-                )}
-              </div>
-            </>
-          )}
-          <div className="field">
-            <label>Título</label>
-            <input type="text" value={form.titulo} readOnly={readOnly}
-              onChange={e => upd('titulo', e.target.value)}
-              placeholder="Ej: Cotización Pérez, Llamar a Juan" />
-          </div>
-          <div className="field-row field-row-3">
+        <div className="modal-body sectioned">
+          {/* ── Sección: Tarea ── */}
+          <div className="modal-section">
+            <h4>Tarea</h4>
+            <div className="field">
+              <label>Título</label>
+              <input type="text" value={form.titulo} readOnly={readOnly}
+                onChange={e => upd('titulo', e.target.value)}
+                placeholder="Ej: Cotización Pérez, Llamar a Juan" />
+            </div>
             <div className="field">
               <label>Columna</label>
               <select value={form.columnaId} disabled={readOnly} onChange={e => upd('columnaId', e.target.value)}>
                 {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
               </select>
             </div>
-            <div className="field">
-              <label>Fecha</label>
-              <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
-                onChange={e => upd('fechaRecordatorio', e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Hora</label>
-              {readOnly || !form.fechaRecordatorio ? (
-                <input type="time" value={form.horaRecordatorio || ''} readOnly disabled />
-              ) : (
-                <HoraTexto value={form.horaRecordatorio || ''}
-                  onChange={(v) => upd('horaRecordatorio', v)} />
-              )}
-            </div>
+            {!readOnly && (
+              <div className="field">
+                <label>Compañía (opcional)</label>
+                <div className="compania-chips">
+                  {COMPANIAS.map(c => (
+                    <label key={c.id}
+                      className={`compania-chip ${form.compania === c.id ? 'selected' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={form.compania === c.id}
+                        onChange={() => upd('compania', form.compania === c.id ? null : c.id)}
+                      />
+                      <span className="compania-chip-label">{c.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-          {!readOnly && (
-            <CrmClientePicker
-              value={crmCliente}
-              onPick={(c) => { setCrmCliente(c); if (!form.titulo.trim() && c.full_name) upd('titulo', c.full_name); }}
-              onClear={() => setCrmCliente(null)}
-            />
-          )}
-          {!readOnly && (
-            <>
-              <div className="msg-shortcut-row" aria-label="Atajos de bitácora">
-                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Mandé mensaje hoy')}>Mandé mensaje hoy</button>
-                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Lo llamé hoy')}>Lo llamé hoy</button>
-                <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Envié propuesta/mail')}>Envié propuesta/mail</button>
+
+          {/* ── Sección: Recordatorio ── */}
+          <div className="modal-section">
+            <h4>Recordatorio</h4>
+            {!readOnly && (
+              <>
+                <div className="quick-date-title">Recordatorio rápido</div>
+                <div className="quick-date-row" aria-label="Recordatorio rápido">
+                  <button type="button" className="btn-quick-date" onClick={quickHoy}
+                    title="Recordatorio hoy en ~3 horas">
+                    Hoy<small>en 3 hs</small>
+                  </button>
+                  <button type="button" className="btn-quick-date" onClick={quickManana}
+                    title="Recordatorio mañana 9:00">
+                    Mañana<small>9:00</small>
+                  </button>
+                  <button type="button" className="btn-quick-date" onClick={quickProxSemana}
+                    title="Recordatorio próximo lunes 9:00">
+                    Próx semana<small>lun 9:00</small>
+                  </button>
+                  {form.fechaRecordatorio && (
+                    <button type="button" className="btn-quick-date muted" onClick={quickQuitar}
+                      title="Quitar la fecha, sacar del calendar — la tarea sigue en el Kanban">
+                      Quitar<small>recordatorio</small>
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            <div className="field-row">
+              <div className="field">
+                <label>Fecha</label>
+                <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
+                  onChange={e => upd('fechaRecordatorio', e.target.value)} />
               </div>
               <div className="field">
-                <label>Nueva entrada de bitácora <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.66rem'}}>(Enter guarda · Shift+Enter línea nueva)</span></label>
-                <textarea value={nuevaEntrada} autoFocus={!readOnly}
-                  onChange={e => setNuevaEntrada(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-                      e.preventDefault();
-                      guardar();
-                    }
-                  }}
-                  placeholder="Al guardar se agrega arriba con fecha y hora..."
-                  rows={3} />
-              </div>
-            </>
-          )}
-          {form.observacion && (
-            <div className="field">
-              <label>Bitácora {!readOnly && <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(editable — podés corregir entradas anteriores)</span>}</label>
-              <textarea className="bitacora-view" value={form.observacion}
-                readOnly={readOnly}
-                onChange={e => upd('observacion', e.target.value)}
-                rows={Math.min(10, Math.max(4, form.observacion.split('\n').length))} />
-            </div>
-          )}
-          {/* Selector de compañía: grid de 5 chips (radio behavior, solo uno
-              tildado). Visible siempre dentro del modal — alternativa al
-              click derecho que solo funciona en desktop. */}
-          {!readOnly && (
-            <div className="field">
-              <label>Compañía (opcional)</label>
-              <div className="compania-chips">
-                {COMPANIAS.map(c => (
-                  <label key={c.id}
-                    className={`compania-chip ${form.compania === c.id ? 'selected' : ''}`}>
-                    <input
-                      type="checkbox"
-                      checked={form.compania === c.id}
-                      onChange={() => upd('compania', form.compania === c.id ? null : c.id)}
-                    />
-                    <span className="compania-chip-label">{c.label}</span>
-                  </label>
-                ))}
+                <label>Hora</label>
+                {readOnly || !form.fechaRecordatorio ? (
+                  <input type="time" value={form.horaRecordatorio || ''} readOnly disabled />
+                ) : (
+                  <HoraTexto value={form.horaRecordatorio || ''}
+                    onChange={(v) => upd('horaRecordatorio', v)} />
+                )}
               </div>
             </div>
-          )}
-          {/* Acciones secundarias al fondo del body (no en el footer sticky):
-              Eliminar y Archivar son acciones destructivas o de bajo uso.
-              Las primarias (Cancelar/Convertir/Guardar) quedan siempre
-              visibles en el footer sticky abajo. */}
+          </div>
+
+          {/* ── Sección: Seguimiento (CRM + bitácora) ── */}
+          <div className="modal-section">
+            <h4>Seguimiento</h4>
+            {!readOnly && (
+              <CrmClientePicker
+                value={crmCliente}
+                onPick={(c) => { setCrmCliente(c); if (!form.titulo.trim() && c.full_name) upd('titulo', c.full_name); }}
+                onClear={() => setCrmCliente(null)}
+              />
+            )}
+            {!readOnly && (
+              <>
+                <div className="msg-shortcut-row" aria-label="Atajos de bitácora">
+                  <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Mandé mensaje hoy')}>Mandé mensaje hoy</button>
+                  <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Lo llamé hoy')}>Lo llamé hoy</button>
+                  <button type="button" className="btn-msg-shortcut" onClick={() => agregarAtajo('Envié propuesta/mail')}>Envié propuesta/mail</button>
+                </div>
+                <div className="field">
+                  <label>Nueva entrada de bitácora <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.66rem'}}>(Enter guarda · Shift+Enter línea nueva)</span></label>
+                  <textarea value={nuevaEntrada} autoFocus={!readOnly}
+                    onChange={e => setNuevaEntrada(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+                        e.preventDefault();
+                        guardar();
+                      }
+                    }}
+                    placeholder="Al guardar se agrega arriba con fecha y hora..."
+                    rows={3} />
+                </div>
+              </>
+            )}
+            {form.observacion ? (
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Bitácora {!readOnly && <span style={{fontWeight:400, color:'var(--texto-suave)', fontSize:'0.72rem'}}>(editable — podés corregir entradas anteriores)</span>}</label>
+                <textarea className="bitacora-view" value={form.observacion}
+                  readOnly={readOnly}
+                  onChange={e => upd('observacion', e.target.value)}
+                  rows={Math.min(10, Math.max(4, form.observacion.split('\n').length))} />
+              </div>
+            ) : (readOnly && (
+              <div style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>Sin bitácora registrada.</div>
+            ))}
+          </div>
+
+          {/* ── Acciones secundarias (Eliminar / Archivar) ── */}
           {!readOnly && (
-            <div className="field" style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--borde)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div className="modal-section" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>
               {onArchive && (
                 <button type="button" className="btn-secondary" onClick={onArchive}>
