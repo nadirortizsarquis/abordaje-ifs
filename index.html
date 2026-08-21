@@ -13438,12 +13438,25 @@ function CalendarioCompartidoGeneralSection({ userId }) {
   const [enabled, setEnabled] = useState(null);   // null = cargando
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [owners, setOwners] = useState(null);     // null = sin cargar; [] = ninguno
+  const [ownersLoading, setOwnersLoading] = useState(false);
   useEffect(() => {
     let vivo = true;
     sb.from('profiles').select('compartir_calendario').eq('id', userId).maybeSingle()
       .then(({ data }) => { if (vivo) setEnabled(!!data?.compartir_calendario); });
     return () => { vivo = false; };
   }, [userId]);
+  // Lista read-only de a quiénes puede ver (config del admin). Solo si participa:
+  // la edge function exige el flag propio, si no devuelve 403.
+  useEffect(() => {
+    if (enabled !== true) { setOwners(null); return; }
+    let vivo = true; setOwnersLoading(true);
+    sharedCal('owners')
+      .then(d => { if (vivo) setOwners(d.owners || []); })
+      .catch(() => { if (vivo) setOwners([]); })
+      .finally(() => { if (vivo) setOwnersLoading(false); });
+    return () => { vivo = false; };
+  }, [enabled]);
   const toggle = async () => {
     if (busy || enabled === null) return;
     const val = !enabled;
@@ -13469,6 +13482,29 @@ function CalendarioCompartidoGeneralSection({ userId }) {
         </div>
       </div>
       {error && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{error}</div>}
+      {enabled === true && (
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid #f3f4f6' }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+            Podés ver el calendario de
+          </div>
+          {ownersLoading ? (
+            <div style={{ fontSize: 13, color: '#9ca3af' }}>Cargando…</div>
+          ) : (owners && owners.length) ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {owners.map(o => (
+                <span key={o.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: '#eef2ff', border: '1px solid #e0e7ff', borderRadius: 999, padding: '4px 12px', fontSize: 13, fontWeight: 600, color: '#3730a3' }}>
+                  {o.name}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: '#9ca3af', lineHeight: 1.5 }}>
+              Todavía no hay agentes configurados para que veas su calendario. El admin lo asigna desde Ajustes → Compartidos.
+            </div>
+          )}
+          <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 8 }}>Lo configura el administrador.</div>
+        </div>
+      )}
     </section>
   );
 }
