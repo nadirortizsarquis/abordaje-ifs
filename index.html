@@ -16094,24 +16094,6 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
               </select>
             </div>
-            {!readOnly && (
-              <div className="field">
-                <label>Compañía (opcional)</label>
-                <div className="compania-chips">
-                  {COMPANIAS.map(c => (
-                    <label key={c.id}
-                      className={`compania-chip ${form.compania === c.id ? 'selected' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={form.compania === c.id}
-                        onChange={() => upd('compania', form.compania === c.id ? null : c.id)}
-                      />
-                      <span className="compania-chip-label">{c.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           {/* ── Sección: Recordatorio ── */}
