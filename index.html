@@ -7684,6 +7684,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           slot={nuevaAgendaSlot}
           onCancel={() => setNuevaAgendaSlot(null)}
           onSave={(form) => handleSaveAgenda(nuevaAgendaSlot, form)}
+          inviteMeId={!isAssistant && agente?.compartir_calendario === true ? user?.id : null}
         />
       )}
 
@@ -7697,6 +7698,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onCancel={() => setAgendaEditando(null)}
             onSave={(patch) => handleUpdateAgenda(agendaId, patch, gcalCalId)}
             onDelete={() => handleRequestDeleteAgenda(agendaEditando, agendaId, gcalCalId)}
+            inviteMeId={!isAssistant && agente?.compartir_calendario === true ? user?.id : null}
           />
         );
       })()}
@@ -10680,6 +10682,104 @@ function MeetingDetalleLoader({ meetingId, meId, onClose, onChanged }) {
       myInvite={invitees.find(i => i.invitee_id === meId)} invitees={invitees} nameOf={nameOf}
       onClose={onClose} onChanged={onChanged}
     />
+  );
+}
+
+// ── Sección "Invitar a calendario compartido" (Módulo 4) ──────────────────────
+// Se embebe en los modales del calendario común (agenda nueva/editar, etc.).
+// Crea/actualiza un meeting espejo (creator_agenda=false: el evento origen ya
+// cubre el calendario del creador) + sus invitaciones. Idempotente por
+// source_ref cuando se lo pasan (evento ya existente). Vive en Abordaje: no
+// toca Google. Si el usuario no participa del calendario compartido, no renderiza.
+function MeetingInviteSection({ meId, sourceRef, title, startAt, endAt }) {
+  const [owners, setOwners] = useState(null);
+  const [invited, setInvited] = useState(() => new Set());
+  const [savedInvited, setSavedInvited] = useState(() => new Set());
+  const [meetingId, setMeetingId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    if (!meId) { setOwners([]); return; }
+    let vivo = true;
+    sharedCal('owners').then(d => { if (vivo) setOwners(d.owners || []); }).catch(() => { if (vivo) setOwners([]); });
+    if (sourceRef && meId) {
+      (async () => {
+        const { data: m } = await sb.from('abordaje_calendar_meetings').select('id').eq('creator_id', meId).eq('source_ref', sourceRef).maybeSingle();
+        if (!vivo || !m) return;
+        setMeetingId(m.id);
+        const { data: iv } = await sb.from('abordaje_calendar_meeting_invites').select('invitee_id').eq('meeting_id', m.id);
+        if (!vivo) return;
+        const s = new Set((iv || []).map(x => x.invitee_id));
+        setInvited(s); setSavedInvited(new Set(s));
+      })();
+    }
+    return () => { vivo = false; };
+  }, [sourceRef, meId]);
+
+  if (!owners || owners.length === 0) return null;
+
+  const toggle = (id) => { setSaved(false); setInvited(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; }); };
+  const setsEqual = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
+  const dirty = !setsEqual(invited, savedInvited);
+
+  const guardar = async () => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try {
+      let mId = meetingId;
+      const payload = { title: (title || '').trim() || 'Evento', start_at: startAt, end_at: endAt, creator_agenda: false };
+      if (!mId) {
+        const ins = { creator_id: meId, ...payload };
+        if (sourceRef) ins.source_ref = sourceRef;
+        const { data: m, error } = await sb.from('abordaje_calendar_meetings').insert(ins).select('id').single();
+        if (error) throw error; mId = m.id; setMeetingId(mId);
+      } else {
+        const { error } = await sb.from('abordaje_calendar_meetings').update(payload).eq('id', mId);
+        if (error) throw error;
+      }
+      const toAdd = [...invited].filter(id => !savedInvited.has(id));
+      const toRemove = [...savedInvited].filter(id => !invited.has(id));
+      if (toAdd.length) {
+        const { error } = await sb.from('abordaje_calendar_meeting_invites').insert(toAdd.map(invitee_id => ({ meeting_id: mId, invitee_id })));
+        if (error) throw error;
+      }
+      if (toRemove.length) {
+        const { error } = await sb.from('abordaje_calendar_meeting_invites').delete().eq('meeting_id', mId).in('invitee_id', toRemove);
+        if (error) throw error;
+      }
+      setSavedInvited(new Set(invited)); setSaved(true);
+    } catch (e) { setError(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  return (
+    <div className="field" style={{ marginTop: 8, paddingTop: 16, borderTop: '1px dashed var(--borde)' }}>
+      <label style={{ display: 'block', marginBottom: 6 }}>Invitar a calendario compartido</label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+        {owners.map(o => {
+          const on = invited.has(o.id);
+          return (
+            <button type="button" key={o.id} onClick={() => toggle(o.id)}
+              style={{ border: `1.5px solid ${on ? '#4338ca' : 'var(--borde)'}`, background: on ? '#eef2ff' : '#fff', color: on ? '#3730a3' : 'var(--texto)',
+                borderRadius: 999, padding: '5px 12px', fontSize: 12.5, fontWeight: 600, cursor: 'pointer' }}>
+              {on ? '✓ ' : ''}{o.name}
+            </button>
+          );
+        })}
+      </div>
+      {error && <div className="field-error" style={{ marginTop: 6 }}>{error}</div>}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9 }}>
+        <button type="button" className="btn-secondary" onClick={guardar} disabled={busy || !dirty}>
+          {busy ? 'Guardando…' : (meetingId ? 'Actualizar invitaciones' : 'Enviar invitaciones')}
+        </button>
+        {saved && !dirty && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>✓ Invitaciones guardadas</span>}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--texto-suave)', marginTop: 6, lineHeight: 1.4 }}>
+        Les llega una invitación en "Calendario compartido" (no toca Google). Al aceptar, el evento aparece en su calendario con contorno.
+      </div>
+    </div>
   );
 }
 
@@ -16905,7 +17005,7 @@ function SlotChooserModal({ slot, onCancel, onAgenda, onTarea }) {
 // Click sobre un evento del calendar que es una "Nueva agenda" (sin prospect).
 // Permite cambiar fecha/hora/título/observación + Eliminar. El sync a Google
 // Calendar se dispara automáticamente desde storage.updateAgendado/deleteAgendado.
-function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
+function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete, inviteMeId }) {
   // agenda puede venir en dos formatos:
   //   - modo piloto: { googleEvent: <calendar.event> } — la fuente es Google.
   //   - non-piloto: { id, fecha, nota } — la fuente es abordaje_agendados.
@@ -16995,6 +17095,16 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
               />
             </div>
           )}
+          {inviteMeId && (isGoogle ? agenda.googleEvent?.id : agenda.id) && (() => {
+            const [y, m, d] = fecha.split('-').map(Number);
+            const [hh, mm] = hora.split(':').map(Number);
+            const st = new Date(y || 2026, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+            const sourceRef = isGoogle ? `gcal:${agenda.googleEvent.id}` : `agenda:${agenda.id}`;
+            return (
+              <MeetingInviteSection meId={inviteMeId} sourceRef={sourceRef}
+                title={titulo} startAt={st.toISOString()} endAt={new Date(st.getTime() + 60 * 60000).toISOString()} />
+            );
+          })()}
         </div>
         <div className="modal-footer" style={{ justifyContent: readOnly ? 'flex-end' : 'space-between' }}>
           {!readOnly && <button type="button" className="btn-danger" onClick={onDelete}>Eliminar</button>}
@@ -17012,7 +17122,7 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete }) {
 // Form simple. Por defecto crea sólo un agendado standalone (sin prospect).
 // Si el user tilda "Vincular a un prospecto nuevo", pide el nombre y se crea
 // el prospect + un primer contacto agendado para ese horario.
-function NuevaAgendaModal({ slot, onCancel, onSave }) {
+function NuevaAgendaModal({ slot, onCancel, onSave, inviteMeId }) {
   const [titulo, setTitulo] = useState('');
   const [observacion, setObservacion] = useState('');
   const [crearProspect, setCrearProspect] = useState(false);
@@ -17092,6 +17202,15 @@ function NuevaAgendaModal({ slot, onCancel, onSave }) {
             </div>
           )}
           {err && <div className="field-error" style={{ marginTop: 8 }}>{err}</div>}
+          {inviteMeId && (() => {
+            const [y, m, d] = fecha.split('-').map(Number);
+            const [hh, mm] = (hora || '').split(':').map(Number);
+            const st = new Date(y || 2026, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
+            return (
+              <MeetingInviteSection meId={inviteMeId} sourceRef={null}
+                title={titulo} startAt={st.toISOString()} endAt={new Date(st.getTime() + 60 * 60000).toISOString()} />
+            );
+          })()}
         </div>
         <div className="modal-footer">
           <button type="button" className="btn-secondary" onClick={onCancel} disabled={submitting}>Cancelar</button>
