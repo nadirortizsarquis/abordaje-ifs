@@ -13089,6 +13089,168 @@ function AsesoresSection() {
   );
 }
 
+// ── AJUSTES ADMIN: CALENDARIOS COMPARTIDOS (matriz de autorización) ──────────
+// Fila = agente DUEÑO de su calendario. Check master (izq) = su consentimiento.
+// Columnas = agentes que pueden VER ese calendario. Check [fila owner][col viewer]
+// = owner autoriza a viewer a ver su calendario (ocupado/disponible, sin detalles).
+function CalendariosCompartidosSection() {
+  const [agents, setAgents] = useState([]);
+  const [shares, setShares] = useState([]);   // [{owner_id, viewer_id}]
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = async () => {
+    setLoading(true); setError(null);
+    const [{ data: profs }, { data: sh }] = await Promise.all([
+      sb.from('profiles').select('id, display_name, email, compartir_calendario')
+        .is('assistant_of_id', null).or('is_demo.eq.false,demo_active.eq.true')
+        .order('display_name', { ascending: true }),
+      sb.from('abordaje_calendar_shares').select('owner_id, viewer_id'),
+    ]);
+    setAgents(profs || []);
+    setShares(sh || []);
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+
+  const shareSet = useMemo(() => new Set((shares || []).map(s => `${s.owner_id}|${s.viewer_id}`)), [shares]);
+  const shortName = (a) => (a.display_name || a.email || '?').split(/\s+/)[0];
+
+  const toggleShare = async (ownerId, viewerId) => {
+    if (ownerId === viewerId || busy) return;
+    const key = `${ownerId}|${viewerId}`;
+    const exists = shareSet.has(key);
+    setBusy(true); setError(null);
+    setShares(prev => exists
+      ? prev.filter(s => !(s.owner_id === ownerId && s.viewer_id === viewerId))
+      : [...prev, { owner_id: ownerId, viewer_id: viewerId }]);
+    try {
+      if (exists) {
+        const { error } = await sb.from('abordaje_calendar_shares').delete().eq('owner_id', ownerId).eq('viewer_id', viewerId);
+        if (error) throw error;
+      } else {
+        const { error } = await sb.from('abordaje_calendar_shares').insert({ owner_id: ownerId, viewer_id: viewerId });
+        if (error) throw error;
+      }
+    } catch (e) { setError(e.message || String(e)); await load(); }
+    finally { setBusy(false); }
+  };
+
+  const toggleMaster = async (agentId, val) => {
+    if (busy) return;
+    setBusy(true); setError(null);
+    setAgents(prev => prev.map(a => a.id === agentId ? { ...a, compartir_calendario: val } : a));
+    try {
+      const { error } = await sb.from('profiles').update({ compartir_calendario: val }).eq('id', agentId);
+      if (error) throw error;
+    } catch (e) { setError(e.message || String(e)); await load(); }
+    finally { setBusy(false); }
+  };
+
+  const wrap = { marginTop: 22, padding: '18px 20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14 };
+  const th = { padding: '7px 8px', fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' };
+  const td = { padding: '6px 8px', fontSize: 13, borderBottom: '1px solid #f3f4f6', textAlign: 'center' };
+
+  return (
+    <section style={wrap}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#1e1b4b', marginBottom: 4 }}>Calendarios compartidos</div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 14, lineHeight: 1.5 }}>
+        Cada <strong>fila</strong> es un agente (dueño de su calendario). El check <strong>"Comparte"</strong> de la izquierda
+        es su consentimiento: si está en verde participa y ve la solapa "Calendario compartido". Las <strong>columnas</strong>
+        marcan a quién <strong>autoriza a ver</strong> su calendario. En "Calendario compartido" solo se ven espacios
+        <strong> ocupado / disponible</strong> (sin título ni datos), y no se muestran los recordatorios de tareas/llamados.
+      </div>
+      {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+      {loading ? <div style={{ fontSize: 13, color: '#9ca3af' }}>Cargando…</div> : (
+        agents.length === 0 ? <div style={{ fontSize: 13, color: '#9ca3af' }}>No hay agentes.</div> : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse' }}>
+              <thead>
+                <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                  <th style={{ ...th, textAlign: 'center' }}>Comparte</th>
+                  <th style={{ ...th, textAlign: 'left' }}>Agente</th>
+                  {agents.map(v => (
+                    <th key={v.id} style={{ ...th, textAlign: 'center' }} title={`Puede ver: ${v.display_name || v.email}`}>{shortName(v)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {agents.map(owner => (
+                  <tr key={owner.id}>
+                    <td style={{ ...td }}>
+                      <input type="checkbox" checked={!!owner.compartir_calendario} disabled={busy}
+                        onChange={e => toggleMaster(owner.id, e.target.checked)}
+                        title={owner.compartir_calendario ? 'Comparte / participa — click para desactivar' : 'No participa — click para activar'} />
+                    </td>
+                    <td style={{ ...td, textAlign: 'left', whiteSpace: 'nowrap', fontWeight: 600, color: '#1e1b4b' }}>
+                      {owner.display_name || owner.email}
+                    </td>
+                    {agents.map(viewer => (
+                      <td key={viewer.id} style={td}>
+                        {owner.id === viewer.id ? (
+                          <span style={{ color: '#d1d5db' }}>—</span>
+                        ) : (
+                          <input type="checkbox" disabled={busy || !owner.compartir_calendario}
+                            checked={shareSet.has(`${owner.id}|${viewer.id}`)}
+                            onChange={() => toggleShare(owner.id, viewer.id)}
+                            title={!owner.compartir_calendario ? `${shortName(owner)} tiene "Comparte" desactivado` : `${shortName(owner)} → ${shortName(viewer)}`} />
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
+// ── AJUSTES GENERAL: toggle de consentimiento de Calendario compartido ──────
+// Para no-admins (los admin lo manejan desde la matriz). Opt-in: si está ON,
+// participa (comparte y puede ver) y le aparece la solapa "Calendario compartido".
+function CalendarioCompartidoGeneralSection({ userId }) {
+  const [enabled, setEnabled] = useState(null);   // null = cargando
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+  useEffect(() => {
+    let vivo = true;
+    sb.from('profiles').select('compartir_calendario').eq('id', userId).maybeSingle()
+      .then(({ data }) => { if (vivo) setEnabled(!!data?.compartir_calendario); });
+    return () => { vivo = false; };
+  }, [userId]);
+  const toggle = async () => {
+    if (busy || enabled === null) return;
+    const val = !enabled;
+    setBusy(true); setError(null); setEnabled(val);
+    try {
+      const { error } = await sb.from('profiles').update({ compartir_calendario: val }).eq('id', userId);
+      if (error) throw error;
+    } catch (e) { setError(e.message || String(e)); setEnabled(!val); }
+    finally { setBusy(false); }
+  };
+  return (
+    <section style={adminSectionStyle}>
+      <h3 style={adminSectionTitleStyle}>Calendario compartido</h3>
+      <p style={adminSectionDescStyle}>
+        Autorizá el uso de "Calendario compartido": vas a poder ver los espacios ocupado/disponible
+        de los agentes que el admin te configuró, y ellos podrán ver los tuyos. Nunca se muestran
+        títulos ni datos de las reuniones — solo si el espacio está ocupado o libre. Si lo apagás, no participás.
+      </p>
+      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div className={`toggle-switch ${enabled ? 'on' : ''}`} onClick={toggle} role="switch" aria-checked={!!enabled} />
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+          {enabled === null ? 'Cargando…' : enabled ? 'Activado — compartís y podés ver' : 'Desactivado'}
+        </div>
+      </div>
+      {error && <div style={{ color: '#dc2626', fontSize: 12, marginTop: 8 }}>{error}</div>}
+    </section>
+  );
+}
+
 function UsuariosSection({ currentUser, onViewAs }) {
   const currentUserId = currentUser?.id;
   const esMegaAdmin = (currentUser?.email || '').toLowerCase() === MEGAADMIN_EMAIL;
@@ -14292,7 +14454,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
         {esAdmin && (
           <div style={{ display: 'flex', gap: 4, padding: '0 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flex: '0 0 auto' }}>
-            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio']].map(([k, label]) => (
+            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio'], ['compartidos', 'Compartidos']].map(([k, label]) => (
               <button key={k} type="button" onClick={() => setTab(k)}
                 style={{ border: 'none', background: 'none', padding: '12px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
                   color: tab === k ? '#1e1b4b' : '#9ca3af',
@@ -14368,6 +14530,9 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onUnlinkOAuth={onUnlinkOAuth}
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
           />
+          {!esAdmin && currentUser?.id && (
+            <CalendarioCompartidoGeneralSection userId={currentUser.id} />
+          )}
           </>)}
 
           {esAdmin && tab === 'usuarios' && (<>
@@ -14378,6 +14543,10 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
           {esAdmin && tab === 'directorio' && (
             <AsesoresSection />
+          )}
+
+          {esAdmin && tab === 'compartidos' && (
+            <CalendariosCompartidosSection />
           )}
         </div>
       </div>
