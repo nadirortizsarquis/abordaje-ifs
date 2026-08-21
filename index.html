@@ -1163,6 +1163,9 @@
   }
   .field textarea { resize: vertical; min-height: 80px; }
   .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  /* Fila fecha/hora/columna del modal de tarea: en desktop, fecha y hora
+     compactas + columna ocupa el resto. En mobile colapsa (ver media query). */
+  .field-row.field-row-fhc { grid-template-columns: 150px 130px 1fr; }
   /* Variante "grande" para los inputs de fecha/hora del modal Nueva Agenda
      y similares — el dato más importante del modal merece más prominencia. */
   .field-row.field-row-prominente { gap: 12px; margin-bottom: 18px; }
@@ -3521,6 +3524,9 @@
     .timeline-obs { white-space: normal; }
     .field-row, .field-inline-row { grid-template-columns: 1fr; }
     .field-row.field-row-3 { grid-template-columns: 1fr; }
+    /* Fecha/Hora lado a lado (entran bien), Columna full width debajo. */
+    .field-row.field-row-fhc { grid-template-columns: 1fr 1fr; }
+    .field-row.field-row-fhc > .field:last-child { grid-column: 1 / -1; }
     .tipos-grid { grid-template-columns: 1fr 1fr; }
     .panel-side { max-width: 100%; }
     .panel-section { padding: 18px 18px; }
@@ -16116,7 +16122,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 </div>
               </>
             )}
-            <div className="field-row" style={{ gridTemplateColumns: '150px 130px 1fr' }}>
+            <div className="field-row field-row-fhc">
               <div className="field">
                 <label>Fecha</label>
                 <input type="date" value={form.fechaRecordatorio || ''} readOnly={readOnly}
