@@ -13344,7 +13344,9 @@ function CalendariosCompartidosSection() {
     setBusy(true); setError(null);
     setAgents(prev => prev.map(a => a.id === agentId ? { ...a, compartir_calendario: val } : a));
     try {
-      const { error } = await sb.from('profiles').update({ compartir_calendario: val }).eq('id', agentId);
+      // Vía RPC SECURITY DEFINER: el update directo a profiles gatilla la recursión
+      // de la RLS (update_own_metadata). La RPC valida authz (admin o uno mismo).
+      const { error } = await sb.rpc('set_compartir_calendario', { target_id: agentId, val });
       if (error) throw error;
     } catch (e) { setError(e.message || String(e)); await load(); }
     finally { setBusy(false); }
@@ -13429,7 +13431,7 @@ function CalendarioCompartidoGeneralSection({ userId }) {
     const val = !enabled;
     setBusy(true); setError(null); setEnabled(val);
     try {
-      const { error } = await sb.from('profiles').update({ compartir_calendario: val }).eq('id', userId);
+      const { error } = await sb.rpc('set_compartir_calendario', { target_id: userId, val });
       if (error) throw error;
     } catch (e) { setError(e.message || String(e)); setEnabled(!val); }
     finally { setBusy(false); }
