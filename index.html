@@ -5935,7 +5935,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,compartir_calendario').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -7429,7 +7429,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} />
+        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -7628,6 +7628,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             onSlotClick={readOnly ? null : (date, hour, minute) => setSlotPicker({ date, hour, minute })}
           />
         </>
+      )}
+
+      {view === 'calendario_compartido' && !isAssistant && agente?.compartir_calendario === true && (
+        <CalendarioCompartidoView settings={settings} />
       )}
 
       <footer className="app-footer">
@@ -10089,7 +10093,7 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
 }
 
 // ── VIEW TABS (Lista | Calendario) ────────────────────────────
-function ViewTabs({ view, setView, showProd, showCalPagos }) {
+function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido }) {
   return (
     <div className="view-tabs">
       <button className={`view-tab ${view === 'lista' ? 'active' : ''}`}
@@ -10098,6 +10102,10 @@ function ViewTabs({ view, setView, showProd, showCalPagos }) {
         onClick={() => setView('tareas')}>Tareas</button>
       <button className={`view-tab ${view === 'calendario' ? 'active' : ''}`}
         onClick={() => setView('calendario')}>Calendario</button>
+      {showCalCompartido && (
+        <button className={`view-tab ${view === 'calendario_compartido' ? 'active' : ''}`}
+          onClick={() => setView('calendario_compartido')}>Calendario compartido</button>
+      )}
       {showProd && (
         <button className={`view-tab ${view === 'produccion' ? 'active' : ''}`}
           onClick={() => setView('produccion')}>Mi producción</button>
@@ -10105,6 +10113,200 @@ function ViewTabs({ view, setView, showProd, showCalPagos }) {
       {showCalPagos && (
         <button className={`view-tab ${view === 'calendario_pagos' ? 'active' : ''}`}
           onClick={() => setView('calendario_pagos')}>Calendario de pagos</button>
+      )}
+    </div>
+  );
+}
+
+// ── CALENDARIO COMPARTIDO ────────────────────────────────────────────────────
+// Wrapper de la edge function shared-calendar (ocupados anonimizados).
+async function sharedCal(op, payload = {}) {
+  const { data, error } = await sb.functions.invoke('shared-calendar', { body: { op, ...payload } });
+  if (error) {
+    let msg = error.message || 'Error';
+    try { const b = await error.context.json(); if (b?.error) msg = b.error; } catch (_) {}
+    throw new Error(msg);
+  }
+  if (data && data.ok === false && data.error) throw new Error(data.error);
+  return data;
+}
+
+const CALCOMP_PALETTE = ['#0098DA', '#e11d48', '#16a34a', '#9333ea', '#ea580c', '#0891b2', '#ca8a04', '#4f46e5', '#db2777', '#059669'];
+
+function CalendarioCompartidoView({ settings }) {
+  const [owners, setOwners] = useState([]);
+  const [selected, setSelected] = useState(null);   // Set de ownerIds; null = todos
+  const [mode, setMode] = useState('ocupado');       // 'ocupado' | 'disponible'
+  const [weekStart, setWeekStart] = useState(() => startOfWeek(new Date()));
+  const [blocks, setBlocks] = useState([]);
+  const [noAccess, setNoAccess] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    sharedCal('owners').then(d => setOwners(d.owners || [])).catch(e => setError(e.message));
+  }, []);
+
+  const colorOf = (id) => CALCOMP_PALETTE[Math.max(0, owners.findIndex(o => o.id === id)) % CALCOMP_PALETTE.length];
+  const nameOf = (id) => (owners.find(o => o.id === id)?.name) || 'Agente';
+  const activeOwners = owners.filter(o => !selected || selected.has(o.id));
+
+  const nDays = settings.includeWeekends ? 7 : 5;
+  const days = useMemo(() => Array.from({ length: nDays }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; }), [weekStart, nDays]);
+
+  useEffect(() => {
+    if (!owners.length) { setBlocks([]); setLoading(false); return; }
+    const tMin = new Date(weekStart); tMin.setHours(0, 0, 0, 0);
+    const tMax = new Date(weekStart); tMax.setDate(tMax.getDate() + 7); tMax.setHours(0, 0, 0, 0);
+    setLoading(true); setError(null);
+    sharedCal('busy', { timeMin: tMin.toISOString(), timeMax: tMax.toISOString() })
+      .then(d => { setBlocks(d.blocks || []); setNoAccess(d.noAccess || []); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [owners, weekStart]);
+
+  const wsMin = (settings.workStartHour || 8) * 60 + (settings.workStartMin || 0);
+  const weMin = (settings.workEndHour || 20) * 60 + (settings.workEndMin || 0);
+  const range = Math.max(60, weMin - wsMin);
+  const PX_PER_HOUR = 40;
+  const gridH = (range / 60) * PX_PER_HOUR;
+
+  const sameDay = (iso, d) => { const x = new Date(iso); return x.getFullYear() === d.getFullYear() && x.getMonth() === d.getMonth() && x.getDate() === d.getDate(); };
+  const minutesOf = (iso) => { const x = new Date(iso); return x.getHours() * 60 + x.getMinutes(); };
+
+  // Bloques ocupados por día, acotados al horario laboral, de los owners activos.
+  const dayBusy = (d) => {
+    const activeIds = new Set(activeOwners.map(o => o.id));
+    return blocks
+      .filter(b => activeIds.has(b.ownerId) && sameDay(b.start, d))
+      .map(b => ({ ownerId: b.ownerId, s: Math.max(wsMin, minutesOf(b.start)), e: Math.min(weMin, minutesOf(b.end)) }))
+      .filter(b => b.e > b.s);
+  };
+
+  // Huecos libres comunes (todos los owners activos libres) en un día.
+  const dayFree = (d) => {
+    const busy = dayBusy(d).map(b => [b.s, b.e]).sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const [s, e] of busy) { if (merged.length && s <= merged[merged.length - 1][1]) merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e); else merged.push([s, e]); }
+    const free = []; let cur = wsMin;
+    for (const [s, e] of merged) { if (s > cur) free.push([cur, s]); cur = Math.max(cur, e); }
+    if (cur < weMin) free.push([cur, weMin]);
+    return free;
+  };
+
+  const toggleOwner = (id) => setSelected(prev => {
+    const base = prev ? new Set(prev) : new Set(owners.map(o => o.id));
+    if (base.has(id)) base.delete(id); else base.add(id);
+    return base.size === owners.length ? null : base;
+  });
+
+  const goWeek = (delta) => setWeekStart(prev => { const d = new Date(prev); d.setDate(d.getDate() + delta * 7); return d; });
+  const DOW = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+  const hourLabels = []; for (let m = wsMin; m <= weMin; m += 60) hourLabels.push(m);
+
+  return (
+    <div style={{ padding: '4px 0 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className="btn-mini" onClick={() => goWeek(-1)}>‹</button>
+          <button className="btn-mini" onClick={() => setWeekStart(startOfWeek(new Date()))}>Hoy</button>
+          <button className="btn-mini" onClick={() => goWeek(1)}>›</button>
+          <span style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--texto)', marginLeft: 6 }}>
+            {days[0].getDate()} {NOMBRES_MES[days[0].getMonth()].slice(0, 3)} – {days[days.length - 1].getDate()} {NOMBRES_MES[days[days.length - 1].getMonth()].slice(0, 3)}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto', background: '#eef2ff', borderRadius: 999, padding: 3 }}>
+          {[['ocupado', 'Ocupado'], ['disponible', 'Disponible']].map(([k, label]) => (
+            <button key={k} type="button" onClick={() => setMode(k)}
+              style={{ border: 'none', borderRadius: 999, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
+                background: mode === k ? '#4338ca' : 'transparent', color: mode === k ? '#fff' : '#4338ca' }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {owners.length === 0 ? (
+        <div className="empty" style={{ padding: '40px 20px', textAlign: 'center', color: 'var(--texto-suave)' }}>
+          Todavía no hay agentes que compartan su calendario con vos. El admin lo configura en Ajustes → Compartidos.
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {owners.map(o => {
+              const on = !selected || selected.has(o.id);
+              const sinAcceso = noAccess.includes(o.id);
+              return (
+                <button key={o.id} type="button" onClick={() => toggleOwner(o.id)}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${on ? colorOf(o.id) : 'var(--borde)'}`,
+                    background: on ? colorOf(o.id) + '18' : '#fff', borderRadius: 999, padding: '4px 12px', fontSize: '0.8rem', cursor: 'pointer',
+                    opacity: on ? 1 : 0.5 }}>
+                  <span style={{ width: 10, height: 10, borderRadius: '50%', background: colorOf(o.id) }} />
+                  {o.name}{sinAcceso ? ' (sin acceso)' : ''}
+                </button>
+              );
+            })}
+          </div>
+
+          {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
+          {loading && <div style={{ fontSize: 13, color: 'var(--texto-suave)', marginBottom: 8 }}>Cargando disponibilidad…</div>}
+
+          <div style={{ display: 'flex', border: '1px solid var(--borde)', borderRadius: 10, overflow: 'hidden', background: 'var(--bg-card)' }}>
+            {/* columna de horas */}
+            <div style={{ width: 48, flex: '0 0 48px', borderRight: '1px solid var(--borde)' }}>
+              <div style={{ height: 28, borderBottom: '1px solid var(--borde)' }} />
+              <div style={{ position: 'relative', height: gridH }}>
+                {hourLabels.map(m => (
+                  <div key={m} style={{ position: 'absolute', top: ((m - wsMin) / range) * gridH - 6, right: 6, fontSize: '0.66rem', color: 'var(--texto-suave)' }}>
+                    {pad2(Math.floor(m / 60))}:{pad2(m % 60)}
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* columnas de días */}
+            {days.map((d, di) => {
+              const busy = dayBusy(d);
+              const free = mode === 'disponible' ? dayFree(d) : [];
+              const nOwn = Math.max(1, activeOwners.length);
+              const esHoy = new Date().toDateString() === d.toDateString();
+              return (
+                <div key={di} style={{ flex: '1 1 0', minWidth: 90, borderRight: di < days.length - 1 ? '1px solid var(--borde)' : 'none' }}>
+                  <div style={{ height: 28, borderBottom: '1px solid var(--borde)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.72rem', fontWeight: 700, color: esHoy ? 'var(--azul)' : 'var(--texto)', background: esHoy ? '#eff6ff' : 'transparent' }}>
+                    {DOW[d.getDay()]} {d.getDate()}
+                  </div>
+                  <div style={{ position: 'relative', height: gridH, background: mode === 'disponible' ? '#fef2f2' : 'transparent' }}>
+                    {/* líneas de hora */}
+                    {hourLabels.map(m => <div key={m} style={{ position: 'absolute', left: 0, right: 0, top: ((m - wsMin) / range) * gridH, borderTop: '1px solid #f1f5f9' }} />)}
+                    {mode === 'ocupado' ? (
+                      busy.map((b, i) => {
+                        const oi = Math.max(0, activeOwners.findIndex(o => o.id === b.ownerId));
+                        return (
+                          <div key={i} title="Ocupado" style={{
+                            position: 'absolute', top: ((b.s - wsMin) / range) * gridH, height: Math.max(3, ((b.e - b.s) / range) * gridH),
+                            left: `${(oi / nOwn) * 100}%`, width: `calc(${100 / nOwn}% - 2px)`,
+                            background: colorOf(b.ownerId), opacity: 0.82, borderRadius: 3,
+                          }} />
+                        );
+                      })
+                    ) : (
+                      free.map((f, i) => (
+                        <div key={i} title="Disponible (todos libres)" style={{
+                          position: 'absolute', top: ((f[0] - wsMin) / range) * gridH, height: Math.max(3, ((f[1] - f[0]) / range) * gridH),
+                          left: 2, right: 2, background: '#22c55e', opacity: 0.28, borderRadius: 3, border: '1px solid #16a34a',
+                        }} />
+                      ))
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 10, lineHeight: 1.5 }}>
+            {mode === 'ocupado'
+              ? 'Cada barra = un espacio ocupado (sin título ni datos). Cada color, un agente.'
+              : 'En verde, los espacios en que TODOS los agentes seleccionados están libres (para coordinar reuniones).'}
+            {' '}No se muestran recordatorios de tareas ni de llamados. Acotado al horario laboral.
+          </div>
+        </>
       )}
     </div>
   );
@@ -16719,7 +16921,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) {
