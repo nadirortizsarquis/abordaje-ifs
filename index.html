@@ -7820,6 +7820,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               setPendingProspectAgenda(null);
               setSelectedId(id);
             }}
+            inviteMeId={!isAssistant && agente?.compartir_calendario === true ? user?.id : null}
           />
         );
       })()}
@@ -16427,7 +16428,7 @@ function ConfirmDeleteTareaModal({ tarea, onCancel, onUnlinkCalendar, onDeleteAl
 // la agenda (borra contacto del historial + evento Google, el prospect
 // vuelve a su estado anterior) o abrir la ficha del prospect (panel lateral
 // para ver historial completo, editar datos, etc.).
-function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalendar, onOpenProspect }) {
+function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalendar, onOpenProspect, inviteMeId }) {
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
     document.addEventListener('keydown', onKey);
@@ -16477,6 +16478,15 @@ function ProspectAgendaActionModal({ event, prospectName, onCancel, onSoloCalend
               </span>
             </button>
           </div>
+          {/* Invitar a colegas: SOLO si es una cita (tipo 'agendado'), nunca un recordatorio. */}
+          {inviteMeId && event?.tipo === 'agendado' && fecha && event?.id && (() => {
+            const st = new Date(event.fecha);
+            const dur = event.duracionMin || 60;
+            return (
+              <MeetingInviteSection meId={inviteMeId} sourceRef={`prospcita:${event.id}`}
+                title={`Cita con ${prospectName}`} startAt={st.toISOString()} endAt={new Date(st.getTime() + dur * 60000).toISOString()} />
+            );
+          })()}
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
