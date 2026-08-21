@@ -1,6 +1,20 @@
 # Integración Abordaje → CRM IFS Broker (bitácora de clientes)
 
-Estado: **DISEÑO / SPEC** (nada implementado todavía). Documento base para desarrollo y para el PM.
+Estado: **IMPLEMENTADO Y EN PRODUCCIÓN** (ago 2026). Lo que sigue fue el spec de diseño;
+el cuerpo detallado puede tener matices respecto de lo finalmente construido, pero la
+integración YA ESTÁ LIVE. Resumen de lo implementado:
+- Botón **"Convertir a cliente CRM"** (`CrmVinculoLanzador`) en prospecto, tarea, agenda
+  y cita de calendario. Modal: busca por DNI, vincula o **crea** el cliente (opt-in, con
+  DNI+nombre+apellido obligatorios), y vuelca la gestión a la bitácora del cliente.
+- Typeahead **"Cliente en el CRM"** (`CrmClientePicker`) al crear prospecto/tarea.
+- **Ancla por cliente** (`crm_client_id` en prospecto y a nivel ítem para tareas/agendas
+  sueltas). El `sync` junta todo lo que apunte al mismo cliente.
+- Gating por asesor: `advisors.crm_sync_enabled` (default OFF; admins habilitados por rol).
+  Enforced **server-side** en la edge function `crm-sync` (ops search/lookup/create/sync;
+  403 si no está habilitado; `lookup` vacío para no-admin).
+- Conecta al CRM Django de Bruno (TokenAuthentication). Migraciones:
+  `20260813120000` (foundation), `20260819120000` (ancla por ítem), `20260820140000`
+  (flag `crm_sync_enabled`). PM #819.
 
 > **Actualización 13/08/2026 (Nadir).** Se retomó el tema y se cargó al PM como
 > tarea **#819** (proyecto Abordaje). Dos precisiones que **superan** lo que decía

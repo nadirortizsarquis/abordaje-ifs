@@ -65,6 +65,13 @@ fases de migración ver `CHANGELOG.md`.
   indigo. Aceptar/rechazar en el detalle; badge (N) en la solapa; al aceptar
   aparece en el calendario normal (render-only, sin duplicar el ocupado).
   Modal de tarea reestilado (más ancho + secciones tipo ficha de prospecto).
+- **Integración con el CRM de Bruno (2026-08, EN PRODUCCIÓN).** Botón "Convertir
+  a cliente CRM" (`CrmVinculoLanzador`) en prospecto/tarea/agenda/cita: busca por
+  DNI, vincula o crea el cliente, y vuelca la gestión a su bitácora. Typeahead
+  "Cliente en el CRM" (`CrmClientePicker`) al crear. Ancla por `crm_client_id`
+  (prospecto + a nivel ítem). Gating por asesor `advisors.crm_sync_enabled`
+  (default OFF; admins por rol), enforced server-side en la edge function
+  `crm-sync`. Detalle: `docs/INTEGRACION_CRM.md` · PM #819.
 
 ## Modelo de asistentes
 - `profiles.assistant_of_id` apunta al principal.
@@ -93,6 +100,7 @@ detalle en `supabase/README.md`.
 | `update-user-email` | v6 | Cambio de email (admin). Guard: solo el megaadmin puede cambiar el email de otro admin. |
 | `update-user-password` | v8 | Cambio de password (admin). Guard: solo el megaadmin puede cambiar el password de otro admin. |
 | `shared-calendar` | v2 | Calendario compartido. Ops `owners` / `busy` (ocupados anonimizados, sin título) / `meeting_people` (nombres de participantes). Exige `compartir_calendario` ON. |
+| `crm-sync` | v7 | Integración con el CRM de Bruno. Ops search/lookup/create/sync (bitácora de clientes). Gating server-side por `advisors.crm_sync_enabled`. |
 
 Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 
