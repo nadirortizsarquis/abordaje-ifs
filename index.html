@@ -11754,9 +11754,9 @@ function calpagoCompaniaLabel(compania) {
 //            Investors/BD son blancos sobre navy→fondo oscuro).
 const CALPAGO_COMPANIA = {
   'ole':             { code: 'OLE', accent: '#0098DA', logoBg: '#ffffff' },
-  'investors-trust': { code: 'IT',  accent: '#0E7AA8', logoBg: '#0E7AA8' },
+  'investors-trust': { code: 'IT',  accent: '#0E7AA8', logoBg: '#ffffff' },
   'life-group':      { code: 'LG',  accent: '#3E4095', logoBg: '#ffffff' },
-  'best-doctors':    { code: 'BD',  accent: '#0D8FA8', logoBg: '#0D8FA8' },
+  'best-doctors':    { code: 'BD',  accent: '#0D8FA8', logoBg: '#ffffff' },
   'patrimonial':     { code: 'PAT', accent: '#6b7280', logoBg: '#ffffff' },
 };
 function calpagoCompaniaCfg(c) { return CALPAGO_COMPANIA[c] || CALPAGO_COMPANIA['ole']; }
@@ -11874,8 +11874,9 @@ function CalpagoAsesorPicker({ roster, selIds, setSelIds }) {
 
 function CalpagoEditModal({ ev, current, isAdmin, onSave, onEdit, onClose }) {
   const esManual = ev.origen === 'manual';
-  const [paga, setPaga] = useState(current ? (current.paga || null) : null);
-  const [obs, setObs] = useState(current ? (current.obs || '') : '');
+  // Para manuales, quién paga + obs vienen del propio registro (ev); para OLE, del pagoMap (current).
+  const [paga, setPaga] = useState(esManual ? (ev.pagador || null) : (current ? (current.paga || null) : null));
+  const [obs, setObs] = useState(esManual ? (ev.obs || '') : (current ? (current.obs || '') : ''));
   return (
     <div className="calpago-modal-ov" onClick={onClose}>
       <div className="calpago-modal" onClick={e => e.stopPropagation()}>
@@ -11894,40 +11895,25 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onEdit, onClose }) {
           </div>
         </div>
         <div className="calpago-modal-body">
-          {esManual ? (
-            // Manual: solo lectura acá; para cambiar datos, botón Editar (abre el modal completo).
-            <>
-              <div className="calpago-modal-label">Quién paga</div>
-              <div style={{ marginTop: 5 }}>
-                <span className="calpago-badge" style={calpagoBadgeStyle(ev)}>{ev.pagador ? CALPAGO_PAG[ev.pagador].label : 'Sin definir'}</span>
-              </div>
-              {ev.obs && (<>
-                <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
-                <div style={{ fontSize: '0.86rem', color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{ev.obs}</div>
-              </>)}
-            </>
-          ) : (
-            <>
-              <div className="calpago-modal-label">¿Quién paga?</div>
-              <div className="calpago-payopts">
-                {['cliente', 'ifs', 'agente'].map(pg => {
-                  const c = CALPAGO_PAG[pg]; const on = paga === pg;
-                  return <button key={pg} type="button" className="calpago-payopt"
-                    style={on ? { background: c.bd, borderColor: c.bd, color: '#fff' } : { borderColor: c.bd, color: c.tx, background: '#fff' }}
-                    onClick={() => setPaga(on ? null : pg)}>{c.label}</button>;
-                })}
-              </div>
-              <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
-              <textarea className="calpago-modal-obs" value={obs} onChange={e => setObs(e.target.value)} rows={3}
-                placeholder="Notas sobre esta póliza o su cobranza…" />
-            </>
-          )}
+          <div className="calpago-modal-label">¿Quién paga?</div>
+          <div className="calpago-payopts">
+            {['cliente', 'ifs', 'agente'].map(pg => {
+              const c = CALPAGO_PAG[pg]; const on = paga === pg;
+              return <button key={pg} type="button" className="calpago-payopt"
+                style={on ? { background: c.bd, borderColor: c.bd, color: '#fff' } : { borderColor: c.bd, color: c.tx, background: '#fff' }}
+                onClick={() => setPaga(on ? null : pg)}>{c.label}</button>;
+            })}
+          </div>
+          <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
+          <textarea className="calpago-modal-obs" value={obs} onChange={e => setObs(e.target.value)} rows={3}
+            placeholder="Notas sobre esta póliza o su cobranza…" />
         </div>
-        <div className="calpago-modal-foot">
-          <button type="button" className="calpago-btn-ghost" onClick={onClose}>Cerrar</button>
-          {esManual
-            ? <button type="button" className="calpago-btn-primary" onClick={onEdit}>Editar</button>
-            : <button type="button" className="calpago-btn-primary" onClick={() => onSave(paga, obs)}>Guardar</button>}
+        <div className="calpago-modal-foot" style={{ justifyContent: 'space-between' }}>
+          <div>{esManual && <button type="button" className="calpago-btn-ghost" onClick={onEdit}>Editar datos</button>}</div>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button type="button" className="calpago-btn-ghost" onClick={onClose}>Cerrar</button>
+            <button type="button" className="calpago-btn-primary" onClick={() => onSave(paga, obs)}>Guardar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -12082,6 +12068,15 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
     try {
       if (!paga && !cleanObs) await sb.from('ole_poliza_pago').delete().eq('user_id', asesorId).eq('poliza', poliza);
       else await sb.from('ole_poliza_pago').upsert({ user_id: asesorId, poliza, paga: paga || null, observaciones: cleanObs || null, updated_at: new Date().toISOString() }, { onConflict: 'user_id,poliza' });
+    } catch (e) { /* optimista */ }
+  }
+
+  // Guardar quién paga + observaciones de un PAGO MANUAL (van en su propia fila).
+  async function savePagoManual(manualId, paga, obs) {
+    const cleanObs = (obs || '').trim();
+    setManuales(ms => ms.map(m => m.id === manualId ? { ...m, paga: paga || null, observaciones: cleanObs } : m));
+    try {
+      await sb.from('abordaje_pago_manual').update({ paga: paga || null, observaciones: cleanObs, updated_at: new Date().toISOString() }).eq('id', manualId);
     } catch (e) { /* optimista */ }
   }
 
@@ -12301,7 +12296,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
 
       {editing && (
         <CalpagoEditModal ev={editing} isAdmin={isAdmin} current={pagoMap[calpagoPagoKey(editing.asesorId, editing.poliza)] || null}
-          onSave={(paga, obs) => { savePago(editing.asesorId, editing.poliza, paga, obs); setEditing(null); }}
+          onSave={(paga, obs) => { if (editing.origen === 'manual') savePagoManual(editing.manualId, paga, obs); else savePago(editing.asesorId, editing.poliza, paga, obs); setEditing(null); }}
           onEdit={() => { const reg = (manuales || []).find(m => m.id === editing.manualId); setEditing(null); if (reg) setPagoModal({ registro: reg }); }}
           onClose={() => setEditing(null)} />
       )}
