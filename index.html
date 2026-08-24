@@ -6040,6 +6040,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const { notificaciones, notifUrgentes, dismissNotif } = useNotificaciones(state, isPilot, user);
   const { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors } = useSettings(user, agente);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showDuplicados, setShowDuplicados] = useState(false);
+  const dupCount = React.useMemo(() => agruparDuplicados(state.prospectos).length, [state.prospectos]);
   const [showSettings, setShowSettings] = useState(false);
   const [showInstrucciones, setShowInstrucciones] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
@@ -6331,6 +6333,59 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         setState(s => ({ ...s, prospectos: prev }));
       }
     })();
+  };
+
+  // Fusiona uno o más prospectos "source" dentro de un "target": mueve sus
+  // gestiones (contactos) al target, completa datos faltantes del target, borra
+  // los sources (con su limpieza de Google + cascada de tareas/agendas) y
+  // re-sincroniza la tarea/agenda del target según el último contacto del
+  // historial combinado. Recarga el estado desde la DB para quedar consistente.
+  const handleFusionarProspectos = async (targetId, sourceIds) => {
+    if (guardReadOnly()) return;
+    const ids = (sourceIds || []).filter(id => id && id !== targetId);
+    if (!ids.length) return;
+    try {
+      // 1. Mover contactos de los sources al target.
+      for (const sid of ids) {
+        const { error } = await sb.from('abordaje_prospecto_contactos')
+          .update({ prospecto_id: targetId }).eq('prospecto_id', sid);
+        if (error) throw error;
+      }
+      // 2. Completar datos faltantes del target desde los sources.
+      const target = state.prospectos.find(p => p.id === targetId);
+      const sources = ids.map(sid => state.prospectos.find(p => p.id === sid)).filter(Boolean);
+      const fill = {};
+      const pick = (campo) => sources.find(x => (x[campo] || '').toString().trim())?.[campo];
+      if (target && !(target.telefono || '').trim() && pick('telefono')) fill.telefono = pick('telefono');
+      if (target && !(target.documento || '').trim() && pick('documento')) fill.documento = pick('documento');
+      if (target && !(target.referente || '').trim() && pick('referente')) fill.referente = pick('referente');
+      if (target && !target.crmClientId) { const s = sources.find(x => x.crmClientId); if (s) fill.crmClientId = s.crmClientId; }
+      if (Object.keys(fill).length) await storage.updateProspecto(targetId, fill);
+      // 3. Borrar cada source (limpieza Google + cascada de sus tareas/agendas).
+      for (const sid of ids) {
+        if (isPilot) {
+          try {
+            const past = new Date(); past.setFullYear(past.getFullYear() - 10);
+            const fut = new Date(); fut.setFullYear(fut.getFullYear() + 10);
+            const evts = await gcalApi.list(past.toISOString(), fut.toISOString());
+            const toDel = (evts || []).filter(ev => ev.extendedProperties?.private?.abordaje_prospect_id === sid);
+            await Promise.all(toDel.map(ev => gcalApi.delete(ev.id).catch(() => {})));
+          } catch (e) { console.warn('gcal list fusion:', e); }
+          const tareasSrc = (state.tareas?.items || []).filter(t => t.prospectoId === sid && t.googleEventId);
+          await Promise.all(tareasSrc.map(t => gcalApi.delete(t.googleEventId).catch(() => {})));
+        }
+        await storage.deleteProspecto(sid);
+      }
+      // 4. Recargar estado desde DB (contactos movidos + sources borrados).
+      const fresh = await storage.loadState(viewAs?.id);
+      setState(fresh);
+      // 5. Re-sincronizar el target según el último contacto del historial combinado.
+      const t2 = fresh.prospectos.find(p => p.id === targetId);
+      const cs = t2?.contactos || [];
+      await sincronizarSeguimiento(targetId, cs[cs.length - 1] || null, fresh);
+      if (isPilot) bumpGcal();
+      showToast(ids.length === 1 ? 'Prospectos fusionados' : `${ids.length + 1} prospectos fusionados`);
+    } catch (e) { handleErr(e, 'fusionarProspectos'); }
   };
 
   // Sincroniza la tarea (Abordar) y/o el agendado del prospect según el contacto activo.
@@ -7614,6 +7669,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                         <>
                           <button className="btn-export" onClick={() => exportarProspectosExcel(prospectosVista)} title="Descargar lista en Excel">Excel</button>
                           <button className="btn-export" onClick={() => exportarProspectosPDF(prospectosVista, user)} title="Descargar lista en PDF">PDF</button>
+                          {!readOnly && dupCount > 0 && (
+                            <button className="btn-secondary" onClick={() => setShowDuplicados(true)}
+                              title="Revisar y fusionar prospectos duplicados">
+                              Duplicados ({dupCount})
+                            </button>
+                          )}
                           {!readOnly && (
                             <button className="btn-primary" onClick={() => setShowAddModal(true)}>+ Nuevo prospecto</button>
                           )}
@@ -7760,6 +7821,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onSave={handleAdd}
           prospectos={state.prospectos}
           onOpenExistente={(id) => { setShowAddModal(false); setSelectedId(id); }}
+        />
+      )}
+
+      {showDuplicados && (
+        <DuplicadosModal
+          prospectos={state.prospectos}
+          onClose={() => setShowDuplicados(false)}
+          onFusionar={handleFusionarProspectos}
+          onOpenProspecto={(id) => { setShowDuplicados(false); setSelectedId(id); }}
         />
       )}
 
@@ -10114,6 +10184,110 @@ function buscarDuplicadosProspecto(prospectos, { nombre, telefono, documento }, 
     if (dd && (p.documento || '').toString().trim() === dd) return true;
     return false;
   });
+}
+
+// Agrupa prospectos ACTIVOS que probablemente sean la misma persona: cluster por
+// nombre normalizado, teléfono (>=6 dígitos) o DNI (union-find). Devuelve solo los
+// grupos de 2+.
+function agruparDuplicados(prospectos) {
+  const activos = (prospectos || []).filter(p => !p.archivado);
+  const parent = {};
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const union = (a, b) => { parent[find(a)] = find(b); };
+  activos.forEach(p => { parent[p.id] = p.id; });
+  const byKey = {};
+  const addKey = (k, id) => { if (!k) return; if (byKey[k]) union(byKey[k], id); else byKey[k] = id; };
+  activos.forEach(p => {
+    const nn = normNombre(p.nombre); if (nn.length >= 3) addKey('n:' + nn, p.id);
+    const tt = normTel(p.telefono); if (tt.length >= 6) addKey('t:' + tt, p.id);
+    const dd = (p.documento || '').toString().trim(); if (dd) addKey('d:' + dd, p.id);
+  });
+  const groups = {};
+  activos.forEach(p => { const r = find(p.id); (groups[r] = groups[r] || []).push(p); });
+  return Object.values(groups).filter(g => g.length >= 2);
+}
+
+// Modal "Posibles duplicados": grupos + elegir cuál mantener + fusionar.
+function DuplicadosModal({ prospectos, onClose, onFusionar, onOpenProspecto }) {
+  const grupos = React.useMemo(() => agruparDuplicados(prospectos), [prospectos]);
+  const [targets, setTargets] = useState({});
+  const [busyKey, setBusyKey] = useState(null);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const defaultTarget = (g) => [...g].sort((a, b) => (b.contactos?.length || 0) - (a.contactos?.length || 0))[0].id;
+  const targetOf = (g) => targets[g[0].id] ?? defaultTarget(g);
+  const fusionar = async (g) => {
+    const tid = targetOf(g);
+    const others = g.filter(p => p.id !== tid).map(p => p.id);
+    setBusyKey(g[0].id);
+    try { await onFusionar(tid, others); } finally { setBusyKey(null); }
+  };
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 640 }}>
+        <div className="modal-header">
+          <h3>Posibles duplicados</h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          {grupos.length === 0 ? (
+            <div style={{ padding: '18px 4px', color: 'var(--texto-suave)', fontSize: '0.9rem' }}>
+              No se encontraron prospectos duplicados (por nombre, teléfono o DNI). 🎉
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 12, lineHeight: 1.5 }}>
+                {grupos.length} {grupos.length === 1 ? 'grupo' : 'grupos'} con posibles duplicados. Elegí cuál <strong>mantener</strong> (por defecto el de más gestiones) y fusioná: las gestiones de los otros se mueven al elegido y el resto se elimina.
+              </div>
+              {grupos.map(g => {
+                const tid = targetOf(g);
+                const busy = busyKey === g[0].id;
+                return (
+                  <div key={g[0].id} style={{ border: '1px solid var(--borde)', borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--texto)', marginBottom: 8 }}>
+                      {g[0].nombre || '(sin nombre)'} <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>· {g.length} coincidencias</span>
+                    </div>
+                    {g.map(p => {
+                      const est = ESTADO_META[deriveEstado(p)];
+                      const nGest = (p.contactos || []).length;
+                      return (
+                        <label key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '6px 4px', cursor: 'pointer', fontSize: '0.84rem' }}>
+                          <input type="radio" name={`grp-${g[0].id}`} checked={tid === p.id} disabled={busy}
+                            onChange={() => setTargets(t => ({ ...t, [g[0].id]: p.id }))} />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <strong style={{ color: '#1e1b4b' }}>{p.nombre || '(sin nombre)'}</strong>
+                            <span style={{ color: 'var(--texto-suave)' }}>
+                              {' · '}{nGest} {nGest === 1 ? 'gestión' : 'gestiones'}
+                              {p.telefono ? ` · ${p.telefono}` : ''}{p.documento ? ` · DNI ${p.documento}` : ''}
+                            </span>
+                          </span>
+                          {est && <span className="chip" style={{ color: est.color, background: est.bg, fontSize: '0.7rem', fontWeight: 700 }}>{est.label}</span>}
+                          <button type="button" onClick={(e) => { e.preventDefault(); onOpenProspecto(p.id); }}
+                            style={{ border: '1px solid var(--borde)', background: '#fff', borderRadius: 6, padding: '2px 8px', fontSize: '0.72rem', cursor: 'pointer' }}>Ver</button>
+                        </label>
+                      );
+                    })}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                      <button type="button" className="btn-primary" onClick={() => fusionar(g)} disabled={busy}
+                        style={{ fontSize: '0.82rem', padding: '7px 14px' }}>
+                        {busy ? 'Fusionando…' : `Fusionar en "${(g.find(p => p.id === tid)?.nombre || '').slice(0, 24) || 'el elegido'}"`}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function NuevoProspectoModal({ onCancel, onSave, slotInfo, prospectos, onOpenExistente }) {
