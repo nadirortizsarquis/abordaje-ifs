@@ -11715,9 +11715,14 @@ const CALPAGO_PAG = {
 };
 const CALPAGO_SIN = { bg: '#f1f5f9', bd: '#94a3b8', tx: '#475569', label: 'Sin definir' };
 const CALPAGO_MUT = { bg: '#f3f4f6', bd: '#d1d5db', tx: '#9ca3af', label: 'Mensual' };
+// Mensuales que paga el cliente: azul clarito (se ve que es cliente, pero suave
+// porque son recurrentes/muchas).
+const CALPAGO_CLI_MENSUAL = { bg: '#eff6ff', bd: '#93c5fd', tx: '#3b82f6', label: 'Cliente' };
 function calpagoStyle(pagador, freq) {
-  // Las mensuales que paga el cliente (o sin definir) van apagadas: ruido de fondo.
-  if (freq === 'mensual' && (!pagador || pagador === 'cliente')) return CALPAGO_MUT;
+  // Mensual del cliente → azul clarito. Mensual sin definir → gris apagado
+  // (ruido de fondo). El resto usa el color pleno del pagador.
+  if (freq === 'mensual' && pagador === 'cliente') return CALPAGO_CLI_MENSUAL;
+  if (freq === 'mensual' && !pagador) return CALPAGO_MUT;
   if (!pagador) return CALPAGO_SIN;
   return CALPAGO_PAG[pagador] || CALPAGO_SIN;
 }
