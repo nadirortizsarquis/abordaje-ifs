@@ -4601,7 +4601,7 @@ const COMPANIA_BY_ID = Object.fromEntries(COMPANIAS.map(c => [c.id, c]));
 const TIPOS_CONTACTO = [
   { id: 'agendado',          label: 'AGENDADO',            color: '#065f46', bg: '#d1fae5', estado: 'agendado',   input: 'fechahora' },
   { id: 'contestador',       label: 'Contestador',         color: '#374151', bg: '#f3f4f6', estado: 'pendiente',  input: 'none' },
-  { id: 'mensaje_sin_respuesta', label: 'Mensaje sin respuesta', color: '#1e40af', bg: '#dbeafe', estado: 'pendiente', input: 'none' },
+  { id: 'mensaje_sin_respuesta', label: 'Mensaje sin respuesta', color: '#0f172a', bg: '#cbd5e1', estado: 'pendiente', input: 'none' },
   { id: 'fecha_exacta',      label: 'Fecha exacta',        color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'fecha' },
   { id: 'llamar_15min',      label: 'Llamar en 15 min',    color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
   { id: 'llamar_tarde',      label: 'Llamar por la tarde', color: '#b45309', bg: '#fef3c7', estado: 'pendiente',  input: 'none' },
@@ -12438,6 +12438,9 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
 const CAL_COLOR_VERDE    = { color: '#065f46', bg: '#d1fae5', border: '#065f46' };
 const CAL_COLOR_GRIS     = { color: '#374151', bg: '#e5e7eb', border: '#374151' };
 const CAL_COLOR_AZUL     = { color: '#1e40af', bg: '#dbeafe', border: '#1e40af' };
+// Gris oscuro / pizarra para "mensaje sin respuesta" (antes azul, se confundía
+// con el color de los calendarios externos personales de Google).
+const CAL_COLOR_GRIS_OSC = { color: '#0f172a', bg: '#94a3b8', border: '#334155' };
 const CAL_COLOR_AMARILLO = { color: '#a16207', bg: '#fef9c3', border: '#a16207' };
 const CAL_COLOR_VIOLETA  = { color: '#6d28d9', bg: 'rgba(124,58,237,0.14)', border: '#7c3aed' };
 // Eventos compartidos (meetings) — mismo lenguaje visual que el resto, pero con
@@ -12497,7 +12500,7 @@ function colorCalendarEvento(e, colorsMap, calendarColors) {
   if (t === 'recordatorio') return CAL_COLOR_VIOLETA;
   if (t === 'agendado') return CAL_COLOR_VERDE;
   if (t === 'contestador') return CAL_COLOR_GRIS;
-  if (t === 'mensaje_sin_respuesta') return CAL_COLOR_AZUL;
+  if (t === 'mensaje_sin_respuesta') return CAL_COLOR_GRIS_OSC;
   if (t === 'fecha_exacta' || (typeof t === 'string' && t.startsWith('llamar_'))) {
     return CAL_COLOR_AMARILLO;
   }
