@@ -12162,7 +12162,8 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin }) {
           {['cliente', 'ifs', 'agente'].map(k => { const c = CALPAGO_PAG[k]; return (
             <span className="calpago-legend-item" key={k}><span className="calpago-dot" style={{ background: c.bg, borderColor: c.bd }}></span>{c.label}</span>
           ); })}
-          <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_MUT.bg, borderColor: CALPAGO_MUT.bd }}></span>Mensual/cliente</span>
+          <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_CLI_MENSUAL.bg, borderColor: CALPAGO_CLI_MENSUAL.bd }}></span>Cliente mensual</span>
+          <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_SIN.bg, borderColor: CALPAGO_SIN.bd }}></span>Sin definir</span>
         </div>
       </div>
 
