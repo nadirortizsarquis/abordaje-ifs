@@ -12365,6 +12365,11 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     let kind = 'agenda';
     let prospectoNombre = null;
     let isOrphan = false;
+    // Tipo del evento para colorear (coherente con la Lista). Por defecto
+    // 'agendado' (citas/agendas/externos → verde). Para eventos de TAREA se
+    // deriva del último contacto del prospecto (recordatorio/contestador/llamar_…);
+    // una tarea manual sin prospecto queda null → violeta default.
+    let tipoEvento = 'agendado';
     // Distinguimos "creado desde Abordaje" de "evento externo del calendar
     // personal" mirando el tag `abordaje_agente_id` (lo inyecta gcalApi._decorate
     // en cualquier create/update de Abordaje). Sin esto, las agendas standalone
@@ -12385,6 +12390,15 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       if (!tarea || (tarea.googleEventId && tarea.googleEventId !== ev.id)) {
         isOrphan = true;
       }
+      // Color por tipo: derivamos el tipo de gestión del último contacto del
+      // prospecto (si la tarea cuelga de uno). Manual (sin prospecto) → null → violeta.
+      if (tarea?.prospectoId) {
+        const p = prospectos.find(x => x.id === tarea.prospectoId);
+        const ultimo = p ? [...(p.contactos || [])].reverse().find(c => c.agendadoPara) : null;
+        tipoEvento = ultimo?.tipo || null;
+      } else {
+        tipoEvento = null;
+      }
     }
     events.push({
       id: ev.id,
@@ -12396,7 +12410,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       isOrphan,
       label: prospectoNombre || ev.summary || '(sin título)',
       fecha: start,
-      tipo: 'agendado',
+      tipo: tipoEvento,
       observacion: ev.description || '',
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
