@@ -6625,9 +6625,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (!ultimo || ultimo.tipo === 'agendado') return;
     const nuevoAgendado = nuevaFecha ? (nuevaHora ? `${nuevaFecha}T${nuevaHora}` : nuevaFecha) : null;
     // El contacto activo pasa a "recordatorio" (violeta) con la fecha de la tarea.
-    // La observación se pisa SOLO si vino una línea de bitácora nueva (nota != null).
+    // La línea de bitácora nueva se AGREGA a la observación (no pisa la nota
+    // original de la gestión); no se duplica si ya estaba.
     const patchContacto = { tipo: 'recordatorio', agendadoPara: nuevoAgendado };
-    if (nota != null) patchContacto.observacion = nota;
+    if (nota) {
+      const orig = (ultimo.observacion || '').trim();
+      if (!orig) patchContacto.observacion = nota;
+      else if (!orig.includes(nota)) patchContacto.observacion = `${orig}\n· ${nota}`;
+      // si ya la incluye, no tocamos la observación
+    }
     const yaIgual = ultimo.tipo === 'recordatorio'
       && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
       && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
@@ -9350,6 +9356,9 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
                 disabled={anyBusy || (status && status.pendientes === 0)} style={{ width:'100%' }}>
                 {busy === 'sync' ? 'Sincronizando…' : 'Sincronizar gestión ahora'}
               </button>
+              <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:10, lineHeight:1.5 }}>
+                Se vuelca como una foto del momento. Editar una gestión que ya fue sincronizada <strong>no</strong> la re-envía al CRM.
+              </div>
             </div>
           ) : creating ? (
             // ── Alta de cliente nuevo en el CRM (datos del cliente) ─────
@@ -12462,19 +12471,18 @@ function colorCalendarEvento(e, colorsMap, calendarColors) {
     const c = deriveColorsFromGcalHex(e.gcalColor);
     if (c) return c;
   }
-  // Regla de origen: si el evento nace de una tarea del Kanban (manual o
-  // auto-generada desde una gestión), su color es violeta — coherente con la
-  // identidad visual de las tareas (cards lila). Esto se impone aunque la
-  // tarea tenga prospectoId y el último contacto del prospect sea 'agendado'.
-  if (e?.kind === 'tarea') return CAL_COLOR_VIOLETA;
+  // Color por TIPO de gestión — coherente con el badge de la Lista. El
+  // 'recordatorio' (viene de tarea) es violeta; las tareas MANUALES (sin tipo
+  // derivado del prospecto) caen al violeta default de abajo.
   const t = e?.tipo;
+  if (t === 'recordatorio') return CAL_COLOR_VIOLETA;
   if (t === 'agendado') return CAL_COLOR_VERDE;
   if (t === 'contestador') return CAL_COLOR_GRIS;
   if (t === 'mensaje_sin_respuesta') return CAL_COLOR_AZUL;
   if (t === 'fecha_exacta' || (typeof t === 'string' && t.startsWith('llamar_'))) {
     return CAL_COLOR_AMARILLO;
   }
-  // Tarea manual sin tipo derivado del prospect → violeta default.
+  // Tarea manual (sin tipo) → violeta default.
   return CAL_COLOR_VIOLETA;
 }
 

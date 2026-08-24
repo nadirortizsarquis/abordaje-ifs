@@ -460,6 +460,18 @@ Deno.serve(async (req: Request) => {
       if (!crmClientId || Number.isNaN(crmClientId)) {
         return jsonResponse({ error: "missing crm_client_id" }, 400);
       }
+      // Validar que el cliente EXISTA en el CRM antes de fijar el vínculo (evita
+      // anclas a ids inexistentes que después volcarían al cliente equivocado).
+      // Defensivo: un 404 rechaza; cualquier otro fallo del CRM deja pasar el
+      // vínculo (no rompemos el flujo por un hipo de infra).
+      try {
+        await crmClient()(`/clients/${crmClientId}/`);
+      } catch (e) {
+        if ((e as any)?.status === 404) {
+          return jsonResponse({ error: `El cliente #${crmClientId} no existe en el CRM.` }, 404);
+        }
+        console.warn("crm-sync link: no se pudo validar el cliente, se vincula igual:", (e as any)?.message || e);
+      }
       await setLink(crmClientId);
       return jsonResponse({
         ok: true, action: "linked", crm_client_id: crmClientId,
