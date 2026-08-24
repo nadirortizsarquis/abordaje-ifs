@@ -2382,7 +2382,10 @@
   .calpago-asesor-btn { border: 1px solid var(--borde); background: var(--bg-card); border-radius: 8px; font-size: 0.8rem; font-weight: 700; color: var(--texto); padding: 6px 12px; cursor: pointer; }
   .calpago-asesor-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 40; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.16); padding: 10px 12px; min-width: 230px; }
   .calpago-asesor-list { display: flex; flex-direction: column; gap: 5px; margin-top: 6px; max-height: 280px; overflow: auto; border-top: 1px solid var(--borde); padding-top: 6px; }
-  .calpago-pop { position: fixed; z-index: 60; pointer-events: none; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.18); padding: 10px 12px; max-width: 270px; }
+  .calpago-pop { position: fixed; z-index: 60; pointer-events: none; background: #fff; border: 1px solid var(--borde); border-radius: 10px; box-shadow: 0 12px 30px rgba(0,0,0,0.18); padding: 11px 13px;
+    /* Ancho fijo para que el pop del hover salga siempre del mismo tamaño
+       (antes se achicaba al contenido → cada uno un ancho distinto). */
+    width: 252px; max-width: calc(100vw - 24px); box-sizing: border-box; }
   .calpago-pop-row { font-size: 0.74rem; color: #6b7280; margin-bottom: 2px; }
   .calpago-pop-obs { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--borde); font-size: 0.74rem; color: #374151; font-style: italic; white-space: pre-wrap; }
   .calpago-modal-ov { position: fixed; inset: 0; z-index: 70; background: rgba(15,23,42,0.5); display: flex; align-items: center; justify-content: center; padding: 20px; }
