@@ -543,21 +543,41 @@ Deno.serve(async (req: Request) => {
 
       const now = nowIso();
       const logId = log?.id ?? null;
+      // El log YA se creó en el CRM. Marcamos las filas como sincronizadas; si el
+      // marcado falla, NO respondemos "synced" limpio: avisamos, porque re-enviar
+      // volcaría de nuevo esas gestiones (duplicado en la bitácora del CRM).
       const stamp = async (table: string, ids: string[]) => {
-        if (!ids.length) return;
-        await supabase.from(table).update({ crm_log_id: logId, crm_synced_at: now }).in("id", ids);
+        if (!ids.length) return null;
+        const { error } = await supabase.from(table)
+          .update({ crm_log_id: logId, crm_synced_at: now }).in("id", ids);
+        if (error) { console.error(`crm-sync stamp ${table} falló:`, error.message); return { table, error: error.message }; }
+        return null;
       };
-      await Promise.all([
+      const stampResults = await Promise.all([
         stamp("abordaje_prospecto_contactos", contactos.map((x) => x.id)),
         stamp("abordaje_agendados", agendados.map((x) => x.id)),
         stamp("abordaje_tareas", tareas.map((x) => x.id)),
       ]);
+      const stampErrors = stampResults.filter(Boolean);
+      const synced = contactos.length + agendados.length + tareas.length;
+
+      if (stampErrors.length) {
+        return jsonResponse({
+          ok: true,
+          action: "synced_unmarked",
+          crm_log_id: logId,
+          synced,
+          detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
+          warning: "El log se creó en el CRM pero no se pudo marcar todo como sincronizado. NO vuelvas a sincronizar (podría duplicar la gestión en el CRM); avisá a soporte para reintentar el marcado.",
+          stampErrors,
+        });
+      }
 
       return jsonResponse({
         ok: true,
         action: "synced",
         crm_log_id: logId,
-        synced: contactos.length + agendados.length + tareas.length,
+        synced,
         detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
       });
     }

@@ -4718,7 +4718,7 @@ function deriveEstado(prospecto) {
   // registro histórico), retrocedemos para no quedarnos pegados en estado
   // 'agendado' sin agenda real.
   let i = arr.length - 1;
-  while (i >= 0 && arr[i].tipo === 'agendado' && !arr[i].agendadoPara) i--;
+  while (i >= 0 && (arr[i].tipo === 'agendado' || arr[i].tipo === 'recordatorio') && !arr[i].agendadoPara) i--;
   if (i < 0) return 'nuevo';
   const cfg = tipoConfig(arr[i].tipo);
   return cfg ? cfg.estado : 'nuevo';
@@ -6619,7 +6619,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
       && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
     if (yaIgual) return; // nada cambió
-    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchContacto } : c);
+    // Reflejar el actor (quién tocó) en el state, como hace storage.updateContacto.
+    const me = await auth.getUser();
+    const patchLocal = { ...patchContacto, actorId: me?.id || ultimo.actorId };
+    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchLocal } : c);
     const proxNuevo = [...contactosAct].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
     const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
     try {
@@ -10137,9 +10140,10 @@ function HistorialEditForm({ contacto, settings, onSave, onCancel }) {
         patch.agendadoPara = new Date(fechaIso + 'T09:00:00').toISOString();
       }
       // Si la fecha cambió respecto al original, la etiqueta original ya no aplica.
-      // Convertimos automáticamente a "fecha_exacta" (salvo que ya sea agendado, que mantiene tipo).
+      // Convertimos automáticamente a "fecha_exacta" (salvo agendado, que mantiene
+      // tipo, y recordatorio, que conserva su identidad "viene de tarea").
       const cambioFecha = patch.agendadoPara !== contacto.agendadoPara;
-      if (cambioFecha && contacto.tipo !== 'agendado' && contacto.tipo !== 'fecha_exacta') {
+      if (cambioFecha && contacto.tipo !== 'agendado' && contacto.tipo !== 'fecha_exacta' && contacto.tipo !== 'recordatorio') {
         patch.tipo = 'fecha_exacta';
       }
     }
