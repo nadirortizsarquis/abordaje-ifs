@@ -2386,9 +2386,11 @@
   .calpago-pop-row { font-size: 0.74rem; color: #6b7280; margin-bottom: 2px; }
   .calpago-pop-obs { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--borde); font-size: 0.74rem; color: #374151; font-style: italic; white-space: pre-wrap; }
   .calpago-modal-ov { position: fixed; inset: 0; z-index: 70; background: rgba(15,23,42,0.5); display: flex; align-items: center; justify-content: center; padding: 20px; }
-  .calpago-modal { background: #fff; border-radius: 14px; width: 100%; max-width: 440px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); overflow: hidden;
-    /* Tamaño consistente: todas las tarjetas arrancan del mismo alto; el body
-       crece para llenar el espacio y el footer queda siempre al fondo. */
+  .calpago-modal { background: #fff; border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,0.3); overflow: hidden;
+    /* Tamaño consistente para TODAS las tarjetas: ancho fijo (460px, igual que el
+       modal de edición) y alto mínimo parejo; el body crece y el footer queda al
+       fondo. En pantallas angostas se achica solo. */
+    width: 460px; max-width: calc(100vw - 40px);
     min-height: 380px; display: flex; flex-direction: column; }
   .calpago-modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; padding: 16px 18px; background: linear-gradient(135deg, var(--azul-oscuro), var(--azul)); color: #fff; }
   .calpago-modal-title { font-size: 1.02rem; font-weight: 800; }
