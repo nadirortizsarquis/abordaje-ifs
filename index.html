@@ -5857,6 +5857,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [prodAgentes, setProdAgentes] = useState([]);
   // Calendario de pagos: filtro multi-asesor elevado a App (mismo patrón que prodTarget).
   const [calPagoSel, setCalPagoSel] = useState(null);   // null = Todos
+  const [calPagoNuevoSignal, setCalPagoNuevoSignal] = useState(0); // ++ abre el modal "Nuevo pago" en el calendario
   const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
   const calPagoEffIds = useMemo(() => {
     const selfId = agente?.id || user?.id;
@@ -7674,6 +7675,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         {view === 'calendario_pagos' && isAdminProd && calRoster.length > 1 && (
           <CalpagoAsesorPicker roster={calRoster} selIds={calPagoSel} setSelIds={setCalPagoSel} />
         )}
+        {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
+          <button className="btn-primary" style={{ marginLeft: 'auto' }}
+            onClick={() => setCalPagoNuevoSignal(s => s + 1)}
+            title="Cargar un pago a mano (Investors Trust, etc.)">+ Nuevo pago</button>
+        )}
         {view === 'tareas' && (
           <label className="kanban-autoorden" style={{ marginLeft: 'auto' }}
             title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
@@ -7688,7 +7694,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
-        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={agente?.id || user?.id} selfNombre={agente?.display_name || user?.email} />
+        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={agente?.id || user?.id} selfNombre={isAdminProd ? 'IFS' : (agente?.display_name || user?.email)} nuevoSignal={calPagoNuevoSignal} />
       )}
 
       {view === 'lista' && (
@@ -11882,7 +11888,7 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
   );
 }
 
-function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
+function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nuevoSignal }) {
   const idsKey = (effIds || []).slice().sort().join(',');
 
   const [rows, setRows] = useState(null);
@@ -11922,6 +11928,10 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
     });
     return () => { cancel = true; };
   }, [idsKey, manualTick]);
+
+  // El botón "Nuevo pago" vive en el renglón de solapas (App). Al clickearlo,
+  // App incrementa nuevoSignal y acá abrimos el modal de carga.
+  useEffect(() => { if (nuevoSignal > 0) setPagoModal({}); }, [nuevoSignal]);
 
   const detalle = useMemo(() => {
     const out = [];
@@ -12094,7 +12104,9 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
               const evs = byDay[k] || [];
               const MAX = 3;
               return (
-                <div key={i} className={'calpago-cell' + (cell.outOfMonth ? ' out' : '') + (isToday(cell.date) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
+                <div key={i} className={'calpago-cell' + (cell.outOfMonth ? ' out' : '') + (isToday(cell.date) ? ' today' : '') + (selDay === k ? ' sel' : '')}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => { if (evs.length) setSelDay(k); else setPagoModal({ fecha: cell.date }); }}>
                   <div className="calpago-daynum">{cell.date.getDate()}</div>
                   {evs.slice(0, MAX).map((e, j) => renderChip(e, j))}
                   {evs.length > MAX && <div className="calpago-more" onClick={ev => { ev.stopPropagation(); setSelDay(k); }}>+{evs.length - MAX} más</div>}
@@ -12113,7 +12125,9 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
                 const k = dayKey(d);
                 const evs = byDay[k] || [];
                 return (
-                  <div key={i} className={'calpago-cell' + (isToday(d) ? ' today' : '') + (selDay === k ? ' sel' : '')} onClick={() => setSelDay(k)}>
+                  <div key={i} className={'calpago-cell' + (isToday(d) ? ' today' : '') + (selDay === k ? ' sel' : '')}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => { if (evs.length) setSelDay(k); else setPagoModal({ fecha: d }); }}>
                     <div className="calpago-daynum">{DOW_CORTOS[i]} {d.getDate()}/{d.getMonth() + 1}</div>
                     {evs.map((e, j) => renderChip(e, j))}
                     {!evs.length && <div style={{ fontSize: '0.66rem', color: '#cbd5e1', marginTop: 6 }}>—</div>}
@@ -12215,9 +12229,6 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
           <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_CLI_MENSUAL.bg, borderColor: CALPAGO_CLI_MENSUAL.bd }}></span>Cliente mensual</span>
           <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_SIN.bg, borderColor: CALPAGO_SIN.bd }}></span>Sin definir</span>
         </div>
-        <button type="button" className="cal-nav-btn"
-          style={{ background: '#3E4095', color: '#fff', border: 'none', fontWeight: 700, whiteSpace: 'nowrap' }}
-          onClick={() => setPagoModal({})} title="Cargar un pago a mano (Investors Trust, etc.)">+ Nuevo pago</button>
       </div>
 
       {nq && (
@@ -12227,7 +12238,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre }) {
             <button className="cal-nav-btn" style={{ background: '#eef2ff', color: '#3E4095', border: '1px solid #c7d2fe' }} onClick={() => setQ('')}>Limpiar</button>
           </div>
           {searchResults.length ? searchResults.map((e, i) => (
-            <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.origen === 'manual') abrirEvento(e); else if (e.date) goToDate(e.date); else setEditing(e); }}>
+            <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.date) { goToDate(e.date); setQ(''); } else abrirEvento(e); }}>
               <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
