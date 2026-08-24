@@ -11872,7 +11872,8 @@ function CalpagoAsesorPicker({ roster, selIds, setSelIds }) {
   );
 }
 
-function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
+function CalpagoEditModal({ ev, current, isAdmin, onSave, onEdit, onClose }) {
+  const esManual = ev.origen === 'manual';
   const [paga, setPaga] = useState(current ? (current.paga || null) : null);
   const [obs, setObs] = useState(current ? (current.obs || '') : '');
   return (
@@ -11885,7 +11886,7 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
             <div className="calpago-modal-sub">{[CALPAGO_FREQ_LABEL[ev.freq] || ev.freqRaw, ev.estado].filter(Boolean).join(' · ')}</div>
             {calpagoFmtPrima(ev.prima) && <div className="calpago-modal-sub" style={{ fontSize: '0.95rem', fontWeight: 800, opacity: 1 }}>Prima: {calpagoFmtPrima(ev.prima)}</div>}
             <div className="calpago-modal-sub">Vence: {ev.date ? ev.date.toLocaleDateString('es-AR') : '—'}</div>
-            <div className="calpago-modal-sub">Póliza: {ev.poliza}</div>
+            {ev.poliza && <div className="calpago-modal-sub">Póliza: {ev.poliza}</div>}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', flexShrink: 0, marginLeft: 10, alignSelf: 'stretch' }}>
             <button className="calpago-modal-x" onClick={onClose}>×</button>
@@ -11893,22 +11894,40 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
           </div>
         </div>
         <div className="calpago-modal-body">
-          <div className="calpago-modal-label">¿Quién paga?</div>
-          <div className="calpago-payopts">
-            {['cliente', 'ifs', 'agente'].map(pg => {
-              const c = CALPAGO_PAG[pg]; const on = paga === pg;
-              return <button key={pg} type="button" className="calpago-payopt"
-                style={on ? { background: c.bd, borderColor: c.bd, color: '#fff' } : { borderColor: c.bd, color: c.tx, background: '#fff' }}
-                onClick={() => setPaga(on ? null : pg)}>{c.label}</button>;
-            })}
-          </div>
-          <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
-          <textarea className="calpago-modal-obs" value={obs} onChange={e => setObs(e.target.value)} rows={3}
-            placeholder="Notas sobre esta póliza o su cobranza…" />
+          {esManual ? (
+            // Manual: solo lectura acá; para cambiar datos, botón Editar (abre el modal completo).
+            <>
+              <div className="calpago-modal-label">Quién paga</div>
+              <div style={{ marginTop: 5 }}>
+                <span className="calpago-badge" style={calpagoBadgeStyle(ev)}>{ev.pagador ? CALPAGO_PAG[ev.pagador].label : 'Sin definir'}</span>
+              </div>
+              {ev.obs && (<>
+                <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
+                <div style={{ fontSize: '0.86rem', color: '#374151', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>{ev.obs}</div>
+              </>)}
+            </>
+          ) : (
+            <>
+              <div className="calpago-modal-label">¿Quién paga?</div>
+              <div className="calpago-payopts">
+                {['cliente', 'ifs', 'agente'].map(pg => {
+                  const c = CALPAGO_PAG[pg]; const on = paga === pg;
+                  return <button key={pg} type="button" className="calpago-payopt"
+                    style={on ? { background: c.bd, borderColor: c.bd, color: '#fff' } : { borderColor: c.bd, color: c.tx, background: '#fff' }}
+                    onClick={() => setPaga(on ? null : pg)}>{c.label}</button>;
+                })}
+              </div>
+              <div className="calpago-modal-label" style={{ marginTop: 14 }}>Observaciones</div>
+              <textarea className="calpago-modal-obs" value={obs} onChange={e => setObs(e.target.value)} rows={3}
+                placeholder="Notas sobre esta póliza o su cobranza…" />
+            </>
+          )}
         </div>
         <div className="calpago-modal-foot">
-          <button type="button" className="calpago-btn-ghost" onClick={onClose}>Cancelar</button>
-          <button type="button" className="calpago-btn-primary" onClick={() => onSave(paga, obs)}>Guardar</button>
+          <button type="button" className="calpago-btn-ghost" onClick={onClose}>Cerrar</button>
+          {esManual
+            ? <button type="button" className="calpago-btn-primary" onClick={onEdit}>Editar</button>
+            : <button type="button" className="calpago-btn-primary" onClick={() => onSave(paga, obs)}>Guardar</button>}
         </div>
       </div>
     </div>
@@ -12066,14 +12085,9 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
     } catch (e) { /* optimista */ }
   }
 
-  // Abrir un evento: si es manual → modal de edición del pago; si es OLE → modal
-  // de "quién paga".
-  const abrirEvento = (e) => {
-    if (e.origen === 'manual') {
-      const reg = (manuales || []).find(m => m.id === e.manualId);
-      if (reg) setPagoModal({ registro: reg });
-    } else setEditing(e);
-  };
+  // Abrir un evento: SIEMPRE el mismo detalle (CalpagoEditModal). Las manuales
+  // muestran su info + un botón "Editar" que abre el modal de edición completo.
+  const abrirEvento = (e) => setEditing(e);
 
   const renderChip = (e, key) => {
     const st = calpagoStyle(e.pagador, e.freq);
@@ -12288,6 +12302,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
       {editing && (
         <CalpagoEditModal ev={editing} isAdmin={isAdmin} current={pagoMap[calpagoPagoKey(editing.asesorId, editing.poliza)] || null}
           onSave={(paga, obs) => { savePago(editing.asesorId, editing.poliza, paga, obs); setEditing(null); }}
+          onEdit={() => { const reg = (manuales || []).find(m => m.id === editing.manualId); setEditing(null); if (reg) setPagoModal({ registro: reg }); }}
           onClose={() => setEditing(null)} />
       )}
 
