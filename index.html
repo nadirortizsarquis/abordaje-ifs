@@ -7758,6 +7758,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         <NuevoProspectoModal
           onCancel={() => setShowAddModal(false)}
           onSave={handleAdd}
+          prospectos={state.prospectos}
+          onOpenExistente={(id) => { setShowAddModal(false); setSelectedId(id); }}
         />
       )}
 
@@ -10092,12 +10094,37 @@ function HistorialEditForm({ contacto, settings, onSave, onCancel }) {
 }
 
 // ── MODAL NUEVO PROSPECTO ──────────────────────────────────────
-function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
+// Normalizadores para detectar prospectos duplicados (nombre / teléfono / DNI).
+function normNombre(s) {
+  return (s || '').toString().trim().toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+}
+function normTel(s) { return (s || '').toString().replace(/\D/g, ''); }
+// Devuelve los prospectos ACTIVOS que coinciden con los datos dados (excluye
+// el propio id si se pasa). Match por nombre normalizado, o tel (>=6 dígitos), o DNI.
+function buscarDuplicadosProspecto(prospectos, { nombre, telefono, documento }, excluirId = null) {
+  const nn = normNombre(nombre);
+  const tt = normTel(telefono);
+  const dd = (documento || '').toString().trim();
+  if (nn.length < 3 && tt.length < 6 && !dd) return [];
+  return (prospectos || []).filter(p => {
+    if (p.id === excluirId || p.archivado) return false;
+    if (nn.length >= 3 && normNombre(p.nombre) === nn) return true;
+    if (tt.length >= 6 && normTel(p.telefono) === tt) return true;
+    if (dd && (p.documento || '').toString().trim() === dd) return true;
+    return false;
+  });
+}
+
+function NuevoProspectoModal({ onCancel, onSave, slotInfo, prospectos, onOpenExistente }) {
   const [form, setForm] = useState({
     nombre: '', telefono: '', preferenciaContacto: '',
     detalle: '', referente: '', observaciones: ''
   });
   const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
+  const duplicados = buscarDuplicadosProspecto(prospectos, {
+    nombre: form.nombre, telefono: form.telefono, documento: crmCliente?.document_number
+  });
   const [errors, setErrors] = useState({});
   // Evita duplicados por doble Enter / doble tap mientras el save corre.
   const [saving, setSaving] = useState(false);
@@ -10166,6 +10193,23 @@ function NuevoProspectoModal({ onCancel, onSave, slotInfo }) {
               placeholder="Ej: Juan Pérez" autoFocus />
             {errors.nombre && <div className="field-error">{errors.nombre}</div>}
           </div>
+          {duplicados.length > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 12px', marginBottom: 14, fontSize: '0.82rem', color: '#92400e', lineHeight: 1.5 }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>
+                ⚠ Ya {duplicados.length === 1 ? 'existe un prospecto' : `existen ${duplicados.length} prospectos`} que coincide{duplicados.length === 1 ? '' : 'n'}:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {duplicados.slice(0, 4).map(p => (
+                  <button key={p.id} type="button"
+                    onClick={() => onOpenExistente && onOpenExistente(p.id)}
+                    style={{ border: '1px solid #d97706', background: '#fff', color: '#92400e', borderRadius: 999, padding: '4px 11px', fontSize: '0.8rem', fontWeight: 600, cursor: 'pointer' }}>
+                    Abrir "{p.nombre || '(sin nombre)'}"{p.telefono ? ` · ${p.telefono}` : ''}
+                  </button>
+                ))}
+              </div>
+              <div style={{ marginTop: 6, fontSize: '0.76rem' }}>Si es otra persona, podés crearlo igual.</div>
+            </div>
+          )}
           <div className="field-row">
             <div className="field">
               <label>Teléfono</label>
