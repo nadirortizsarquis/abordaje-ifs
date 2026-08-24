@@ -102,6 +102,7 @@ const TIPO_LABELS: Record<string, string> = {
   llamar_lunes: "Llamar próximo lunes",
   llamar_dentro_de: "Llamar dentro de",
   rechazado: "Rechazado",
+  recordatorio: "Recordatorio",
 };
 const COMPANIA_LABELS: Record<string, string> = {
   "ole": "Olé",
@@ -283,20 +284,19 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     contactos = data ?? [];
   }
 
-  // Agendas y tareas: del prospecto O sueltas vinculadas al mismo cliente.
-  const orFilter = (extra: string[]) =>
-    [`crm_client_id.eq.${clientId}`, ...extra].join(",");
-  const prospInPart = prospIds.length ? [`prospecto_id.in.(${prospIds.join(",")})`] : [];
-
+  // Agendas y tareas: SOLO las SUELTAS vinculadas directo a un cliente
+  // (crm_client_id). Las que cuelgan de un prospecto son proyecciones del
+  // contacto (que es el registro canónico) -> NO se vuelcan, para no duplicar
+  // la misma gestión en la bitácora del CRM (recordatorios incluidos).
   const { data: ag } = await supabase.from("abordaje_agendados")
     .select("id, fecha, nota, created_at")
     .eq("agente_id", agenteId).is("crm_synced_at", null)
-    .or(orFilter(prospInPart));
+    .eq("crm_client_id", clientId);
 
   const { data: tr } = await supabase.from("abordaje_tareas")
     .select("id, titulo, observacion, columna_id, compania, fecha_recordatorio, hora_recordatorio, created_at")
     .eq("agente_id", agenteId).eq("archivada", false).is("crm_synced_at", null)
-    .or(orFilter(prospInPart));
+    .eq("crm_client_id", clientId);
 
   return { contactos, agendados: ag ?? [], tareas: tr ?? [] };
 }

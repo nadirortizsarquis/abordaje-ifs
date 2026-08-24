@@ -4609,7 +4609,10 @@ const TIPOS_CONTACTO = [
   { id: 'llamar_semana',     label: 'Llamar en una semana', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
   { id: 'llamar_lunes',      label: 'Llamar próximo lunes', color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'none' },
   { id: 'llamar_dentro_de',  label: 'Llamar dentro de…',   color: '#9a3412', bg: '#fed7aa', estado: 'programado', input: 'plazo' },
-  { id: 'rechazado',         label: 'RECHAZADO',           color: '#991b1b', bg: '#fee2e2', estado: 'rechazado',  input: 'none' }
+  { id: 'rechazado',         label: 'RECHAZADO',           color: '#991b1b', bg: '#fee2e2', estado: 'rechazado',  input: 'none' },
+  // Derivado (no seleccionable a mano): lo setea el sync inverso cuando se pone/
+  // cambia un recordatorio desde la tarjeta de Tareas. Violeta = viene de tarea.
+  { id: 'recordatorio',      label: 'Recordatorio',        color: '#6d28d9', bg: '#ede9fe', estado: 'programado', input: 'fechahora', derivado: true }
 ];
 
 const ESTADO_META = {
@@ -6505,7 +6508,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // NO llamamos sincronizarSeguimiento (evita el delete+recreate: la tarea ya
   // refleja el cambio). Solo aplica si el último contacto genera tarea (no una
   // cita 'agendado').
-  const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora) => {
+  // Extrae la última línea REAL de bitácora (entrada con timestamp `[...]`) del
+  // texto de una tarea. Devuelve null si el tope no es una entrada de bitácora
+  // (ej. el "Label — nota" inicial): en ese caso no pisamos la observación.
+  const extraerUltimaLineaBitacora = (obs) => {
+    if (!obs) return null;
+    const top = (obs.split(/\n\n+/)[0] || '').trim();
+    const m = top.match(/^\[[^\]]*\]\s*([\s\S]*)$/);
+    return m ? m[1].trim() : null;
+  };
+
+  const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora, nota) => {
     const prospectoId = tarea?.prospectoId;
     if (!prospectoId) return;
     const prospecto = state.prospectos.find(p => p.id === prospectoId);
@@ -6514,12 +6527,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     const ultimo = contactos[contactos.length - 1];
     if (!ultimo || ultimo.tipo === 'agendado') return;
     const nuevoAgendado = nuevaFecha ? (nuevaHora ? `${nuevaFecha}T${nuevaHora}` : nuevaFecha) : null;
-    if ((ultimo.agendadoPara || null) === (nuevoAgendado || null)) return; // sin cambio real
-    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, agendadoPara: nuevoAgendado } : c);
+    // El contacto activo pasa a "recordatorio" (violeta) con la fecha de la tarea.
+    // La observación se pisa SOLO si vino una línea de bitácora nueva (nota != null).
+    const patchContacto = { tipo: 'recordatorio', agendadoPara: nuevoAgendado };
+    if (nota != null) patchContacto.observacion = nota;
+    const yaIgual = ultimo.tipo === 'recordatorio'
+      && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
+      && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
+    if (yaIgual) return; // nada cambió
+    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchContacto } : c);
     const proxNuevo = [...contactosAct].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
     const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
     try {
-      await storage.updateContacto(ultimo.id, { agendadoPara: nuevoAgendado });
+      await storage.updateContacto(ultimo.id, patchContacto);
       await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
       setState(s => ({
         ...s,
@@ -6776,7 +6796,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           }));
           // Sync inverso a la ficha del prospecto si esta tarea es de un prospecto.
           const tareaObj = state.tareas.items.find(t => t.id === e.tareaId);
-          if (tareaObj?.prospectoId) await _syncTareaAProspecto(tareaObj, newF, newH);
+          if (tareaObj?.prospectoId) await _syncTareaAProspecto(tareaObj, newF, newH, extraerUltimaLineaBitacora(tareaObj.observacion));
         }
         bumpGcal();
         showToast('Evento movido');
@@ -7099,9 +7119,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       await storage.updateTarea(id, patch);
       // Sync inverso: si es una tarea de prospecto y cambió la fecha/hora,
       // propagar al contacto activo del prospecto (Lista de Abordaje al día).
-      if (prev?.prospectoId && ('fechaRecordatorio' in patch || 'horaRecordatorio' in patch)) {
+      if (prev?.prospectoId) {
         const merged = { ...prev, ...patch };
-        await _syncTareaAProspecto(prev, merged.fechaRecordatorio || null, merged.horaRecordatorio || null);
+        const fechaCambio = (merged.fechaRecordatorio || null) !== (prev.fechaRecordatorio || null)
+          || (merged.horaRecordatorio || null) !== (prev.horaRecordatorio || null);
+        const nota = extraerUltimaLineaBitacora(merged.observacion);
+        const notaCambio = ('observacion' in patch) && (patch.observacion || '') !== (prev.observacion || '') && nota != null;
+        if (fechaCambio || notaCambio) {
+          await _syncTareaAProspecto(prev, merged.fechaRecordatorio || null, merged.horaRecordatorio || null, nota);
+        }
       }
       // En piloto, sincronizar con Google Calendar.
       if (isPilot && prev) {
@@ -9815,7 +9841,7 @@ function RegistrarGestion({ onSubmit, settings }) {
   return (
     <div>
       <div className="tipos-grid">
-        {TIPOS_CONTACTO.map(t => {
+        {TIPOS_CONTACTO.filter(t => !t.derivado).map(t => {
           const selected = tipoSel === t.id;
           return (
             <button
