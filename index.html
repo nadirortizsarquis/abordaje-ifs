@@ -2363,8 +2363,10 @@
   .calpago-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
   .calpago-row:last-child { border-bottom: none; }
   .calpago-badge { font-size: 0.66rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.3px; }
-  /* Logo mini de la compañía en el chip del calendario (diferenciación delicada OLE/IT). */
-  .calpago-chip-logo { width: 11px; height: 11px; object-fit: contain; margin-right: 3px; vertical-align: -1px; display: inline-block; opacity: 0.9; }
+  /* Badge de compañía en el chip del calendario (sigla OLE/IT/…): legible en
+     tamaño chico, diferenciación delicada. */
+  .calpago-chip-cia { display: inline-block; font-size: 0.55rem; font-weight: 800; color: #fff;
+    border-radius: 4px; padding: 0 4px; margin-right: 4px; letter-spacing: 0.3px; vertical-align: 1px; line-height: 1.5; }
   .calpago-paysel { display: inline-flex; gap: 4px; margin-left: auto; }
   .calpago-paysel button {
     border: 1px solid var(--borde); background: var(--bg-card); border-radius: 6px;
@@ -11743,6 +11745,32 @@ function calpagoCompaniaLabel(compania) {
   const c = COMPANIAS.find(x => x.id === compania);
   return (c && c.label) || 'OLE';
 }
+// Config visual por compañía para el calendario de pagos:
+//  - code:   sigla corta para el badge del chip (legible en tamaño chico).
+//  - accent: color de marca para el badge.
+//  - logoBg: fondo correcto para que el logo sea legible (OLE color→blanco,
+//            Investors/BD son blancos sobre navy→fondo oscuro).
+const CALPAGO_COMPANIA = {
+  'ole':             { code: 'OLE', accent: '#0098DA', logoBg: '#ffffff' },
+  'investors-trust': { code: 'IT',  accent: '#0E7AA8', logoBg: '#0E7AA8' },
+  'life-group':      { code: 'LG',  accent: '#3E4095', logoBg: '#ffffff' },
+  'best-doctors':    { code: 'BD',  accent: '#0D8FA8', logoBg: '#0D8FA8' },
+  'patrimonial':     { code: 'PAT', accent: '#6b7280', logoBg: '#ffffff' },
+};
+function calpagoCompaniaCfg(c) { return CALPAGO_COMPANIA[c] || CALPAGO_COMPANIA['ole']; }
+// Logo en su caja con el fondo correcto (reutilizable: tarjeta, hover).
+function CalpagoLogoBox({ compania, h = 30 }) {
+  const logo = calpagoCompaniaLogo(compania);
+  if (!logo) return <span style={{ fontWeight: 800, fontSize: 13, color: '#334155' }}>{calpagoCompaniaLabel(compania)}</span>;
+  const cfg = calpagoCompaniaCfg(compania);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: cfg.logoBg,
+      borderRadius: 7, padding: '4px 8px', height: h, border: '1px solid rgba(0,0,0,0.08)', flexShrink: 0 }}
+      title={calpagoCompaniaLabel(compania)}>
+      <img src={logo} alt={calpagoCompaniaLabel(compania)} style={{ maxHeight: h - 10, maxWidth: 96, objectFit: 'contain', display: 'block' }} />
+    </span>
+  );
+}
 const calpagoBadgeStyle = e => { const st = calpagoStyle(e.pagador, e.freq); return { background: st.bg, borderColor: st.bd, color: st.tx }; };
 function calpagoDayLabel(k) {
   const p = k.split('-').map(Number);
@@ -11859,10 +11887,7 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onClose }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', justifyContent: 'space-between', flexShrink: 0, marginLeft: 10, alignSelf: 'stretch' }}>
             <button className="calpago-modal-x" onClick={onClose}>×</button>
-            {calpagoCompaniaLogo(ev.compania) && (
-              <img src={calpagoCompaniaLogo(ev.compania)} alt={calpagoCompaniaLabel(ev.compania)} title={calpagoCompaniaLabel(ev.compania)}
-                style={{ maxWidth: 52, maxHeight: 24, objectFit: 'contain' }} />
-            )}
+            <CalpagoLogoBox compania={ev.compania} h={42} />
           </div>
         </div>
         <div className="calpago-modal-body">
@@ -12051,7 +12076,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   const renderChip = (e, key) => {
     const st = calpagoStyle(e.pagador, e.freq);
     const hasObs = !!(e.obs && e.obs.length);
-    const logo = calpagoCompaniaLogo(e.compania);
+    const cia = calpagoCompaniaCfg(e.compania);
     return (
       <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
         style={{ background: st.bg, borderColor: st.bd, color: st.tx }}
@@ -12059,7 +12084,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
         onMouseLeave={() => setHover(null)}
         onClick={ev => { ev.stopPropagation(); setHover(null); abrirEvento(e); }}>
         {hasObs && <span className="calpago-chip-note" style={{ background: st.bd }}></span>}
-        {logo && <img src={logo} alt="" className="calpago-chip-logo" />}
+        <span className="calpago-chip-cia" style={{ background: cia.accent }}>{cia.code}</span>
         {e.asegurado}
       </button>
     );
@@ -12272,14 +12297,22 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
 
       {hover && (
         <div className="calpago-pop" style={{ left: Math.max(8, Math.min(hover.x, winW - 285)), top: hover.y + 6 }}>
-          <div style={{ fontWeight: 700, color: '#1e1b4b', marginBottom: 4 }}>{hover.e.asegurado}</div>
-          {isAdmin && hover.e.asesorNombre && <div className="calpago-pop-row" style={{ color: '#7C3AED', fontWeight: 600 }}>{hover.e.asesorNombre}</div>}
-          <div className="calpago-pop-row">{[CALPAGO_FREQ_LABEL[hover.e.freq] || hover.e.freqRaw, hover.e.estado].filter(Boolean).join(' · ')}</div>
-          {calpagoFmtPrima(hover.e.prima) && <div className="calpago-pop-row" style={{ fontSize: '0.9rem', fontWeight: 700, color: '#1e1b4b' }}>Prima: {calpagoFmtPrima(hover.e.prima)}</div>}
-          <div className="calpago-pop-row">Vence: {hover.e.date.toLocaleDateString('es-AR')}</div>
-          <div className="calpago-pop-row">Póliza: {hover.e.poliza}</div>
-          <div style={{ marginTop: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 9, paddingBottom: 9, borderBottom: '1px solid #eef2f7' }}>
+            <CalpagoLogoBox compania={hover.e.compania} h={30} />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 800, color: '#1e1b4b', fontSize: '0.92rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hover.e.asegurado}</div>
+              {isAdmin && hover.e.asesorNombre && <div style={{ fontSize: '0.72rem', color: '#7C3AED', fontWeight: 700 }}>{hover.e.asesorNombre}</div>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <div className="calpago-pop-row">{[CALPAGO_FREQ_LABEL[hover.e.freq] || hover.e.freqRaw, hover.e.estado].filter(Boolean).join(' · ')}</div>
+            {calpagoFmtPrima(hover.e.prima) && <div className="calpago-pop-row" style={{ fontWeight: 700, color: '#1e1b4b' }}>Prima: {calpagoFmtPrima(hover.e.prima)}</div>}
+            <div className="calpago-pop-row">Vence: {hover.e.date ? hover.e.date.toLocaleDateString('es-AR') : '—'}</div>
+            {hover.e.poliza && <div className="calpago-pop-row">Póliza: {hover.e.poliza}</div>}
+          </div>
+          <div style={{ marginTop: 9, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
             <span className="calpago-badge" style={calpagoBadgeStyle(hover.e)}>{hover.e.pagador ? CALPAGO_PAG[hover.e.pagador].label : 'Sin definir'}</span>
+            <span style={{ fontSize: '0.66rem', color: '#94a3b8', fontWeight: 700 }}>{calpagoCompaniaLabel(hover.e.compania)}</span>
           </div>
           {hover.e.obs && <div className="calpago-pop-obs">{hover.e.obs}</div>}
         </div>
@@ -12352,9 +12385,7 @@ function PagoManualModal({ registro, fechaInit, selfId, defaultAsesor, onClose, 
             <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b', marginBottom: 2 }}>{ed.id ? 'Editar pago' : 'Nuevo pago'}</div>
             <div style={{ fontSize: 12.5, color: '#6b7280', marginBottom: 6 }}>Carga manual (planes sin reporte automático, ej. Investors Trust).</div>
           </div>
-          {calpagoCompaniaLogo(compania) && (
-            <img src={calpagoCompaniaLogo(compania)} alt={calpagoCompaniaLabel(compania)} style={{ maxWidth: 56, maxHeight: 28, objectFit: 'contain', flexShrink: 0 }} />
-          )}
+          <CalpagoLogoBox compania={compania} h={40} />
         </div>
 
         <label style={lbl}>Compañía</label>
