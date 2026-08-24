@@ -8499,6 +8499,11 @@ function FilaProspecto({ prospecto, onClick, selectable = false, selected = fals
       <td className="col-nombre">
         <ActorStar item={prospecto} />
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
+        {prospecto.createdAt && (
+          <div style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', fontWeight: 400, marginTop: 2 }}>
+            creado {dateToDDMMYY(new Date(prospecto.createdAt))}
+          </div>
+        )}
       </td>
       <td className="col-telefono">{prospecto.telefono || '—'}</td>
       <td className="estado-cell"><BadgeEstado prospecto={prospecto} /></td>
@@ -16202,6 +16207,11 @@ function TareaCard({ tarea, readOnly, autoOrden, onClick, onDropTarea, onToggleP
           </div>
         );
       })()}
+      {tarea.createdAt && (
+        <div style={{ fontSize: '0.62rem', color: 'var(--texto-suave)', marginTop: 4 }}>
+          creada {dateToDDMMYY(new Date(tarea.createdAt))}
+        </div>
+      )}
       {companiaPicker && (
         <CompaniaPicker
           x={companiaPicker.x}
