@@ -4482,7 +4482,10 @@ const EVENT_COLOR_PALETTE = {
   amarillo:       { color: '#854d0e', bg: '#fef9c3', border: '#ca8a04', label: 'Amarillo' },
   verde:          { color: '#065f46', bg: '#d1fae5', border: '#15803d', label: 'Verde' },
   turquesa:       { color: '#115e59', bg: '#ccfbf1', border: '#0d9488', label: 'Turquesa' },
+  cian:           { color: '#155e75', bg: '#cffafe', border: '#0891b2', label: 'Cian' },
+  celeste:        { color: '#075985', bg: '#e0f2fe', border: '#0284c7', label: 'Celeste' },
   azul:           { color: '#1e40af', bg: '#dbeafe', border: '#1d4ed8', label: 'Azul' },
+  indigo:         { color: '#3730a3', bg: '#e0e7ff', border: '#4f46e5', label: 'Índigo' },
   rosa:           { color: '#9d174d', bg: '#fce7f3', border: '#db2777', label: 'Rosa' },
   gris:           { color: '#1f2937', bg: '#e5e7eb', border: '#4b5563', label: 'Gris' },
   // Variantes claras: mismo tono, fondo más suave y texto/borde más livianos.
@@ -4491,15 +4494,18 @@ const EVENT_COLOR_PALETTE = {
   amarilloClaro:  { color: '#a16207', bg: '#fefce8', border: '#fde047', label: 'Amarillo claro' },
   verdeClaro:     { color: '#15803d', bg: '#f0fdf4', border: '#86efac', label: 'Verde claro' },
   turquesaClaro:  { color: '#0d9488', bg: '#f0fdfa', border: '#5eead4', label: 'Turquesa claro' },
+  cianClaro:      { color: '#0e7490', bg: '#ecfeff', border: '#67e8f9', label: 'Cian claro' },
+  celesteClaro:   { color: '#0284c7', bg: '#f0f9ff', border: '#7dd3fc', label: 'Celeste claro' },
   azulClaro:      { color: '#1d4ed8', bg: '#eff6ff', border: '#93c5fd', label: 'Azul claro' },
+  indigoClaro:    { color: '#4338ca', bg: '#eef2ff', border: '#a5b4fc', label: 'Índigo claro' },
   rosaClaro:      { color: '#be185d', bg: '#fdf2f8', border: '#f9a8d4', label: 'Rosa claro' },
   grisClaro:      { color: '#4b5563', bg: '#f9fafb', border: '#d1d5db', label: 'Gris claro' },
 };
 // Orden visual: cada base seguido de su variante clara, agrupados por matiz.
 // Render en 2 filas (8 columnas) para que se vea limpio en el picker.
 const EVENT_COLOR_ORDER = [
-  'rojo','naranja','amarillo','verde','turquesa','azul','rosa','gris',
-  'rojoClaro','naranjaClaro','amarilloClaro','verdeClaro','turquesaClaro','azulClaro','rosaClaro','grisClaro',
+  'rojo','naranja','amarillo','verde','turquesa','cian','celeste','azul','indigo','rosa','gris',
+  'rojoClaro','naranjaClaro','amarilloClaro','verdeClaro','turquesaClaro','cianClaro','celesteClaro','azulClaro','indigoClaro','rosaClaro','grisClaro',
 ];
 
 // Construye la clave que identifica univocamente un evento del calendar para
