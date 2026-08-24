@@ -5862,6 +5862,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Calendario de pagos: filtro multi-asesor elevado a App (mismo patrón que prodTarget).
   const [calPagoSel, setCalPagoSel] = useState(null);   // null = Todos
   const [calPagoNuevoSignal, setCalPagoNuevoSignal] = useState(0); // ++ abre el modal "Nuevo pago" en el calendario
+  const [calPagoQ, setCalPagoQ] = useState(''); // buscador del calendario de pagos (subido a App para ir al lado del botón)
   const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
   const calPagoEffIds = useMemo(() => {
     const selfId = agente?.id || user?.id;
@@ -7680,9 +7681,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           <CalpagoAsesorPicker roster={calRoster} selIds={calPagoSel} setSelIds={setCalPagoSel} />
         )}
         {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
-          <button className="btn-primary" style={{ marginLeft: 'auto' }}
-            onClick={() => setCalPagoNuevoSignal(s => s + 1)}
-            title="Cargar un pago a mano (Investors Trust, etc.)">+ Nuevo pago</button>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input type="search" value={calPagoQ} onChange={e => setCalPagoQ(e.target.value)} placeholder="Buscar cliente o póliza…"
+                aria-label="Buscar en el calendario de pagos"
+                style={{ height: 32, padding: '0 26px 0 12px', borderRadius: 999, border: '1px solid var(--borde)', fontSize: '0.82rem', minWidth: 150, background: 'var(--bg-card)', color: 'var(--texto)' }} />
+              {calPagoQ && <button type="button" onClick={() => setCalPagoQ('')} aria-label="Limpiar búsqueda"
+                style={{ position: 'absolute', right: 8, border: 'none', background: 'none', cursor: 'pointer', color: 'var(--texto-suave)', fontSize: 15, lineHeight: 1, padding: 0 }}>×</button>}
+            </div>
+            <button className="btn-primary"
+              onClick={() => setCalPagoNuevoSignal(s => s + 1)}
+              title="Cargar un pago a mano (Investors Trust, etc.)">+ Nuevo pago</button>
+          </div>
         )}
         {view === 'tareas' && (
           <label className="kanban-autoorden" style={{ marginLeft: 'auto' }}
@@ -7698,7 +7708,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
-        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={agente?.id || user?.id} selfNombre={isAdminProd ? 'IFS' : (agente?.display_name || user?.email)} nuevoSignal={calPagoNuevoSignal} />
+        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={agente?.id || user?.id} selfNombre={isAdminProd ? 'IFS' : (agente?.display_name || user?.email)} nuevoSignal={calPagoNuevoSignal} q={calPagoQ} setQ={setCalPagoQ} />
       )}
 
       {view === 'lista' && (
@@ -11920,7 +11930,7 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onEdit, onClose }) {
   );
 }
 
-function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nuevoSignal }) {
+function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nuevoSignal, q = '', setQ }) {
   const idsKey = (effIds || []).slice().sort().join(',');
 
   const [rows, setRows] = useState(null);
@@ -11938,7 +11948,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   const [editing, setEditing] = useState(null);
   const [freqF, setFreqF] = useState({ mensual: true, trimestral: true, semestral: true, anual: true });
   const [pagF, setPagF] = useState({ cliente: true, ifs: true, agente: true, sin: true });
-  const [q, setQ] = useState('');
+  const [ciaF, setCiaF] = useState({}); // filtro por compañía; sin clave = mostrado
 
   useEffect(() => {
     if (!effIds.length) { setRows([]); setLoading(false); return; }
@@ -12023,11 +12033,17 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   }, [detalle, pagoMap, eachPay, year, nombreDe]);
 
   const nq = calpagoNorm(q);
+  // Compañías presentes en los datos (para los checks de filtro).
+  const companiasPresentes = useMemo(() => {
+    const set = new Set((detalle || []).map(p => p._compania || 'ole'));
+    return COMPANIAS.filter(c => set.has(c.id));
+  }, [detalle]);
   const shown = useMemo(() => eventos.filter(e => {
     if (e.freq && !freqF[e.freq]) return false;
     if (!pagF[e.pagador || 'sin']) return false;
+    if (ciaF[e.compania] === false) return false;
     return true;
-  }), [eventos, freqF, pagF]);
+  }), [eventos, freqF, pagF, ciaF]);
   // Búsqueda sobre TODO el libro (todos los años, no solo el que se ve).
   const searchResults = useMemo(() => {
     if (!nq) return [];
@@ -12237,10 +12253,6 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   return (
     <div>
       <div className="calpago-toolbar">
-        <div className="calpago-fgroup" style={{ position: 'relative' }}>
-          <input className="calpago-search" type="text" value={q} onChange={e => setQ(e.target.value)} placeholder="Buscar cliente o póliza…" />
-          {q && <button type="button" className="calpago-search-x" onClick={() => setQ('')}>×</button>}
-        </div>
         <div className="calpago-toggle">
           <button className={!eachPay ? 'active' : ''} onClick={() => setEachPay(false)}>Solo renovación</button>
           <button className={eachPay ? 'active' : ''} onClick={() => setEachPay(true)}>Mostrar cada pago</button>
@@ -12263,6 +12275,17 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
             </label>
           ))}
         </div>
+        {companiasPresentes.length > 1 && (
+          <div className="calpago-fgroup">
+            <span className="calpago-fgroup-label">Compañía</span>
+            {companiasPresentes.map(c => (
+              <label className="calpago-chk" key={c.id}>
+                <input type="checkbox" checked={ciaF[c.id] !== false} onChange={e => setCiaF(x => ({ ...x, [c.id]: e.target.checked }))} />
+                {calpagoCompaniaCfg(c.id).code}
+              </label>
+            ))}
+          </div>
+        )}
         <div className="calpago-legend">
           {['cliente', 'ifs', 'agente'].map(k => { const c = CALPAGO_PAG[k]; return (
             <span className="calpago-legend-item" key={k}><span className="calpago-dot" style={{ background: c.bg, borderColor: c.bd }}></span>{c.label}</span>
