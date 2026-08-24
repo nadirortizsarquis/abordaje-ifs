@@ -2363,10 +2363,12 @@
   .calpago-row { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--borde); flex-wrap: wrap; }
   .calpago-row:last-child { border-bottom: none; }
   .calpago-badge { font-size: 0.66rem; font-weight: 800; padding: 2px 8px; border-radius: 6px; border: 1px solid; text-transform: uppercase; letter-spacing: 0.3px; }
-  /* Badge de compañía en el chip del calendario (sigla OLE/IT/…): legible en
-     tamaño chico, diferenciación delicada. */
-  .calpago-chip-cia { display: inline-block; font-size: 0.55rem; font-weight: 800; color: #fff;
-    border-radius: 4px; padding: 0 4px; margin-right: 4px; letter-spacing: 0.3px; vertical-align: 1px; line-height: 1.5; }
+  /* Logo de compañía en el chip del calendario, en su cajita con el fondo
+     correcto (OLE→blanco, Investors/BD blancos→navy) para que se lea. */
+  .calpago-chip-logobox { display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 3px; padding: 1px 3px; margin-right: 4px; vertical-align: -2px;
+    border: 1px solid rgba(0,0,0,0.10); flex-shrink: 0; }
+  .calpago-chip-logobox img { height: 12px; width: auto; max-width: 58px; object-fit: contain; display: block; }
   .calpago-paysel { display: inline-flex; gap: 4px; margin-left: auto; }
   .calpago-paysel button {
     border: 1px solid var(--borde); background: var(--bg-card); border-radius: 6px;
@@ -12077,6 +12079,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
     const st = calpagoStyle(e.pagador, e.freq);
     const hasObs = !!(e.obs && e.obs.length);
     const cia = calpagoCompaniaCfg(e.compania);
+    const logo = calpagoCompaniaLogo(e.compania);
     return (
       <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
         style={{ background: st.bg, borderColor: st.bd, color: st.tx }}
@@ -12084,7 +12087,11 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
         onMouseLeave={() => setHover(null)}
         onClick={ev => { ev.stopPropagation(); setHover(null); abrirEvento(e); }}>
         {hasObs && <span className="calpago-chip-note" style={{ background: st.bd }}></span>}
-        <span className="calpago-chip-cia" style={{ background: cia.accent }}>{cia.code}</span>
+        {logo && (
+          <span className="calpago-chip-logobox" style={{ background: cia.logoBg }} title={calpagoCompaniaLabel(e.compania)}>
+            <img src={logo} alt="" />
+          </span>
+        )}
         {e.asegurado}
       </button>
     );
