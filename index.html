@@ -6498,6 +6498,38 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
+  // Sync INVERSO (tarea → prospecto). La tarea auto-generada de un prospecto es
+  // una proyección de su último contacto; si el usuario le cambia la fecha/hora
+  // desde el Kanban o arrastrándola en el calendario, propagamos el nuevo
+  // `agendadoPara` al contacto activo para que Lista de Abordaje NO quede stale.
+  // NO llamamos sincronizarSeguimiento (evita el delete+recreate: la tarea ya
+  // refleja el cambio). Solo aplica si el último contacto genera tarea (no una
+  // cita 'agendado').
+  const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora) => {
+    const prospectoId = tarea?.prospectoId;
+    if (!prospectoId) return;
+    const prospecto = state.prospectos.find(p => p.id === prospectoId);
+    if (!prospecto) return;
+    const contactos = prospecto.contactos || [];
+    const ultimo = contactos[contactos.length - 1];
+    if (!ultimo || ultimo.tipo === 'agendado') return;
+    const nuevoAgendado = nuevaFecha ? (nuevaHora ? `${nuevaFecha}T${nuevaHora}` : nuevaFecha) : null;
+    if ((ultimo.agendadoPara || null) === (nuevoAgendado || null)) return; // sin cambio real
+    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, agendadoPara: nuevoAgendado } : c);
+    const proxNuevo = [...contactosAct].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
+    const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
+    try {
+      await storage.updateContacto(ultimo.id, { agendadoPara: nuevoAgendado });
+      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+      setState(s => ({
+        ...s,
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
+      }));
+    } catch (e) { console.warn('sync tarea->prospecto:', e?.message || e); }
+  };
+
   const handleAddContacto = async (prospectoId, contacto, opts = {}) => {
     if (guardReadOnly()) return;
     try {
@@ -6742,6 +6774,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
             tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === e.tareaId
               ? { ...t, fechaRecordatorio: newF, horaRecordatorio: newH, actorId: me?.id || t.actorId, updatedAt: new Date().toISOString() } : t) }
           }));
+          // Sync inverso a la ficha del prospecto si esta tarea es de un prospecto.
+          const tareaObj = state.tareas.items.find(t => t.id === e.tareaId);
+          if (tareaObj?.prospectoId) await _syncTareaAProspecto(tareaObj, newF, newH);
         }
         bumpGcal();
         showToast('Evento movido');
@@ -7062,6 +7097,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }));
     try {
       await storage.updateTarea(id, patch);
+      // Sync inverso: si es una tarea de prospecto y cambió la fecha/hora,
+      // propagar al contacto activo del prospecto (Lista de Abordaje al día).
+      if (prev?.prospectoId && ('fechaRecordatorio' in patch || 'horaRecordatorio' in patch)) {
+        const merged = { ...prev, ...patch };
+        await _syncTareaAProspecto(prev, merged.fechaRecordatorio || null, merged.horaRecordatorio || null);
+      }
       // En piloto, sincronizar con Google Calendar.
       if (isPilot && prev) {
         const merged = { ...prev, ...patch };
