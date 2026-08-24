@@ -6608,6 +6608,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     const prospecto = state.prospectos.find(p => p.id === prospectoId);
     if (!prospecto) return;
     const contactos = prospecto.contactos || [];
+    // INVARIANTE (no romper): una tarea de prospecto se crea SOLO en
+    // _syncSeguimientoBody, que borra-y-recrea, así que a lo sumo hay UNA tarea
+    // por prospecto y siempre espeja al ÚLTIMO contacto. Por eso acá operamos
+    // sobre contactos[último]. Si alguna vez se permite crear tareas de prospecto
+    // por otra vía (sin regenerar), habría que ligar la tarea a su contacto de
+    // origen (columna contacto_id) y sincronizar contra ese id.
     const ultimo = contactos[contactos.length - 1];
     if (!ultimo || ultimo.tipo === 'agendado') return;
     const nuevoAgendado = nuevaFecha ? (nuevaHora ? `${nuevaFecha}T${nuevaHora}` : nuevaFecha) : null;
