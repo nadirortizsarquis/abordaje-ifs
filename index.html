@@ -4933,7 +4933,16 @@ function buscarEnProspectos(prospectos, q) {
   );
 }
 
-function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = [], ordenFecha = 'ninguno') {
+// Timestamp de la gestión MÁS reciente de un prospecto (los contactos vienen
+// ordenados por created_at ascendente, así que el último es el más nuevo).
+function ultimaGestionTs(p) {
+  const cs = p.contactos || [];
+  if (!cs.length) return '';
+  const u = cs[cs.length - 1];
+  return u.createdAt || u.fecha || '';
+}
+
+function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = [], ordenFecha = 'ninguno', ordenGestion = false) {
   const hoy = new Date();
   // filterEtiqueta es array (vacío = todas). Aceptamos también el formato
   // legacy de string ('todos' o un único id) por compatibilidad.
@@ -4964,7 +4973,16 @@ function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = 
     }
     return true;
   });
-  if (ordenFecha === 'asc' || ordenFecha === 'desc') {
+  // El check "gestión reciente" tiene prioridad sobre el orden por próximo contacto.
+  if (ordenGestion) {
+    r = [...r].sort((a, b) => {
+      const ax = ultimaGestionTs(a), bx = ultimaGestionTs(b);
+      if (!ax && !bx) return 0;
+      if (!ax) return 1;   // sin gestiones al final
+      if (!bx) return -1;
+      return bx.localeCompare(ax); // más reciente arriba
+    });
+  } else if (ordenFecha === 'asc' || ordenFecha === 'desc') {
     r = [...r].sort((a, b) => {
       const ax = a.proximoContacto || '';
       const bx = b.proximoContacto || '';
@@ -6124,6 +6142,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     setAutoOrdenTareas(v => {
       const nv = !v;
       try { localStorage.setItem('abordaje_tareas_autoorden', nv ? '1' : '0'); } catch (_) {}
+      return nv;
+    });
+  }, []);
+  // Lista Abordaje: autoordenar por gestión más reciente arriba (descendente).
+  const [ordenGestion, setOrdenGestion] = useState(() => {
+    try { return localStorage.getItem('abordaje_lista_orden_gestion') === '1'; } catch (_) { return false; }
+  });
+  const toggleOrdenGestion = useCallback(() => {
+    setOrdenGestion(v => {
+      const nv = !v;
+      try { localStorage.setItem('abordaje_lista_orden_gestion', nv ? '1' : '0'); } catch (_) {}
       return nv;
     });
   }, []);
@@ -7640,7 +7669,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
               vistaLista === 'archivo' ? p.archivado : !p.archivado
             );
             const filtradosVista = buscarEnProspectos(
-              aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha),
+              aplicarFiltros(prospectosVista, filterEstado, filterFecha, filterEtiqueta, ordenFecha, ordenGestion),
               listaBusqueda
             );
             const archivadosCount = state.prospectos.filter(p => p.archivado).length;
@@ -7656,6 +7685,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
                   setFilterEtiqueta={setFilterEtiqueta}
                   ordenFecha={ordenFecha}
                   setOrdenFecha={setOrdenFecha}
+                  ordenGestion={ordenGestion}
+                  toggleOrdenGestion={toggleOrdenGestion}
                   mostrandoCount={filtradosVista.length}
                   totalCount={prospectosVista.length}
                   vistaLista={vistaLista}
@@ -8179,7 +8210,7 @@ function EmptyState({ onAdd }) {
 // Por default los filtros van plegados — ocupan menos espacio en pantalla.
 // Se despliegan al tocar el toggle "Filtros". Si hay filtros activos, el
 // toggle muestra un badge con la cantidad activos y queda destacado.
-function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0, busqueda = '', setBusqueda = null }) {
+function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha, filterEtiqueta = [], setFilterEtiqueta, ordenFecha = 'ninguno', setOrdenFecha, ordenGestion = false, toggleOrdenGestion = null, mostrandoCount, totalCount, extraActions = null, vistaLista = null, setVistaLista = null, archivadosCount = 0, busqueda = '', setBusqueda = null }) {
   const etiquetasArr = Array.isArray(filterEtiqueta) ? filterEtiqueta : [];
   const filtrosCount =
     (filterEstado !== 'todos' ? 1 : 0)
@@ -8225,6 +8256,13 @@ function FilterBar({ filterEstado, setFilterEstado, filterFecha, setFilterFecha,
         <div className="filter-count">
           {hayFiltros ? `Mostrando ${mostrandoCount} de ${totalCount}` : `${totalCount} ${totalCount === 1 ? 'prospecto' : 'prospectos'}`}
         </div>
+        {toggleOrdenGestion && (
+          <label className="kanban-autoorden"
+            title="Ordena la lista poniendo arriba los prospectos con la gestión más reciente (descendente). Al destildar vuelve al orden anterior.">
+            <input type="checkbox" checked={ordenGestion} onChange={toggleOrdenGestion} />
+            <span>Gestión reciente</span>
+          </label>
+        )}
         {setBusqueda && (
           <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
             <input type="search" value={busqueda} onChange={e => setBusqueda(e.target.value)}
