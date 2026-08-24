@@ -6521,8 +6521,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         } catch (e) { console.error('agendar:', e); }
       }
     } else {
-      const colAbordar = (prevState.tareas?.columnas || []).find(c => c.slug === 'abordar');
-      if (!colAbordar) { console.warn('No hay columna Abordar'); return; }
+      // Preferimos la columna 'abordar'; si el usuario la renombró/borró, caemos
+      // a la primera columna por orden (mismo criterio que handleCreateTareaEnSlot),
+      // para que la tarea del seguimiento aparezca en algún lado y no se pierda.
+      const cols0 = prevState.tareas?.columnas || [];
+      const colAbordar = cols0.find(c => c.slug === 'abordar')
+        || [...cols0].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999))[0];
+      if (!colAbordar) { console.warn('No hay columnas de tareas'); return; }
       const prospect = prevState.prospectos.find(p => p.id === prospectoId);
       const titulo = prospect?.nombre || 'Seguimiento';
       const { fecha, hora } = splitFechaHora(contactoActivo.agendadoPara);
@@ -6569,21 +6574,23 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // `opts.summaryOverride`: si se pasa, se usa como título del evento Google
   // en lugar del default "Cita — <nombre>". Útil cuando el user creó la agenda
   // desde el calendar con un título explícito.
-  const sincronizarSeguimiento = async (prospectoId, contactoActivo, prevState, opts = {}) => {
+  // Serializa una operación contra el resto de operaciones del MISMO prospecto
+  // (cola por prospectoId). Evita carreras entre sincronizarSeguimiento y otros
+  // writes al mismo prospecto (estado/proximoContacto/contactos).
+  const _runLockedProspecto = (prospectoId, fn) => {
     const prevLock = syncLocksRef.current.get(prospectoId) || Promise.resolve();
-    const run = prevLock.catch(() => {}).then(() =>
-      _syncSeguimientoBody(prospectoId, contactoActivo, prevState, opts)
-    );
+    const run = prevLock.catch(() => {}).then(() => fn());
     syncLocksRef.current.set(prospectoId, run);
-    try {
-      return await run;
-    } finally {
-      // Solo limpiar si nadie más encoló otra sync detrás nuestro.
-      if (syncLocksRef.current.get(prospectoId) === run) {
-        syncLocksRef.current.delete(prospectoId);
+    return (async () => {
+      try { return await run; }
+      finally {
+        if (syncLocksRef.current.get(prospectoId) === run) syncLocksRef.current.delete(prospectoId);
       }
-    }
+    })();
   };
+
+  const sincronizarSeguimiento = (prospectoId, contactoActivo, prevState, opts = {}) =>
+    _runLockedProspecto(prospectoId, () => _syncSeguimientoBody(prospectoId, contactoActivo, prevState, opts));
 
   // Sync INVERSO (tarea → prospecto). La tarea auto-generada de un prospecto es
   // una proyección de su último contacto; si el usuario le cambia la fecha/hora
@@ -6632,14 +6639,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     const proxNuevo = [...contactosAct].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
     const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
     try {
-      await storage.updateContacto(ultimo.id, patchContacto);
-      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
-      setState(s => ({
-        ...s,
-        prospectos: s.prospectos.map(p => p.id === prospectoId
-          ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
-          : p)
-      }));
+      // Serializado con sincronizarSeguimiento del mismo prospecto (evita carrera
+      // de estado/proximoContacto).
+      await _runLockedProspecto(prospectoId, async () => {
+        await storage.updateContacto(ultimo.id, patchContacto);
+        await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+        setState(s => ({
+          ...s,
+          prospectos: s.prospectos.map(p => p.id === prospectoId
+            ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+            : p)
+        }));
+      });
     } catch (e) { console.warn('sync tarea->prospecto:', e?.message || e); }
   };
 

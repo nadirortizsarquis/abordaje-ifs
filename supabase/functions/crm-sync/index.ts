@@ -125,14 +125,28 @@ function crmClient() {
     throw new HttpError(503, "CRM no configurado (faltan CRM_API_URL / CRM_API_TOKEN).");
   }
   return async function crm(path: string, init: RequestInit = {}) {
-    const res = await fetch(`${base}${path}`, {
-      ...init,
-      headers: {
-        "Authorization": `Token ${token}`,
-        "Content-Type": "application/json",
-        ...(init.headers ?? {}),
-      },
-    });
+    // Timeout defensivo: si el CRM cuelga, no dejamos la función esperando hasta
+    // el límite del runtime.
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    let res: Response;
+    try {
+      res = await fetch(`${base}${path}`, {
+        ...init,
+        signal: ctrl.signal,
+        headers: {
+          "Authorization": `Token ${token}`,
+          "Content-Type": "application/json",
+          ...(init.headers ?? {}),
+        },
+      });
+    } catch (e) {
+      throw new HttpError(504, (e as any)?.name === "AbortError"
+        ? "El CRM no respondió a tiempo (timeout). Reintentá en un momento."
+        : `No se pudo conectar al CRM: ${(e as any)?.message || e}`);
+    } finally {
+      clearTimeout(timer);
+    }
     const text = await res.text();
     let body: any = {};
     try { body = text ? JSON.parse(text) : {}; } catch { body = { detail: text }; }
