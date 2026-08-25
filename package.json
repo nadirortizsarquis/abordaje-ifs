@@ -7,7 +7,9 @@
     "build": "node scripts/build.mjs",
     "start": "serve public -l ${PORT:-3000} --no-clipboard",
     "check": "node scripts/check.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "test": "node scripts/test.mjs",
+    "verify": "npm run check && npm run smoke && npm run test"
   },
   "dependencies": {
     "@babel/standalone": "7.29.7",

@@ -9,3 +9,8 @@ public/
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# Backups locales del single-file (no van al repo)
+index.backup-*.html
+# Reporte de auditoria (efimero, no va al repo)
+docs/AUDITORIA_2026-08.json

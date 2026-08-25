@@ -68,7 +68,15 @@ No confiar en el DNI en cada envío: fijar el vínculo una vez y guardarlo.
 Control del lado Abordaje (fuente de verdad de "qué ya mandé"):
 - Cada ítem enviado guarda `crm_log_id` + `crm_synced_at`.
 - El botón solo envía ítems con `crm_synced_at` NULL. Reapretar / doble-click = no reenvía.
-- Endurecimiento opcional (si Bruno quiere): `source`/`source_id` + índice único en `ClientLog`.
+
+Endurecimiento implementado (ago 2026, auditoría Fase 1):
+- **create dedup por documento**: antes del POST, `crm-sync` hace `GET /clients/?document_number=<normDoc>`; si ya existe, devuelve **409 `duplicate_document` + candidatos** y el front ofrece VINCULAR en vez de crear un duplicado. `force:true` lo saltea (documentos legítimamente repetidos).
+- **normDoc alineado front + edge**: el documento se normaliza (saca puntos/espacios/guiones) en el dedup de prospectos, en el lookup y en el create → "12.345.678" y "12345678" matchean el mismo cliente.
+- **fail-closed en `link` y en el dedup de `create`**: si el CRM no responde (5xx/timeout), NO se fija el vínculo ni se crea a ciegas; se pide reintentar.
+- **sync bloqueado tras `synced_unmarked`**: si el log entró al CRM pero el stamp local falló, el botón "Sincronizar" queda deshabilitado (reintentar duplicaría); se destraba reabriendo el modal.
+- **aviso `multi_prospecto`**: si varios prospectos apuntan al mismo `crm_client_id`, `status`/`sync` lo marcan y el front avisa que se vuelca la gestión de todos.
+
+Pendiente del lado CRM (Bruno, PM #881): `source`/`source_id` + índice único en `ClientLog` para idempotencia dura server-side (que un reintento de red nunca duplique el log aunque el stamp de Abordaje falle).
 
 ## 5. Fuentes y etiquetado de entradas
 

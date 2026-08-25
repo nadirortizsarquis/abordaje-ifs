@@ -15,6 +15,18 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const WORKSPACE_DOMAIN = "ifs-broker.com";
 const DEFAULT_CALENDAR = "primary";
 
+// Comparación en tiempo constante del token de service-role (evita timing attacks
+// que infieran el secreto byte a byte). El chequeo de longitud filtra solo el
+// largo (fijo y conocido), no el contenido.
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a);
+  const eb = new TextEncoder().encode(b);
+  if (ea.length !== eb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < ea.length; i++) diff |= ea[i] ^ eb[i];
+  return diff === 0;
+}
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
@@ -108,7 +120,7 @@ Deno.serve(async (req: Request) => {
     const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const authHeader = req.headers.get("Authorization") || "";
     const presented = authHeader.replace(/^Bearer\s+/i, "");
-    if (!presented || presented !== serviceRoleKey) {
+    if (!presented || !timingSafeEqualStr(presented, serviceRoleKey)) {
       return jsonResponse({ error: "unauthorized: requires service-role" }, 401);
     }
 

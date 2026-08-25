@@ -792,14 +792,16 @@
     gap: 4px;
   }
   /* Tareas auto-generadas desde una gestión (tienen prospectoId): tono lila más claro */
+  /* Auto-tarea: el color (borde izq + fondo tenue) lo pone el inline style por
+     TIPO de gestión (calColorPorTipo). Acá solo el ancho del borde y el ícono. */
   .tarea-card.tarea-auto {
-    background: #faf5ff;
-    border-color: #e9d5ff;
-    border-left-color: #a78bfa;
+    border-left-width: 3px;
   }
-  .tarea-card.tarea-auto .tarea-card-fecha {
-    background: rgba(167, 139, 250, 0.14);
-    color: #7c3aed;
+  .tarea-auto-mark {
+    font-size: 0.72rem;
+    opacity: 0.6;
+    margin-right: 3px;
+    cursor: help;
   }
   .tarea-card:hover {
     box-shadow: 0 3px 10px rgba(0,0,0,0.07);
@@ -3661,13 +3663,21 @@
 <!-- Versiones pineadas exactas (2026-06-11): un release nuevo de estas libs ya no
      puede romper produccion sin un cambio deliberado aca. Babel sin version
      cargaba "latest" en cada visita. -->
-<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<!-- Librerías VENDORIZADAS (self-hosted en /vendor/, copiadas de static/vendor/ por
+     build.mjs). Antes venían de CDNs de terceros (unpkg/jsdelivr/sheetjs/cdnjs);
+     servirlas desde el propio dominio elimina la dependencia externa: si un CDN se
+     cae o es comprometido, no afecta a la app ni a los datos de clientes. Por eso ya
+     NO hace falta SRI. Versiones congeladas: react/react-dom 18.3.1, supabase-js
+     2.108.1, xlsx 0.20.2, jspdf 2.5.1, jspdf-autotable 3.8.2.
+     Para actualizar una versión: re-descargar el archivo a static/vendor/.
+     Babel sigue en CDN porque SOLO se usa en dev (el build lo remueve del artefacto). -->
+<script src="/vendor/react.production.min.js"></script>
+<script src="/vendor/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.29.7/babel.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.108.1/dist/umd/supabase.min.js"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<script src="/vendor/supabase.min.js"></script>
+<script src="/vendor/xlsx.full.min.js"></script>
+<script src="/vendor/jspdf.umd.min.js"></script>
+<script src="/vendor/jspdf.plugin.autotable.min.js"></script>
 
 <!-- ─────────────────── CAPA DE DATOS (Supabase) ─────────────────── -->
 <script>
@@ -4232,6 +4242,43 @@ const storage = {
     if (error) throw error;
   },
 
+  // Borra el "meeting espejo" del calendario compartido ligado a un evento origen
+  // (source_ref = 'agenda:<id>' | 'gcal:<id>' | 'prospcita:<id>'). Sin esto, al
+  // cancelar el evento origen el invitado seguia viendo una reunion fantasma. La RLS
+  // restringe el delete al creador; los invites caen por ON DELETE CASCADE. Best-effort.
+  async deleteMeetingBySourceRef(sourceRef) {
+    if (!sourceRef) return;
+    try {
+      const { error } = await sb.from('abordaje_calendar_meetings').delete().eq('source_ref', sourceRef);
+      if (error) console.warn('deleteMeetingBySourceRef:', error);
+    } catch (e) { console.warn('deleteMeetingBySourceRef:', e); }
+  },
+
+  // Re-sincroniza el meeting espejo cuando el evento origen se mueve/edita, para
+  // que el invitado no vea la hora/título viejos. Preserva la duración original
+  // del meeting (end - start). RLS restringe a los meetings propios. Best-effort.
+  async updateMeetingBySourceRef(sourceRef, { startAt, title } = {}) {
+    if (!sourceRef) return;
+    try {
+      const { data: m } = await sb.from('abordaje_calendar_meetings')
+        .select('id, start_at, end_at').eq('source_ref', sourceRef).maybeSingle();
+      if (!m) return;
+      const patch = {};
+      if (startAt) {
+        const oldS = m.start_at ? new Date(m.start_at).getTime() : null;
+        const oldE = m.end_at ? new Date(m.end_at).getTime() : null;
+        const durMs = (oldS != null && oldE != null && oldE > oldS) ? (oldE - oldS) : 30 * 60000;
+        const ns = new Date(startAt);
+        if (!isNaN(ns)) { patch.start_at = ns.toISOString(); patch.end_at = new Date(ns.getTime() + durMs).toISOString(); }
+      }
+      if (title != null && String(title).trim()) patch.title = String(title).trim();
+      if (Object.keys(patch).length) {
+        const { error } = await sb.from('abordaje_calendar_meetings').update(patch).eq('id', m.id);
+        if (error) console.warn('updateMeetingBySourceRef:', error);
+      }
+    } catch (e) { console.warn('updateMeetingBySourceRef:', e); }
+  },
+
   async updateAgendado(id, patch) {
     const dbPatch = {};
     if ('fecha' in patch) dbPatch.fecha = patch.fecha;
@@ -4398,9 +4445,15 @@ async function crmSync(op, payload = {}) {
     body: { op, ...payload }
   });
   if (error) {
-    let msg = error.message || 'Error comunicándose con el CRM';
-    try { const body = await error.context.json(); if (body?.error) msg = body.error; } catch (_) {}
-    throw new Error(msg);
+    let body = null;
+    try { body = await error.context.json(); } catch (_) {}
+    // Preferimos el mensaje humano (`message`) cuando el error trae un código
+    // (ej. 'duplicate_document'); si no, el `error` ya es el texto para el asesor.
+    const msg = body?.message || body?.error || error.message || 'Error comunicándose con el CRM';
+    const e = new Error(msg);
+    e.data = body;                       // conserva code + candidates (ej. duplicado)
+    e.status = error.context?.status || null;
+    throw e;
   }
   if (data && data.ok === false && data.error) throw new Error(data.error);
   return data;
@@ -4984,9 +5037,12 @@ function aplicarFiltros(prospectos, filterEstado, filterFecha, filterEtiqueta = 
       if (filterFecha === 'sin_fecha') { if (proxIso) return false; }
       else {
         if (!proxIso) return false;
-        const prox = new Date(proxIso);
+        // parseFechaLocal: proximoContacto es date-only; new Date() lo tomaria como
+        // UTC-medianoche y en ARG (UTC-3) correria al dia anterior. diasEntre normaliza
+        // a dia, asi que "vencidos" se basa en diff<0 (no en prox<hoy, que incluiria hoy).
+        const prox = parseFechaLocal(proxIso);
         const diff = diasEntre(prox, hoy);
-        if (filterFecha === 'vencidos' && !(prox < hoy)) return false;
+        if (filterFecha === 'vencidos' && !(diff < 0)) return false;
         if (filterFecha === 'hoy' && diff !== 0) return false;
         if (filterFecha === 'semana' && !(diff >= 0 && diff <= 7)) return false;
       }
@@ -5097,7 +5153,7 @@ function _filaProspectoParaExport(p) {
     Estado:        ESTADO_META[deriveEstado(p)]?.label || '',
     UltimaGestion: cfgUlt?.label || '',
     UltimaFecha:   ult?.createdAt ? new Date(ult.createdAt).toLocaleDateString('es-AR') : '',
-    Proximo:       proxIso ? new Date(proxIso).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' }) : '',
+    Proximo:       proxIso ? formatFechaHora(proxIso) : '',
     Observacion:   ult?.observacion || '',
     Referente:     p.referente || '',
     Preferencia:   p.preferenciaContacto || '',
@@ -5880,6 +5936,15 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     return arr.length ? arr : (selfId ? [selfId] : []);
   }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
   const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
+  // canon del grupo del usuario logueado: el calendario colapsado lee los pagos
+  // manuales por user_id ∈ effIds (que son solo canons). Si guardáramos bajo el id
+  // crudo de un socio no-canónico (ej. Nadir cuando el canon del libro IFS es Federico),
+  // el pago quedaría invisible para ambos. Guardamos siempre bajo el canon.
+  const calPagoSelfCanon = useMemo(() => {
+    const selfId = agente?.id || user?.id;
+    const unit = calRoster.find(u => (u.memberIds || []).includes(selfId));
+    return (unit && unit.id) || selfId;
+  }, [calRoster, agente?.id, user?.id]);
   useEffect(() => {
     if (!agente) return;
     setProdTarget(viewAs
@@ -6019,6 +6084,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, [user?.id]);
   const [state, setState] = useState(() => emptyState());
   const [loading, setLoading] = useState(true);
+  // Mapa prospectoId -> tipo del último contacto: el Kanban de Tareas colorea las
+  // auto-tareas por el TIPO de su gestión (misma tabla que Lista y Calendario),
+  // no con un lila fijo. Las tareas manuales (sin prospecto) quedan sin tipo.
+  const tipoPorProspecto = useMemo(() => {
+    const m = {};
+    (state.prospectos || []).forEach(p => { m[p.id] = ultimoContactoTipo(p); });
+    return m;
+  }, [state.prospectos]);
 
   // Carga lazy del actorMap: trae solo los profiles cuyo id aparece como
   // actor_id en alguna entidad del state cargado y todavía no está en el
@@ -6498,7 +6571,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } else {
       const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
         if (a.prospectoId !== prospectoId) return false;
-        return new Date(a.fecha) >= ahora;
+        return parseFechaLocal(a.fecha) >= ahora;
       });
       for (const a of agendadosNoVencidos) {
         try { await storage.deleteAgendado(a.id); }
@@ -6686,7 +6759,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (guardReadOnly()) return;
     try {
       const nuevo = await storage.createContacto(prospectoId, contacto);
-      const nuevoEstado = tipoConfig(nuevo.tipo)?.estado || 'nuevo';
+      // estado persistido = deriveEstado (misma fuente que el render), para que la
+      // columna DB no diverja de lo que ve el usuario (incluye el backtrack de
+      // agendado/recordatorio sin fecha). No usar tipoConfig(...).estado a secas.
+      const prospActualAdd = state.prospectos.find(p => p.id === prospectoId);
+      const contactosActAdd = [...((prospActualAdd?.contactos) || []), nuevo];
+      const nuevoEstado = deriveEstado({ ...(prospActualAdd || {}), contactos: contactosActAdd });
       const nuevoProx = nuevo.agendadoPara || null;
 
       // Update local: agregar contacto al prospecto + estado/próximoContacto derivados
@@ -6732,7 +6810,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       });
       const ultimo = contactosAct[contactosAct.length - 1];
       const proxNuevo = ultimo?.agendadoPara || null;
-      const estadoNuevo = ultimo ? (tipoConfig(ultimo.tipo)?.estado || 'nuevo') : 'nuevo';
+      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosAct });
 
       setState(s => ({
         ...s,
@@ -6777,7 +6855,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       const contactosNuevos = contactosPrev.filter(c => c.id !== contactoId);
       const nuevoUltimo = contactosNuevos[contactosNuevos.length - 1] || null;
       const proxNuevo = nuevoUltimo?.agendadoPara || null;
-      const estadoNuevo = nuevoUltimo ? (tipoConfig(nuevoUltimo.tipo)?.estado || 'nuevo') : 'nuevo';
+      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosNuevos });
 
       setState(s => ({
         ...s,
@@ -6929,6 +7007,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           // Sync inverso a la ficha del prospecto si esta tarea es de un prospecto.
           const tareaObj = state.tareas.items.find(t => t.id === e.tareaId);
           if (tareaObj?.prospectoId) await _syncTareaAProspecto(tareaObj, newF, newH, extraerUltimaLineaBitacora(tareaObj.observacion));
+        } else if (e.kind === 'agenda') {
+          // Agenda movida por drag en piloto: re-sincronizar el meeting espejo.
+          await storage.updateMeetingBySourceRef(`gcal:${e.googleEvent.id}`, { startAt: newStartIso, title: e.label || e.googleEvent.summary || null });
         }
         bumpGcal();
         showToast('Evento movido');
@@ -6982,6 +7063,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       }
       // Vaciar la fecha del contacto (queda en el historial sin agenda activa).
       await storage.updateContacto(ultimoAgendado.id, { agendadoPara: null });
+      // Borrar el meeting espejo del calendario compartido si esta cita tenia uno.
+      if (evt.id) await storage.deleteMeetingBySourceRef(`prospcita:${evt.id}`);
       // Recalcular estado y proximoContacto del prospect a partir del state
       // actualizado. Si todos los contactos previos eran 'agendado sin fecha',
       // queda 'nuevo'.
@@ -7019,16 +7102,19 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const handleUpdateAgenda = async (agendaId, patch, gcalCalendarId) => {
     if (guardReadOnly()) return;
     try {
+      const nuevoTitulo = (patch.nota || '').split(/\r?\n+/)[0] || null;
       if (isPilot) {
         await gcalApi.update(agendaId, buildGoogleEventBody({
           startIso: patch.fecha,
-          summary: (patch.nota || '').split(/\r?\n+/)[0] || 'Agenda IFS',
+          summary: nuevoTitulo || 'Agenda IFS',
           description: patch.nota || '',
         }), gcalCalendarId);
         bumpGcal();
+        await storage.updateMeetingBySourceRef(`gcal:${agendaId}`, { startAt: patch.fecha, title: nuevoTitulo });
       } else {
         const updated = await storage.updateAgendado(agendaId, patch);
         setState(s => ({ ...s, agendados: s.agendados.map(a => a.id === agendaId ? updated : a) }));
+        await storage.updateMeetingBySourceRef(`agenda:${agendaId}`, { startAt: patch.fecha, title: nuevoTitulo });
       }
       setAgendaEditando(null);
       showToast('Agenda actualizada');
@@ -7063,8 +7149,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         if (isPilot) {
           await gcalApi.delete(agendaId, gcalCalendarId);
           bumpGcal();
+          await storage.deleteMeetingBySourceRef(`gcal:${agendaId}`);
         } else {
           await storage.deleteAgendado(agendaId);
+          await storage.deleteMeetingBySourceRef(`agenda:${agendaId}`);
         }
       } catch (e) {
         handleErr(e, 'deleteAgenda');
@@ -7716,7 +7804,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
-        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={agente?.id || user?.id} selfNombre={isAdminProd ? 'IFS' : (agente?.display_name || user?.email)} nuevoSignal={calPagoNuevoSignal} q={calPagoQ} setQ={setCalPagoQ} />
+        <CalendarioPagosOLE effIds={calPagoEffIds} nombreDe={calPagoNombreDe} isAdmin={isAdminProd} selfId={calPagoSelfCanon} selfNombre={isAdminProd ? 'IFS' : (agente?.display_name || user?.email)} nuevoSignal={calPagoNuevoSignal} q={calPagoQ} setQ={setCalPagoQ} />
       )}
 
       {view === 'lista' && (
@@ -7844,6 +7932,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       {view === 'tareas' && (
         <TareasView
           tareasState={state.tareas}
+          tipoPorProspecto={tipoPorProspecto}
           readOnly={readOnly}
           autoOrden={autoOrdenTareas}
           onAddTarea={handleAddTarea}
@@ -9190,7 +9279,11 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
   const [cOrigen, setCOrigen] = useState('');
   const [confirm, setConfirm] = useState(null);   // { kind:'link'|'create', ... } | null
   const [clientId, setClientId] = useState(null); // cliente CRM efectivo (backend)
-  const [status, setStatus] = useState(null);     // { pendientes, detalle }
+  const [status, setStatus] = useState(null);     // { pendientes, detalle, multi_prospecto }
+  // Si un sync volcó al CRM pero no pudo marcar todo como sincronizado
+  // (action 'synced_unmarked'), bloqueamos el botón: reintentar duplicaría la
+  // gestión en la bitácora del CRM. Se destraba solo al reabrir el modal.
+  const [syncBlocked, setSyncBlocked] = useState(false);
 
   const anchorPayload = { anchor_type: anchor.type, anchor_id: anchor.id };
   const vinculado = !!clientId;
@@ -9227,6 +9320,15 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
       if (after) await after(r);
       return r;
     } catch (e) {
+      // Duplicado por documento (create): en vez de un error a secas, mostramos
+      // los candidatos existentes para que el asesor VINCULE en lugar de crear.
+      if (e.data?.error === 'duplicate_document' && Array.isArray(e.data.candidates)) {
+        setConfirm(null);
+        setCreating(false);
+        setCands({ exact: e.data.candidates, fuzzy: [] });
+        setError(e.message || 'Ya existe un cliente con ese documento. Vinculá en vez de crear uno nuevo.');
+        return null;
+      }
       setError(e.message);
       return null;
     } finally {
@@ -9305,9 +9407,16 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
   const doSync = async () => {
     await run('sync', {}, async (r) => {
       if (r.action === 'noop') { setNotice('Ya está todo sincronizado — no hay gestión nueva para volcar.'); }
+      else if (r.action === 'synced_unmarked') {
+        // El log entró al CRM pero el marcado de "ya sincronizado" falló. Reintentar
+        // duplicaría. Bloqueamos el botón y mostramos la advertencia del backend.
+        setSyncBlocked(true);
+        setError(r.warning || 'El log se creó en el CRM pero no se pudo marcar todo. No vuelvas a sincronizar (podría duplicar); avisá a soporte.');
+      }
       else {
         const d = r.detalle || {};
-        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).`);
+        const extra = r.multi_prospecto ? ` Nota: este cliente está vinculado a ${r.prospecto_count} prospectos; se volcó la gestión de todos.` : '';
+        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).${extra}`);
       }
       await fetchStatus();
     });
@@ -9393,12 +9502,19 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
                         : 'Toda la gestión ya está volcada a la bitácora del CRM.')
                     : 'La sincronización vuelca a la bitácora del CRM todo lo que apunta a este cliente (contactos, agendas y tareas).'}
               </p>
+              {status && status.multi_prospecto && (
+                <div style={{ background:'#fffbeb', border:'1px solid #fbbf24', color:'#92400e', borderRadius:8, padding:'9px 12px', fontSize:'0.78rem', marginBottom:12, lineHeight:1.45 }}>
+                  Este cliente está vinculado a <strong>{status.prospecto_count} prospectos</strong>. Al sincronizar se vuelca la gestión de todos ellos.
+                </div>
+              )}
               <button type="button" className="btn-primary" onClick={doSync}
-                disabled={anyBusy || (status && status.pendientes === 0)} style={{ width:'100%' }}>
+                disabled={anyBusy || syncBlocked || (status && status.pendientes === 0)} style={{ width:'100%' }}>
                 {busy === 'sync' ? 'Sincronizando…' : 'Sincronizar gestión ahora'}
               </button>
               <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:10, lineHeight:1.5 }}>
-                Se vuelca como una foto del momento. Editar una gestión que ya fue sincronizada <strong>no</strong> la re-envía al CRM.
+                {syncBlocked
+                  ? 'Sincronización pausada por seguridad tras un marcado incompleto. Cerrá y volvé a abrir para reintentar, o avisá a soporte.'
+                  : <>Se vuelca como una foto del momento. Editar una gestión que ya fue sincronizada <strong>no</strong> la re-envía al CRM.</>}
               </div>
             </div>
           ) : creating ? (
@@ -10279,18 +10395,21 @@ function normNombre(s) {
     .normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
 }
 function normTel(s) { return (s || '').toString().replace(/\D/g, ''); }
+// Normaliza el documento (saca puntos/espacios/guiones) para que "12.345.678"
+// matchee "12345678". Debe quedar alineado con el normDoc de la edge crm-sync.
+function normDoc(s) { return (s || '').toString().replace(/[.\s\-_]/g, '').trim(); }
 // Devuelve los prospectos ACTIVOS que coinciden con los datos dados (excluye
 // el propio id si se pasa). Match por nombre normalizado, o tel (>=6 dígitos), o DNI.
 function buscarDuplicadosProspecto(prospectos, { nombre, telefono, documento }, excluirId = null) {
   const nn = normNombre(nombre);
   const tt = normTel(telefono);
-  const dd = (documento || '').toString().trim();
+  const dd = normDoc(documento);
   if (nn.length < 3 && tt.length < 6 && !dd) return [];
   return (prospectos || []).filter(p => {
     if (p.id === excluirId || p.archivado) return false;
     if (nn.length >= 3 && normNombre(p.nombre) === nn) return true;
     if (tt.length >= 6 && normTel(p.telefono) === tt) return true;
-    if (dd && (p.documento || '').toString().trim() === dd) return true;
+    if (dd && normDoc(p.documento) === dd) return true;
     return false;
   });
 }
@@ -10309,7 +10428,7 @@ function agruparDuplicados(prospectos) {
   activos.forEach(p => {
     const nn = normNombre(p.nombre); if (nn.length >= 3) addKey('n:' + nn, p.id);
     const tt = normTel(p.telefono); if (tt.length >= 6) addKey('t:' + tt, p.id);
-    const dd = (p.documento || '').toString().trim(); if (dd) addKey('d:' + dd, p.id);
+    const dd = normDoc(p.documento); if (dd) addKey('d:' + dd, p.id);
   });
   const groups = {};
   activos.forEach(p => { const r = find(p.id); (groups[r] = groups[r] || []).push(p); });
@@ -11457,7 +11576,7 @@ function ProduccionOLE({ target, selfUserId }) {
 
   // Cargar reportes del target (ole_reportes por user_id, o ole_equipo)
   useEffect(() => {
-    setRows(null); setErr(null); setUrl(null); setVista(null);
+    setRows(null); setErr(null); setUrl(null);
     const q = target.type === 'equipo'
       ? sb.from('ole_equipo').select('*')
       : sb.from('ole_reportes').select('*').eq('user_id', target.userId);
@@ -11466,7 +11585,9 @@ function ProduccionOLE({ target, selfUserId }) {
       const orden = { anual: 0, obj1: 1, obj2: 2 };
       const sorted = (data || []).sort((a, b) => (orden[a.vista] ?? 9) - (orden[b.vista] ?? 9));
       setRows(sorted);
-      if (sorted.length) setVista(sorted[0].vista);
+      // Mantener la vista/rango elegido al cambiar de asesor si el nuevo también
+      // la tiene; si no, caer a la primera (anual). Antes reseteaba siempre.
+      setVista(prev => (prev && sorted.some(r => r.vista === prev)) ? prev : (sorted.length ? sorted[0].vista : null));
     });
   }, [target.type, target.userId]);
 
@@ -12542,7 +12663,9 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
       prospectoId: p.id,
       label: p.nombre || '(sin nombre)',
       prospectoNombre: p.nombre || '(sin nombre)',
-      fecha: p.proximoContacto,
+      // agendadoPara conserva fecha+hora; proximoContacto es date-only y perderia
+      // la hora de la cita al recargar (modo no-piloto). Fallback por las dudas.
+      fecha: ultimoAgendado.agendadoPara || p.proximoContacto,
       tipo: 'agendado',
       observacion: ultimoAgendado?.observacion || '',
       duracionMin: ultimoAgendado?.duracionMin || null,
@@ -12738,6 +12861,16 @@ const CAL_COLOR_VIOLETA  = { color: '#6d28d9', bg: 'rgba(124,58,237,0.14)', bord
 // un contorno completo (outline) que los identifica como reunión compartida.
 const CAL_COLOR_MEETING  = { color: '#3730a3', bg: 'rgba(67,56,202,0.13)', border: '#4338ca' };
 
+// Tabla ÚNICA de color-por-tipo: deriva de TIPOS_CONTACTO (la misma fuente que el
+// badge de la Lista), para que el Calendario NO colapse fecha_exacta/llamar_* en un
+// solo amarillo. El borde usa el color del texto del tipo. Así Lista y Calendario
+// hablan el mismo idioma de color por tipo de gestión.
+function calColorPorTipo(tipo) {
+  const cfg = tipoConfig(tipo);
+  if (!cfg) return null;
+  return { color: cfg.color, bg: cfg.bg, border: cfg.color };
+}
+
 // Convierte un color HEX (#RRGGBB) en una versión clarita (bg) y oscura (text).
 function deriveColorsFromGcalHex(hex) {
   if (!hex || typeof hex !== 'string') return null;
@@ -12784,17 +12917,13 @@ function colorCalendarEvento(e, colorsMap, calendarColors) {
     const c = deriveColorsFromGcalHex(e.gcalColor);
     if (c) return c;
   }
-  // Color por TIPO de gestión — coherente con el badge de la Lista. El
-  // 'recordatorio' (viene de tarea) es violeta; las tareas MANUALES (sin tipo
-  // derivado del prospecto) caen al violeta default de abajo.
+  // Color por TIPO de gestión — MISMA tabla que el badge de la Lista
+  // (calColorPorTipo → TIPOS_CONTACTO), para que el Calendario distinga
+  // fecha_exacta / llamar_mañana / llamar_semana en vez de aplanarlos a un
+  // único amarillo. 'recordatorio' = violeta; tarea manual (sin tipo) → violeta.
   const t = e?.tipo;
-  if (t === 'recordatorio') return CAL_COLOR_VIOLETA;
-  if (t === 'agendado') return CAL_COLOR_VERDE;
-  if (t === 'contestador') return CAL_COLOR_GRIS;
-  if (t === 'mensaje_sin_respuesta') return CAL_COLOR_GRIS_OSC;
-  if (t === 'fecha_exacta' || (typeof t === 'string' && t.startsWith('llamar_'))) {
-    return CAL_COLOR_AMARILLO;
-  }
+  const cfg = calColorPorTipo(t);
+  if (cfg) return cfg;
   // Tarea manual (sin tipo) → violeta default.
   return CAL_COLOR_VIOLETA;
 }
@@ -16042,7 +16171,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, readOnly, autoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
+function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
   const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
   return (
     <div className="kanban-wrap">
@@ -16056,6 +16185,7 @@ function TareasView({ tareasState, readOnly, autoOrden, onAddTarea, onDropTarea,
             key={col.id}
             columna={col}
             tareas={items}
+            tipoPorProspecto={tipoPorProspecto}
             readOnly={readOnly}
             autoOrden={autoOrden}
             onRename={(nuevo) => onRenameColumna(col.id, nuevo)}
@@ -16076,7 +16206,7 @@ function TareasView({ tareasState, readOnly, autoOrden, onAddTarea, onDropTarea,
   );
 }
 
-function TareaColumna({ columna, tareas, readOnly, autoOrden, onRename, onDelete, onAddTarea, onDropTarea, onTogglePin, onMoveColumna, onEditarTarea, onSetCompania }) {
+function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, onRename, onDelete, onAddTarea, onDropTarea, onTogglePin, onMoveColumna, onEditarTarea, onSetCompania }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
@@ -16265,7 +16395,7 @@ function TareaColumna({ columna, tareas, readOnly, autoOrden, onRename, onDelete
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} readOnly={readOnly} autoOrden={autoOrden} onClick={() => onEditarTarea(t)} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} tipoGestion={t.prospectoId ? (tipoPorProspecto?.[t.prospectoId] || null) : null} readOnly={readOnly} autoOrden={autoOrden} onClick={() => onEditarTarea(t)} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
         )}
       </div>
       {!readOnly && (agregando ? (
@@ -16285,7 +16415,7 @@ function TareaColumna({ columna, tareas, readOnly, autoOrden, onRename, onDelete
   );
 }
 
-function TareaCard({ tarea, readOnly, autoOrden, onClick, onDropTarea, onTogglePin, onSetCompania }) {
+function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTarea, onTogglePin, onSetCompania }) {
   // Popover de compañías (solo desktop, via click derecho onContextMenu).
   // En mobile no se habilita por ahora — el long-press está reservado para drag.
   const [companiaPicker, setCompaniaPicker] = useState(null); // {x, y} o null
@@ -16491,12 +16621,19 @@ function TareaCard({ tarea, readOnly, autoOrden, onClick, onDropTarea, onToggleP
   const onPointerCancel = (e) => finishDrag(e, false);
 
   const cfgCompania = tarea.compania ? COMPANIA_BY_ID[tarea.compania] : null;
+  // Auto-tarea (viene de una gestión): color por TIPO de gestión (misma tabla que
+  // Lista y Calendario), no lila fijo. El borde izquierdo lleva el color del tipo;
+  // un ícono ↻ marca "automática". Manual (sin prospecto) → neutral.
+  const esAuto = !!tarea.prospectoId;
+  const colTipo = esAuto ? calColorPorTipo(tipoGestion) : null;
+  const autoStyle = colTipo ? { borderLeftColor: colTipo.border, background: colTipo.bg } : null;
 
   return (
     <div
       ref={cardRef}
       data-tarea-id={tarea.id}
-      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${armed ? 'long-press-armed' : ''} ${tarea.prospectoId ? 'tarea-auto' : ''} ${tarea.fijadaAt ? 'fijada' : ''}`}
+      className={`tarea-card activated ${dragging ? 'dragging' : ''} ${armed ? 'long-press-armed' : ''} ${esAuto ? 'tarea-auto' : ''} ${tarea.fijadaAt ? 'fijada' : ''}`}
+      style={autoStyle}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -16529,6 +16666,7 @@ function TareaCard({ tarea, readOnly, autoOrden, onClick, onDropTarea, onToggleP
       )}
       <div className={`tarea-card-titulo ${tarea.titulo ? '' : 'empty'} ${cfgCompania ? 'has-compania' : ''} ${(!readOnly && onTogglePin) ? 'has-pin' : ''}`}>
         <ActorStar item={tarea} />
+        {esAuto && <span className="tarea-auto-mark" title="Tarea automática de una gestión">↻</span>}
         {tarea.titulo || '(sin título)'}
       </div>
       {fechaTxt && (
@@ -17485,10 +17623,10 @@ function InstruccionesModal({ onClose }) {
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li><strong>Agendado</strong> → cita formal con fecha y hora. Aparece en el calendario en <strong>verde</strong>.</Li>
               <Li><strong>Contestador / Mensaje sin respuesta</strong> → quedó pendiente, sin fecha específica.</Li>
-              <Li><strong>Llamar en 15 min / por la tarde / mañana / semana próxima / dentro de… / Fecha exacta</strong> → generan una <strong>tarea auto-generada</strong> en la columna "Abordar" con la fecha calculada. Aparecen en el Kanban (lila claro) y en el calendario (lila).</Li>
+              <Li><strong>Llamar en 15 min / por la tarde / mañana / semana próxima / dentro de… / Fecha exacta</strong> → generan una <strong>tarea auto-generada</strong> en la columna "Abordar" con la fecha calculada. En el Kanban llevan un ícono <strong>↻</strong> para distinguirlas de las manuales.</Li>
               <Li><strong>Rechazado</strong> → cierra el prospecto.</Li>
             </ul>
-            <p>Regla de color en el calendario: <strong>agendas en verde, tareas en lila, eventos de tu Google Calendar personal con su color de Google</strong>. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 6).</p>
+            <p>Regla de color unificada (Lista, Tareas y Calendario): <strong>el color comunica el tipo de gestión</strong> — agendado en verde, recordatorio en violeta, fecha exacta / llamar en tonos ámbar, contestador / mensaje en gris. Los eventos de tu Google Calendar personal usan su color de Google. Podés sobreescribir con click derecho sobre un evento puntual o por calendar completo (ver sección 6).</p>
             <p>El historial completo de etiquetas se ve en el panel lateral del prospecto. Cada gestión del historial se puede <strong>editar o eliminar</strong> (la eliminación pide confirmación en un modal).</p>
           </Section>
 
@@ -17500,7 +17638,7 @@ function InstruccionesModal({ onClose }) {
               <Li>Dentro del modal de tarea, hay <strong>botones rápidos</strong> de recordatorio: Hoy / Mañana / Próx semana / <strong>Quitar</strong>. "Quitar" (rojo sutil) saca la fecha y la cita del calendar pero deja la tarea viva en el Kanban como bitácora.</Li>
               <Li>Al <strong>eliminar</strong> una tarea con fecha, aparece un modal con dos opciones: "Solo sacar del calendar" (deja la tarea sin fecha) o "Borrar tarea completa".</Li>
               <Li><strong>Mover entre columnas</strong> con drag &amp; drop. En mobile, mantené presionado el card por medio segundo y arrastrá. En mobile las columnas no tienen tope de altura — se ven todas las tarjetas y scrolleás la pantalla entera.</Li>
-              <Li>Las etiquetas de prospecto que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em> (lila claro para distinguirlas de las manuales).</Li>
+              <Li>Las etiquetas de prospecto que no son "Agendado" generan tareas automáticas que aparecen en la columna <em>Abordar</em>. Se colorean según el tipo de gestión y llevan un ícono <strong>↻</strong> para distinguirlas de las manuales.</Li>
               <Li>Las columnas se pueden crear, renombrar y reordenar (reorden con confirmación). Las protegidas (Abordar) no se pueden borrar.</Li>
               <Li><strong>Asignar compañía a una tarea:</strong> podés taggear cualquier tarea con una de las 5 compañías (OLE, Investors Trust, Life Group, Best Doctors, Patrimonial). El logo aparece en la esquina superior derecha de la card. Útil para identificar de un vistazo a qué aseguradora corresponde cada venta pendiente. Dos formas de asignar:
                 <ul style={{ paddingLeft: 18, marginTop: 4 }}>
@@ -17534,7 +17672,7 @@ function InstruccionesModal({ onClose }) {
             <ul style={{ paddingLeft: 18, margin: '6px 0' }}>
               <Li>Si activás Google Calendar en Ajustes, los eventos viajan en ambos sentidos: lo que cargás acá aparece en tu Google y viceversa.</Li>
               <Li>Si en algún momento se interrumpe la conexión (token expirado, revocaste el acceso desde Google), aparece un banner amarillo arriba del calendar con CTA "Reconectar" que te lleva a Ajustes.</Li>
-              <Li>Reglas de color por defecto: agendas creadas desde Abordaje en <strong>verde</strong>, tareas en <strong>lila</strong>, eventos de tu calendar personal de Google con su <strong>color de Google</strong>. Tu override manual o por calendar gana sobre estas reglas.</Li>
+              <Li>Reglas de color por defecto: el color comunica el <strong>tipo de gestión</strong> (agendado verde, recordatorio violeta, fecha exacta / llamar en ámbar, contestador / mensaje en gris), igual que el badge de la Lista. Los eventos de tu calendar personal de Google mantienen su <strong>color de Google</strong>. Tu override manual o por calendar gana sobre estas reglas.</Li>
             </ul>
           </Section>
 
@@ -17819,8 +17957,8 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete, inviteM
               <label style={{ display: 'block', marginBottom: 6 }}>Cliente en el CRM</label>
               <CrmVinculoLanzador
                 anchor={{ type: 'agendado', id: agenda.id, nombreSugerido: titulo, documentoSugerido: '' }}
-                label="Crear / Vincular en CRM"
-                className="btn-secondary"
+                label="Convertir a cliente CRM"
+                className="btn-primary"
               />
             </div>
           )}
@@ -18204,6 +18342,41 @@ function ClaudeDesktopFAB() {
 }
 const MEGA_ADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
+// Red de seguridad: si un componente tira un error de render (ej. un campo null
+// inesperado de Supabase/CRM, un reporte OLE malformado), sin esto TODO el arbol
+// React se desmonta y queda pantalla en blanco. El boundary lo contiene y ofrece
+// recargar en vez de dejar la app muerta.
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) {
+    console.error('ErrorBoundary capturó:', error, info);
+    try { showToast('Ocurrió un error en la aplicación', { duration: 4000, dismissible: true }); } catch (e) {}
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f7', padding: 24 }}>
+          <div style={{ maxWidth: 440, textAlign: 'center', background: '#fff', borderRadius: 14, padding: '32px 28px', boxShadow: '0 8px 30px rgba(0,0,0,0.12)' }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#3E4095', marginBottom: 8 }}>Algo falló</div>
+            <div style={{ color: '#555', fontSize: 14, lineHeight: 1.5, marginBottom: 20 }}>
+              Se produjo un error inesperado y esta vista no pudo cargarse. Tus datos están a salvo. Recargá la página para volver a intentar.
+            </div>
+            <button onClick={() => window.location.reload()}
+              style={{ background: '#0098DA', color: '#fff', border: 'none', borderRadius: 9, padding: '11px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer' }}>
+              Recargar
+            </button>
+            {this.state.error?.message && (
+              <div style={{ marginTop: 16, fontSize: 11, color: '#999', wordBreak: 'break-word' }}>{String(this.state.error.message)}</div>
+            )}
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 function AppShell() {
   const [user, setUser] = useState(null);
   const [agente, setAgente] = useState(null);  // perfil con rol/nombre
@@ -18293,11 +18466,22 @@ function AppShell() {
   );
 }
 
+// Errores fuera del árbol React (promesas colgadas, handlers async, libs) no los
+// atrapa el ErrorBoundary: los canalizamos a un toast en vez de que mueran silenciosos.
+window.addEventListener('error', (e) => {
+  console.error('window.onerror:', e.error || e.message);
+  try { showToast('Ocurrió un error inesperado', { duration: 3500, dismissible: true }); } catch (_) {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('unhandledrejection:', e.reason);
+  try { showToast('Ocurrió un error de red o datos', { duration: 3500, dismissible: true }); } catch (_) {}
+});
+
 window.__abordajeMount = function() {
   const loginEl = document.getElementById('loginRoot');
   const appEl = document.getElementById('reactRoot');
-  if (loginEl) ReactDOM.createRoot(loginEl).render(<Root />);
-  if (appEl) ReactDOM.createRoot(appEl).render(<AppShell />);
+  if (loginEl) ReactDOM.createRoot(loginEl).render(<ErrorBoundary><Root /></ErrorBoundary>);
+  if (appEl) ReactDOM.createRoot(appEl).render(<ErrorBoundary><AppShell /></ErrorBoundary>);
 };
 
 window.__abordajeMount();

@@ -117,6 +117,13 @@ function quote(s: string | null | undefined): string {
   return t ? ` "${t}"` : "";
 }
 
+// Normaliza el documento para dedup/lookup/create: saca puntos, espacios y
+// separadores comunes. "12.345.678" y "12345678" tienen que matchear el mismo
+// cliente. Debe quedar alineado con el normDoc del front (index.html).
+function normDoc(s: string | null | undefined): string {
+  return String(s ?? "").replace(/[.\s\-_]/g, "").trim();
+}
+
 // ── Cliente HTTP contra el CRM ───────────────────────────────────────────────
 function crmClient() {
   const base = (Deno.env.get("CRM_API_URL") || "").replace(/\/+$/, "");
@@ -312,7 +319,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     .eq("agente_id", agenteId).eq("archivada", false).is("crm_synced_at", null)
     .eq("crm_client_id", clientId);
 
-  return { contactos, agendados: ag ?? [], tareas: tr ?? [] };
+  return { contactos, agendados: ag ?? [], tareas: tr ?? [], prospIds };
 }
 
 Deno.serve(async (req: Request) => {
@@ -446,7 +453,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ ok: true, exact: [], fuzzy: [], documento: "", pendingScope: true });
       }
       const crm = crmClient();
-      const doc = (body.documento ?? anchor.identity.documento ?? "").trim();
+      const doc = normDoc(body.documento ?? anchor.identity.documento ?? "");
       let exact: any[] = [];
       if (doc) {
         const r = await crm(`/clients/?document_number=${encodeURIComponent(doc)}`);
@@ -470,15 +477,19 @@ Deno.serve(async (req: Request) => {
       }
       // Validar que el cliente EXISTA en el CRM antes de fijar el vínculo (evita
       // anclas a ids inexistentes que después volcarían al cliente equivocado).
-      // Defensivo: un 404 rechaza; cualquier otro fallo del CRM deja pasar el
-      // vínculo (no rompemos el flujo por un hipo de infra).
+      // FAIL-CLOSED: solo fijamos el vínculo si el CRM confirmó el cliente (2xx).
+      // Un 404 -> no existe; cualquier otro fallo (5xx/timeout) -> NO vinculamos y
+      // pedimos reintentar, para no anclar a ciegas sobre un CRM que no respondió.
       try {
         await crmClient()(`/clients/${crmClientId}/`);
       } catch (e) {
         if ((e as any)?.status === 404) {
           return jsonResponse({ error: `El cliente #${crmClientId} no existe en el CRM.` }, 404);
         }
-        console.warn("crm-sync link: no se pudo validar el cliente, se vincula igual:", (e as any)?.message || e);
+        return jsonResponse({
+          error: "No se pudo validar el cliente en el CRM (no respondió). No se fijó el vínculo; reintentá en un momento.",
+          crm_status: (e as any)?.status || 504,
+        }, 502);
       }
       await setLink(crmClientId);
       return jsonResponse({
@@ -498,9 +509,33 @@ Deno.serve(async (req: Request) => {
       const crm = crmClient();
       const first = (body.first_name ?? "").trim();
       const last = (body.last_name ?? "").trim();
-      const doc = (body.document_number ?? anchor.identity.documento ?? "").trim();
+      const doc = normDoc(body.document_number ?? anchor.identity.documento ?? "");
       if (!first || !last || !doc) {
         return jsonResponse({ error: "first_name, last_name y document_number son obligatorios" }, 400);
+      }
+      // Idempotencia: antes de crear, chequeamos que no exista ya un cliente con
+      // ese documento. Si existe, NO creamos un duplicado: devolvemos 409 con los
+      // candidatos para que el front ofrezca vincular. `force:true` lo saltea (caso
+      // raro de documentos legítimamente repetidos que el asesor confirma).
+      if (!body.force) {
+        try {
+          const dup = await crm(`/clients/?document_number=${encodeURIComponent(doc)}`);
+          const cands = dup?.results ?? [];
+          if (cands.length) {
+            return jsonResponse({
+              error: "duplicate_document",
+              message: `Ya existe un cliente con el documento ${doc} en el CRM. Vinculá en vez de crear uno nuevo.`,
+              candidates: cands.slice(0, 10),
+            }, 409);
+          }
+        } catch (e) {
+          // Si el chequeo de dedup falla (CRM no respondió), no creamos a ciegas:
+          // mejor pedir reintento que arriesgar un duplicado.
+          return jsonResponse({
+            error: "No se pudo verificar duplicados en el CRM (no respondió). No se creó el cliente; reintentá en un momento.",
+            crm_status: (e as any)?.status || 504,
+          }, 502);
+        }
       }
       const payload: Record<string, unknown> = {
         first_name: first, last_name: last, document_number: doc,
@@ -537,13 +572,17 @@ Deno.serve(async (req: Request) => {
       if (!anchor.effectiveClientId) {
         return jsonResponse({ ok: true, crm_client_id: null, pendientes: 0, detalle: { contactos: 0, agendados: 0, tareas: 0 } });
       }
-      const { contactos, agendados, tareas } =
+      const { contactos, agendados, tareas, prospIds } =
         await gatherByClient(supabase, anchor.effectiveClientId, anchor.agenteId);
       return jsonResponse({
         ok: true,
         crm_client_id: anchor.effectiveClientId,
         pendientes: contactos.length + agendados.length + tareas.length,
         detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
+        // Aviso: si varios prospectos apuntan al mismo cliente CRM, al sincronizar
+        // se vuelca la gestión de TODOS. El front lo muestra para que no sorprenda.
+        multi_prospecto: (prospIds?.length || 0) > 1,
+        prospecto_count: prospIds?.length || 0,
       });
     }
 
@@ -554,8 +593,9 @@ Deno.serve(async (req: Request) => {
       }
       const crm = crmClient();
       const clientId = anchor.effectiveClientId;
-      const { contactos, agendados, tareas } =
+      const { contactos, agendados, tareas, prospIds } =
         await gatherByClient(supabase, clientId, anchor.agenteId);
+      const multiProspecto = (prospIds?.length || 0) > 1;
 
       if (!contactos.length && !agendados.length && !tareas.length) {
         return jsonResponse({ ok: true, action: "noop", synced: 0, message: "No hay gestión nueva para volcar." });
@@ -613,6 +653,8 @@ Deno.serve(async (req: Request) => {
         crm_log_id: logId,
         synced,
         detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
+        multi_prospecto: multiProspecto,
+        prospecto_count: prospIds?.length || 0,
       });
     }
 

@@ -63,8 +63,15 @@ cpSync(new URL('serve.json', root), new URL('public/serve.json', root));
 // NO desde /static/. Copiarlos a public/static/ rompe logos e íconos PWA.
 cpSync(new URL('static', root), new URL('public', root), { recursive: true });
 
-// Sanity: los logos de compañías tienen que existir donde el código los busca.
-for (const f of ['logos/ole.png', 'logos/life-group.png', 'icon-192.png']) {
+// Sanity: los logos de compañías + las libs vendorizadas tienen que existir donde
+// el código las busca (/logos/... y /vendor/...). Si falta un vendor, la app queda
+// en pantalla blanca en producción, así que abortamos el build.
+for (const f of [
+  'logos/ole.png', 'logos/life-group.png', 'icon-192.png',
+  'vendor/react.production.min.js', 'vendor/react-dom.production.min.js',
+  'vendor/supabase.min.js', 'vendor/xlsx.full.min.js',
+  'vendor/jspdf.umd.min.js', 'vendor/jspdf.plugin.autotable.min.js',
+]) {
   if (!existsSync(new URL('public/' + f, root))) {
     console.error(`build FALLO: falta public/${f} (assets de static/ mal copiados)`);
     process.exit(1);
