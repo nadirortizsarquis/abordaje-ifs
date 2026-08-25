@@ -375,21 +375,29 @@ Deno.serve(async (req: Request) => {
     }
 
     // ── search ── typeahead de clientes del CRM (sin ancla; para vincular al
-    // crear un prospecto/tarea). Scoping: admins ven todos; no-admins todavía no
-    // (hasta que el CRM exponga una búsqueda scopeada por advisor_email — así no
-    // se filtran clientes de otros asesores).
+    // crear un prospecto/tarea). Scoping por asesor (endpoint de Bruno): a los
+    // no-admins les pasamos su advisor_email y el CRM devuelve SOLO sus clientes
+    // (email inexistente -> vacío, nunca clientes ajenos). Los admins usan el bot
+    // (ve todos), sin advisor_email.
     if (op === "search") {
       const q = String(body?.q ?? "").trim();
-      if (!q) return jsonResponse({ ok: true, clients: [], scoped: isAdmin });
-      if (!isAdmin) {
-        // Sin scoping seguro todavía: no devolvemos nada para no exponer
-        // clientes de otros asesores. Se habilita con el search de Bruno.
-        return jsonResponse({ ok: true, clients: [], scoped: false, pendingScope: true });
-      }
+      if (!q) return jsonResponse({ ok: true, clients: [], scoped: true });
       const crm = crmClient();
-      const r = await crm(`/clients/?search=${encodeURIComponent(q)}`);
+      const scopeParam = (!isAdmin && advisorEmail) ? `&advisor_email=${encodeURIComponent(advisorEmail)}` : "";
+      const r = await crm(`/clients/?search=${encodeURIComponent(q)}${scopeParam}`);
       const clients = (r?.results ?? []).slice(0, 15);
       return jsonResponse({ ok: true, clients, scoped: true });
+    }
+
+    // ── verify_advisor ── (solo admin) verifica si un email es asesor del CRM.
+    // Para el indicador verde/rojo del Directorio (Ajustes → Directorio).
+    if (op === "verify_advisor") {
+      if (!isAdmin) return jsonResponse({ error: "solo admin" }, 403);
+      const email = String(body?.email ?? "").trim();
+      if (!email) return jsonResponse({ ok: true, exists: false, active: false, full_name: "" });
+      const crm = crmClient();
+      const r = await crm(`/auth/verify-advisor/?email=${encodeURIComponent(email)}`);
+      return jsonResponse({ ok: true, exists: !!r?.exists, active: !!r?.active, full_name: r?.full_name || "" });
     }
 
     // Ancla: prospecto/tarea/agendado (compat: prospecto_id -> prospecto).

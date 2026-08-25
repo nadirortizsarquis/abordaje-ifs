@@ -14400,10 +14400,32 @@ function AsesoresSection() {
   const [nuevo, setNuevo]       = useState({ display_name: '', advisor_name_ole: '', email: '' });
   const [busy, setBusy]         = useState(false);
   const [error, setError]       = useState(null);
+  const [crmV, setCrmV]         = useState({});   // email(lower) -> { exists, active, full_name } | { error }
+  const crmVRef = useRef({});                     // emails ya verificados (evita re-verificar)
 
   const load = () => sb.from('advisors').select('*').order('display_name')
     .then(({ data, error }) => { if (!error && data) setAdvisors(data); setLoading(false); });
   useEffect(() => { load(); }, []);
+
+  // Verifica cada email contra el CRM (via crm-sync op verify_advisor) para el
+  // indicador verde/rojo. Cada email se consulta una sola vez.
+  useEffect(() => {
+    const emails = [...new Set(advisors.map(a => (a.email || '').trim().toLowerCase()).filter(Boolean))];
+    if (!emails.length) return;
+    let vivo = true;
+    (async () => {
+      for (const email of emails) {
+        if (crmVRef.current[email]) continue;
+        crmVRef.current[email] = true;
+        try {
+          const { data, error } = await sb.functions.invoke('crm-sync', { body: { op: 'verify_advisor', email } });
+          if (!vivo) return;
+          setCrmV(m => ({ ...m, [email]: (error || !data) ? { error: true } : data }));
+        } catch { if (vivo) setCrmV(m => ({ ...m, [email]: { error: true } })); }
+      }
+    })();
+    return () => { vivo = false; };
+  }, [advisors]);
 
   const write = async (fn) => {
     setBusy(true); setError(null);
@@ -14458,7 +14480,7 @@ function AsesoresSection() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={{ borderBottom: '2px solid #e5e7eb' }}>
-              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={th}>Nombre OLE</th><th style={{ ...th, textAlign: 'center' }}>Sincronización con CRM</th>
+              <th style={th}>Activo</th><th style={th}>Nombre</th><th style={th}>Email (login)</th><th style={{ ...th, textAlign: 'center' }} title="¿El email coincide con un asesor activo del CRM?">CRM</th><th style={th}>Nombre OLE</th><th style={{ ...th, textAlign: 'center' }}>Sincronización con CRM</th>
             </tr></thead>
             <tbody>
               {advisors.map(a => (
@@ -14477,6 +14499,18 @@ function AsesoresSection() {
                     <input key={a.id + '|em|' + (a.email || '')} defaultValue={a.email || ''} disabled={busy} placeholder="—"
                       onBlur={e => { const v = e.target.value.trim() || null; if (v !== a.email) patch(a.id, { email: v }); }}
                       style={{ ...adminInpStyle, width: 190 }} />
+                  </td>
+                  <td style={{ ...td, textAlign: 'center' }}>
+                    {(() => {
+                      const email = (a.email || '').trim().toLowerCase();
+                      if (!email) return <span style={{ color: '#cbd5e1' }} title="Sin email">—</span>;
+                      const v = crmV[email];
+                      if (!v) return <span style={{ color: '#9ca3af' }} title="Verificando…">…</span>;
+                      if (v.error) return <span style={{ color: '#9ca3af' }} title="No se pudo verificar contra el CRM">?</span>;
+                      if (v.exists && v.active) return <span style={{ color: '#16a34a', fontWeight: 800 }} title={'Asesor activo del CRM' + (v.full_name ? ': ' + v.full_name : '')}>✓</span>;
+                      if (v.exists && !v.active) return <span style={{ color: '#d97706', fontWeight: 800 }} title="Existe en el CRM pero está inactivo">!</span>;
+                      return <span style={{ color: '#dc2626', fontWeight: 800 }} title="No existe un asesor con este email en el CRM (los volcados fallarán)">✗</span>;
+                    })()}
                   </td>
                   <td style={td}>
                     <input key={a.id + '|ole|' + (a.advisor_name_ole || '')} defaultValue={a.advisor_name_ole || ''} disabled={busy} placeholder="—"
