@@ -10719,6 +10719,25 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
   const [mTick, setMTick] = useState(0);          // fuerza recarga de meetings
   const [slotDraft, setSlotDraft] = useState(null);   // { date, startMin } para crear
   const [openMeeting, setOpenMeeting] = useState(null);
+  // Colores por agente elegibles con click derecho (override local por viewer,
+  // persistido en localStorage). Cada usuario elige los colores de SU vista.
+  const [agentColors, setAgentColors] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('abordaje_calcomp_agent_colors') || '{}') || {}; } catch (e) { return {}; }
+  });
+  const [colorMenu, setColorMenu] = useState(null);   // { ownerId, x, y } del click derecho
+  const setAgentColor = (ownerId, hex) => setAgentColors(prev => {
+    const next = { ...prev };
+    if (hex) next[ownerId] = hex; else delete next[ownerId];
+    try { localStorage.setItem('abordaje_calcomp_agent_colors', JSON.stringify(next)); } catch (e) {}
+    return next;
+  });
+
+  useEffect(() => {
+    if (!colorMenu) return;
+    const onKey = (e) => { if (e.key === 'Escape') setColorMenu(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [colorMenu]);
 
   useEffect(() => {
     sharedCal('owners').then(d => setOwners(d.owners || [])).catch(e => setError(e.message));
@@ -10727,7 +10746,9 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
     }).catch(() => {});
   }, [mTick]);
 
-  const colorOf = (id) => CALCOMP_PALETTE[Math.max(0, owners.findIndex(o => o.id === id)) % CALCOMP_PALETTE.length];
+  // Color automático por posición; el override manual (click derecho) gana.
+  const defaultColorOf = (id) => CALCOMP_PALETTE[Math.max(0, owners.findIndex(o => o.id === id)) % CALCOMP_PALETTE.length];
+  const colorOf = (id) => agentColors[id] || defaultColorOf(id);
   const nameOf = (id) => people[id] || (owners.find(o => o.id === id)?.name) || (id === meId ? 'Vos' : 'Agente');
   const activeOwners = owners.filter(o => !selected || selected.has(o.id));
 
@@ -10877,6 +10898,8 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
               const sinAcceso = noAccess.includes(o.id);
               return (
                 <button key={o.id} type="button" onClick={() => toggleOwner(o.id)}
+                  onContextMenu={(e) => { e.preventDefault(); setColorMenu({ ownerId: o.id, x: e.clientX, y: e.clientY }); }}
+                  title="Click derecho: elegir color"
                   style={{ display: 'flex', alignItems: 'center', gap: 6, border: `1px solid ${on ? colorOf(o.id) : 'var(--borde)'}`,
                     background: on ? colorOf(o.id) + '18' : '#fff', borderRadius: 999, padding: '4px 12px', fontSize: '0.8rem', cursor: 'pointer',
                     opacity: on ? 1 : 0.5 }}>
@@ -10886,6 +10909,39 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
               );
             })}
           </div>
+
+          {colorMenu && (() => {
+            // Bloquear los colores que YA usa otro agente (mantiene todos distintos).
+            const usedByOthers = new Set(owners.filter(o => o.id !== colorMenu.ownerId).map(o => colorOf(o.id)));
+            const actual = colorOf(colorMenu.ownerId);
+            return (
+              <>
+                <div onClick={() => setColorMenu(null)} onContextMenu={(e) => { e.preventDefault(); setColorMenu(null); }}
+                  style={{ position: 'fixed', inset: 0, zIndex: 998 }} />
+                <div style={{ position: 'fixed', left: Math.min(colorMenu.x, window.innerWidth - 200), top: Math.min(colorMenu.y, window.innerHeight - 170),
+                  zIndex: 999, background: '#fff', border: '1px solid var(--borde)', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.16)', padding: 10, width: 186 }}>
+                  <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--texto-suave)', marginBottom: 8 }}>Color de {nameOf(colorMenu.ownerId)}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 6 }}>
+                    {CALCOMP_PALETTE.map(hex => {
+                      const bloqueado = usedByOthers.has(hex) && hex !== actual;
+                      const elegido = hex === actual;
+                      return (
+                        <button key={hex} type="button" disabled={bloqueado}
+                          title={bloqueado ? 'Ya usado por otro agente' : hex}
+                          onClick={() => { setAgentColor(colorMenu.ownerId, hex); setColorMenu(null); }}
+                          style={{ width: 26, height: 26, borderRadius: '50%', background: hex,
+                            border: elegido ? '3px solid #111827' : '2px solid #fff',
+                            boxShadow: elegido ? '0 0 0 1px #111827' : '0 0 0 1px var(--borde)',
+                            cursor: bloqueado ? 'not-allowed' : 'pointer', opacity: bloqueado ? 0.28 : 1 }} />
+                      );
+                    })}
+                  </div>
+                  <button type="button" onClick={() => { setAgentColor(colorMenu.ownerId, null); setColorMenu(null); }}
+                    style={{ marginTop: 10, width: '100%', border: '1px solid var(--borde)', background: '#fff', borderRadius: 8, padding: '5px 8px', fontSize: '0.74rem', cursor: 'pointer', color: 'var(--texto-suave)' }}>Color automático</button>
+                </div>
+              </>
+            );
+          })()}
 
           {error && <div style={{ color: '#dc2626', fontSize: 12, marginBottom: 8 }}>{error}</div>}
           {loading && <div style={{ fontSize: 13, color: 'var(--texto-suave)', marginBottom: 8 }}>Cargando disponibilidad…</div>}
