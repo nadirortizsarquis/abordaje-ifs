@@ -3771,6 +3771,7 @@ function mapTareaFromDB(t) {
     id: t.id,
     columnaId: t.columna_id,
     prospectoId: t.prospecto_id || null,
+    prospectoRefId: t.prospecto_ref_id || null,   // link blando a un prospecto (historial), NO sync
     titulo: t.titulo || '',
     fechaRecordatorio: t.fecha_recordatorio,
     horaRecordatorio: t.hora_recordatorio ? t.hora_recordatorio.slice(0, 5) : null,
@@ -3927,7 +3928,7 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, documento, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, crm_client_id, crm_linked_at, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
@@ -4149,7 +4150,7 @@ const storage = {
   },
 
   // ── Tareas Kanban ──
-  async createTarea({ columnaId, prospectoId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
+  async createTarea({ columnaId, prospectoId = null, prospectoRefId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
     const user = await auth.getUser();
     const agenteId = await auth.getEffectiveAgenteId();
     const { data, error } = await sb.from('abordaje_tareas').insert({
@@ -4157,6 +4158,7 @@ const storage = {
       agente_id: agenteId,
       actor_id: user.id,
       prospecto_id: prospectoId,
+      prospecto_ref_id: prospectoRefId,
       titulo,
       observacion,
       fecha_recordatorio: fechaRecordatorio,
@@ -4210,7 +4212,7 @@ const storage = {
   async listTareasArchivadas() {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
-    const TAREA_COLS = 'id, columna_id, prospecto_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
     const { data, error } = await selectAllRows(() => sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
@@ -5012,6 +5014,22 @@ function ultimoContactoTipo(p) {
     if (!last || (c.createdAt || '') > (last.createdAt || '')) last = c;
   }
   return last?.tipo || null;
+}
+
+// Snapshot en texto del historial de gestiones de un prospecto. Se copia a la nota
+// de la tarjeta al "convertir prospecto en tarjeta", para que la info de abordaje
+// viaje con la tarjeta aunque después se archive/borre el prospecto.
+function resumenGestionesProspecto(p) {
+  const head = `[Historial de abordaje${p.nombre ? ' — ' + p.nombre : ''}${p.telefono ? ' · ' + p.telefono : ''}]`;
+  const cs = [...(p.contactos || [])].sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || ''));
+  if (!cs.length) return head + '\n(sin gestiones registradas)';
+  const lines = cs.map(c => {
+    const label = (tipoConfig(c.tipo)?.label) || c.tipo || 'Gestión';
+    const cuando = c.createdAt ? formatFechaHora(c.createdAt) : (c.fecha ? formatFechaHora(c.fecha) : '');
+    const obs = (c.observacion || '').trim();
+    return `- ${cuando ? cuando + ' — ' : ''}${label}${obs ? ': ' + obs : ''}`;
+  });
+  return head + '\n' + lines.join('\n');
 }
 
 // Buscador propio de la Lista de Abordaje (independiente del buscador global del
@@ -7269,6 +7287,24 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
+  // "Convertir prospecto en tarjeta": crea una tarea MANUAL en la columna elegida,
+  // ligada al prospecto por prospecto_ref_id (link blando que el sync NO toca) y con
+  // el historial de gestiones copiado en la nota. Así un prospecto trabajado que ya
+  // no tiene tarjeta viva se puede volver accionable sin perder su abordaje.
+  const handleConvertirProspectoTarea = async (prospecto, columnaId, titulo) => {
+    if (guardReadOnly() || !prospecto || !columnaId) return;
+    try {
+      const tarea = await storage.createTarea({
+        columnaId,
+        prospectoRefId: prospecto.id,
+        titulo: (titulo || prospecto.nombre || 'Tarea').trim(),
+        observacion: resumenGestionesProspecto(prospecto),
+      });
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: [...s.tareas.items, tarea] } }));
+      showToast('Tarjeta creada con el historial del prospecto');
+    } catch (e) { handleErr(e, 'convertirProspectoTarea'); }
+  };
+
   // Asigna (o quita, pasando null) la compañía de una tarea. Solo afecta
   // el campo `compania` — la lógica del Kanban / calendar no cambia,
   // solo cambia el badge/logo en la esquina superior derecha de la card.
@@ -8116,6 +8152,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onPersist={(patch) => handleUpdateTarea(tareaEditando.id, patch)}
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
+          onOpenProspecto={(pid) => { setTareaEditando(null); setSelectedId(pid); }}
         />
       )}
 
@@ -8218,10 +8255,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           prospecto={selectedProspecto}
           settings={settings}
           readOnly={readOnly}
+          columnas={state.tareas.columnas}
           onClose={() => setSelectedId(null)}
           onUpdate={(patch) => upsertProspecto(selectedProspecto.id, patch)}
           onDelete={() => handleDelete(selectedProspecto.id)}
           onArchive={(archivar) => handleArchive(selectedProspecto.id, archivar)}
+          onConvertirTarea={(columnaId, titulo) => handleConvertirProspectoTarea(selectedProspecto, columnaId, titulo)}
           onAddContacto={(c) => handleAddContacto(selectedProspecto.id, c)}
           onEditContacto={(cid, patch) => handleEditContacto(selectedProspecto.id, cid, patch)}
           onDeleteContacto={(cid) => handleDeleteContacto(selectedProspecto.id, cid)}
@@ -9910,9 +9949,10 @@ function CrmCandidato({ c, onLink, disabled, highlight }) {
   );
 }
 
-function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDelete, onArchive, onAddContacto, onEditContacto, onDeleteContacto }) {
+function PanelLateral({ prospecto, settings, readOnly, columnas, onClose, onUpdate, onDelete, onArchive, onConvertirTarea, onAddContacto, onEditContacto, onDeleteContacto }) {
   // Modal de relevamiento de necesidades (casi pantalla completa).
   const [relevOpen, setRelevOpen] = useState(false);
+  const [convModal, setConvModal] = useState(false);   // "Convertir prospecto en tarjeta"
   // Al abrir la ficha, re-encuadrar a pantalla completa si estaba zoomeada.
   useEffect(() => { resetViewportZoom(); }, []);
   useEffect(() => {
@@ -10002,6 +10042,12 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
             se guardan on-blur en los inputs, así que ambos botones cierran
             el panel — el "Cancelar" no descarta nada, solo cierra. */}
         <div className="panel-footer-sticky">
+          {!readOnly && onConvertirTarea && (
+            <button className="btn-secondary" onClick={() => setConvModal(true)}
+              title="Crear una tarjeta en el Kanban (Administrativo, Venta pendiente, etc.) llevando el historial de este prospecto">
+              Crear tarjeta / tarea
+            </button>
+          )}
           {!readOnly && (
             <CrmVinculoLanzador
               anchor={{ type: 'prospecto', id: prospecto.id, nombreSugerido: prospecto.nombre, documentoSugerido: prospecto.documento }}
@@ -10015,8 +10061,61 @@ function PanelLateral({ prospecto, settings, readOnly, onClose, onUpdate, onDele
           <button className="btn-primary" onClick={onClose}>Guardar</button>
         </div>
       </div>
+      {convModal && (
+        <ConvertirTareaModal
+          prospecto={prospecto}
+          columnas={columnas || []}
+          onCancel={() => setConvModal(false)}
+          onCreate={(columnaId, titulo) => { onConvertirTarea(columnaId, titulo); setConvModal(false); onClose(); }}
+        />
+      )}
     </div>
   );
+}
+
+// Modal chico: elegir columna del Kanban + título para "convertir prospecto en
+// tarjeta". El historial se copia solo (en el handler). Prellenamos el título con
+// el nombre del prospecto y la columna con la primera disponible.
+function ConvertirTareaModal({ prospecto, columnas, onCancel, onCreate }) {
+  const cols = [...(columnas || [])].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
+  const [columnaId, setColumnaId] = useState(cols[0]?.id || '');
+  const [titulo, setTitulo] = useState(prospecto?.nombre || '');
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onCancel(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onCancel]);
+  const crear = () => { if (!columnaId || !titulo.trim()) return; onCreate(columnaId, titulo.trim()); };
+  return ReactDOM.createPortal((
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth: 440 }}>
+        <div className="modal-header">
+          <h3>Crear tarjeta / tarea</h3>
+          <button type="button" className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', lineHeight: 1.5, margin: '0 0 14px' }}>
+            Se crea una tarjeta en el Kanban con el <strong>historial de abordaje</strong> de este prospecto copiado en la nota. La tarjeta queda ligada al prospecto (podés volver a su ficha) y el sync de gestiones no la toca.
+          </p>
+          <div className="field">
+            <label>Columna <span className="req">*</span></label>
+            <select value={columnaId} onChange={e => setColumnaId(e.target.value)}>
+              {cols.map(c => <option key={c.id} value={c.id}>{c.titulo}</option>)}
+            </select>
+          </div>
+          <div className="field">
+            <label>Título <span className="req">*</span></label>
+            <input type="text" value={titulo} autoFocus onChange={e => setTitulo(e.target.value)}
+              placeholder="Ej: Propuesta — Juan Pérez" />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onCancel}>Cancelar</button>
+          <button type="button" className="btn-primary" onClick={crear} disabled={!columnaId || !titulo.trim()}>Crear tarjeta</button>
+        </div>
+      </div>
+    </div>
+  ), document.body);
 }
 
 // ── FIELDS PROSPECTO (autosave on blur) ────────────────────────
@@ -17010,7 +17109,7 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onOpenProspecto }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -17143,6 +17242,15 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body sectioned">
+          {/* Tarjeta convertida desde un prospecto: acceso a su ficha (historial vivo).
+              El historial también quedó copiado en la nota de abajo. */}
+          {tarea.prospectoRefId && onOpenProspecto && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '9px 12px', marginBottom: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--azul-oscuro)' }}>Esta tarjeta viene de un prospecto (su historial está en la nota).</span>
+              <button type="button" className="btn-ghost" style={{ fontSize: '0.8rem', fontWeight: 700, padding: 0 }}
+                onClick={() => onOpenProspecto(tarea.prospectoRefId)}>Ver prospecto →</button>
+            </div>
+          )}
           {/* ── Sección: Tarea ── */}
           <div className="modal-section">
             <div className="field">
