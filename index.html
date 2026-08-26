@@ -8669,7 +8669,7 @@ function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds
             <FilaProspecto
               key={p.id}
               prospecto={p}
-              onClick={() => onSelect(p.id)}
+              onSelect={onSelect}
               selectable={selectable}
               selected={selectable && selectedIds ? selectedIds.has(p.id) : false}
               onToggleSelect={onToggleSelect}
@@ -8681,7 +8681,11 @@ function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds
   );
 }
 
-function FilaProspecto({ prospecto, onClick, selectable = false, selected = false, onToggleSelect = null }) {
+// React.memo: en la Lista de Abordaje, cuando App re-renderiza por algo ajeno a la
+// fila (filtros, reloj, modales), las filas cuyos props no cambiaron NO se re-renderean.
+// Efectivo porque onSelect (setSelectedId) es estable y en modo normal onToggleSelect
+// es null. La fila llama onSelect(prospecto.id) internamente (no recibe una closure nueva).
+const FilaProspecto = React.memo(function FilaProspecto({ prospecto, onSelect, selectable = false, selected = false, onToggleSelect = null }) {
   const estado = deriveEstado(prospecto);
   const meta = ESTADO_META[estado];
   // Si el próximo contacto está agendado a más de 3 meses, el row no es urgente:
@@ -8695,7 +8699,7 @@ function FilaProspecto({ prospecto, onClick, selectable = false, selected = fals
     if (prox > enTresMeses) tint = 'tint-futuro-lejos';
   }
   return (
-    <tr className={`fila-clickeable ${tint}${selected ? ' is-selected' : ''}`} onClick={onClick}>
+    <tr className={`fila-clickeable ${tint}${selected ? ' is-selected' : ''}`} onClick={() => onSelect(prospecto.id)}>
       {selectable && (
         <td className="col-check" onClick={(e) => { e.stopPropagation(); onToggleSelect && onToggleSelect(prospecto.id); }}>
           <input
@@ -8731,7 +8735,7 @@ function FilaProspecto({ prospecto, onClick, selectable = false, selected = fals
       </td>
     </tr>
   );
-}
+});
 
 // ── BADGE ESTADO ───────────────────────────────────────────────
 function BadgeEstado({ prospecto }) {
