@@ -12339,6 +12339,19 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
     const set = new Set((detalle || []).map(p => p._compania || 'ole'));
     return COMPANIAS.filter(c => set.has(c.id));
   }, [detalle]);
+  // Reportes OLE viejos que NO tienen 'cartera' (libro completo) y caen a 'detalle'
+  // (solo producción): el calendario muestra un libro INCOMPLETO. Avisamos para que
+  // se republique desde el Tablero, en vez de creer que están todas las pólizas.
+  const librosViejos = useMemo(
+    () => (rows || []).filter(r => r.resumen && !r.resumen.cartera && Array.isArray(r.resumen.detalle)).length,
+    [rows]
+  );
+  // Pólizas con una frecuencia que el normalizador no reconoce: en "cada pago" caen
+  // a anual en silencio (podrían faltar cuotas). Las contamos para avisar.
+  const freqDesconocidas = useMemo(
+    () => (detalle || []).filter(p => (p.frecuencia || '').toString().trim() && !calpagoNormFreq(p.frecuencia)).length,
+    [detalle]
+  );
   const shown = useMemo(() => eventos.filter(e => {
     if (e.freq && !freqF[e.freq]) return false;
     if (!pagF[e.pagador || 'sin']) return false;
@@ -12381,20 +12394,34 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   async function savePago(asesorId, poliza, paga, obs) {
     const cleanObs = (obs || '').trim();
     const key = calpagoPagoKey(asesorId, poliza);
+    const prev = pagoMap[key];   // para rollback si el guardado falla
     setPagoMap(m => { const n = { ...m }; if (!paga && !cleanObs) delete n[key]; else n[key] = { paga: paga || null, obs: cleanObs }; return n; });
+    // supabase-js NO tira excepción: hay que leer .error. Si falla, revertimos el
+    // optimista y avisamos (antes se tragaba el error y el cambio "desaparecía" al recargar).
+    let error = null;
     try {
-      if (!paga && !cleanObs) await sb.from('ole_poliza_pago').delete().eq('user_id', asesorId).eq('poliza', poliza);
-      else await sb.from('ole_poliza_pago').upsert({ user_id: asesorId, poliza, paga: paga || null, observaciones: cleanObs || null, updated_at: new Date().toISOString() }, { onConflict: 'user_id,poliza' });
-    } catch (e) { /* optimista */ }
+      if (!paga && !cleanObs) ({ error } = await sb.from('ole_poliza_pago').delete().eq('user_id', asesorId).eq('poliza', poliza));
+      else ({ error } = await sb.from('ole_poliza_pago').upsert({ user_id: asesorId, poliza, paga: paga || null, observaciones: cleanObs || null, updated_at: new Date().toISOString() }, { onConflict: 'user_id,poliza' }));
+    } catch (e) { error = e; }
+    if (error) {
+      setPagoMap(m => { const n = { ...m }; if (prev === undefined) delete n[key]; else n[key] = prev; return n; });
+      showToast('No se pudo guardar el pago. Reintentá.');
+    }
   }
 
   // Guardar quién paga + observaciones de un PAGO MANUAL (van en su propia fila).
   async function savePagoManual(manualId, paga, obs) {
     const cleanObs = (obs || '').trim();
+    const prev = manuales.find(m => m.id === manualId);   // para rollback
     setManuales(ms => ms.map(m => m.id === manualId ? { ...m, paga: paga || null, observaciones: cleanObs } : m));
+    let error = null;
     try {
-      await sb.from('abordaje_pago_manual').update({ paga: paga || null, observaciones: cleanObs, updated_at: new Date().toISOString() }).eq('id', manualId);
-    } catch (e) { /* optimista */ }
+      ({ error } = await sb.from('abordaje_pago_manual').update({ paga: paga || null, observaciones: cleanObs, updated_at: new Date().toISOString() }).eq('id', manualId));
+    } catch (e) { error = e; }
+    if (error) {
+      if (prev) setManuales(ms => ms.map(m => m.id === manualId ? prev : m));
+      showToast('No se pudo guardar el pago. Reintentá.');
+    }
   }
 
   // Abrir un evento: SIEMPRE el mismo detalle (CalpagoEditModal). Las manuales
@@ -12459,7 +12486,9 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
             {DOW_CORTOS.map(d => <div key={d} className="cal-dow">{d}</div>)}
             {buildMonthGrid(year, cursor.getMonth()).map((cell, i) => {
               const k = dayKey(cell.date);
-              const evs = byDay[k] || [];
+              // Las celdas de relleno (días del mes vecino) NO muestran chips: el pago
+              // se dibuja SOLO en su mes propio, no duplicado en el mes de al lado.
+              const evs = cell.outOfMonth ? [] : (byDay[k] || []);
               const MAX = 3;
               return (
                 <div key={i} className={'calpago-cell' + (cell.outOfMonth ? ' out' : '') + (isToday(cell.date) ? ' today' : '') + (selDay === k ? ' sel' : '')}
@@ -12595,6 +12624,21 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
           <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_SIN.bg, borderColor: CALPAGO_SIN.bd }}></span>Sin definir</span>
         </div>
       </div>
+
+      {(librosViejos > 0 || (eachPay && freqDesconocidas > 0)) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 12 }}>
+          {librosViejos > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fbbf24', color: '#92400e', borderRadius: 8, padding: '8px 12px', fontSize: '0.8rem', lineHeight: 1.4 }}>
+              {librosViejos === 1 ? 'Un reporte OLE es viejo' : `${librosViejos} reportes OLE son viejos`} y solo trae producción (sin el libro completo de renovaciones). Republicá desde el Tablero para ver todas las pólizas.
+            </div>
+          )}
+          {eachPay && freqDesconocidas > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fbbf24', color: '#92400e', borderRadius: 8, padding: '8px 12px', fontSize: '0.8rem', lineHeight: 1.4 }}>
+              {freqDesconocidas} póliza{freqDesconocidas === 1 ? '' : 's'} con frecuencia no reconocida: en "cada pago" se muestran como anuales (podrían faltarles cuotas).
+            </div>
+          )}
+        </div>
+      )}
 
       {nq && (
         <div className="calpago-detail" style={{ marginBottom: 12 }}>
