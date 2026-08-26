@@ -1402,12 +1402,13 @@
     padding: 12px 28px max(12px, env(safe-area-inset-bottom, 0px));
     display: flex;
     gap: 10px;
-    justify-content: space-between;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
     z-index: 8;
   }
-  .panel-footer-sticky button { flex: 1 1 0; min-width: 0; }
+  .panel-footer-sticky button { flex: 1 1 auto; min-width: 130px; }
 
   .panel-section {
     padding: 22px 28px;
@@ -5277,7 +5278,7 @@ async function exportarProspectosPDF(prospectos, user) {
     doc.setFontSize(7.5);
     doc.setTextColor(120, 120, 140);
     doc.setFont('helvetica', 'normal');
-    doc.text('www.broker-ifs.com — Confidencial', 12, pageH - 6);
+    doc.text('www.broker-ifs.com - Confidencial', 12, pageH - 6);
     doc.text(`Página ${pageNum} de ${pageCount}`, pageW - 12, pageH - 6, { align: 'right' });
   };
 
@@ -5735,10 +5736,10 @@ function calcularNotificaciones(state, isPilot = false, dismissed = {}) {
 }
 
 const URGENCIA_META = {
-  vencido: { label: 'Vencidos',         color: '#dc2626', bg: '#fef2f2', emoji: '🔴' },
-  hoy:     { label: 'Hoy',              color: '#ea580c', bg: '#fff7ed', emoji: '🟠' },
-  '24h':   { label: 'Próximas 24 hs',   color: '#a16207', bg: '#fefce8', emoji: '🟡' },
-  semana:  { label: 'Esta semana',      color: '#1e40af', bg: '#eff6ff', emoji: '🔵' },
+  vencido: { label: 'Vencidos',         color: '#dc2626', bg: '#fef2f2' },
+  hoy:     { label: 'Hoy',              color: '#ea580c', bg: '#fff7ed' },
+  '24h':   { label: 'Próximas 24 hs',   color: '#a16207', bg: '#fefce8' },
+  semana:  { label: 'Esta semana',      color: '#1e40af', bg: '#eff6ff' },
 };
 
 function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
@@ -5773,14 +5774,15 @@ function NotificacionesDropdown({ items, onClose, onClickItem, onDismiss }) {
         </span>
       </div>
       {grupos.length === 0 && (
-        <div className="bell-empty">Sin eventos pendientes 🎉</div>
+        <div className="bell-empty">Sin eventos pendientes</div>
       )}
       {grupos.map(g => {
         const meta = URGENCIA_META[g.urgencia];
         return (
           <div key={g.urgencia} className="bell-group">
             <div className="bell-group-header" style={{color: meta.color, background: meta.bg}}>
-              {meta.emoji} {meta.label} <span className="bell-group-count">{g.items.length}</span>
+              <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: meta.color, marginRight: 6, verticalAlign: 'middle' }} />
+              {meta.label} <span className="bell-group-count">{g.items.length}</span>
             </div>
             {g.items.map(it => {
               const dt = it.fecha;
@@ -7422,9 +7424,11 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         const merged = { ...prev, ...patch };
         const fechaCambio = (merged.fechaRecordatorio || null) !== (prev.fechaRecordatorio || null)
           || (merged.horaRecordatorio || null) !== (prev.horaRecordatorio || null);
-        const nota = extraerUltimaLineaBitacora(merged.observacion);
-        const notaCambio = ('observacion' in patch) && (patch.observacion || '') !== (prev.observacion || '') && nota != null;
-        if (fechaCambio || notaCambio) {
+        // SOLO propagamos (y convertimos el contacto a 'recordatorio') cuando cambió la
+        // FECHA/HORA — que es re-agendar. Editar solo la nota NO debe cambiar el tipo/
+        // estado semántico del contacto del prospecto (antes lo pisaba a 'recordatorio').
+        if (fechaCambio) {
+          const nota = extraerUltimaLineaBitacora(merged.observacion);
           await _syncTareaAProspecto(prev, merged.fechaRecordatorio || null, merged.horaRecordatorio || null, nota);
         }
       }
@@ -9182,7 +9186,7 @@ async function exportarRelevamientoPDF(prospecto) {
       if (!filas.length) return;
       ensure(34);
       doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(40, 40, 60);
-      doc.text(`${i + 1}º hijo${h.nombre ? ` — ${h.nombre}` : ''}`, 12, y); y += 2;
+      doc.text(`${i + 1}º hijo${h.nombre ? ` - ${h.nombre}` : ''}`, 12, y); y += 2;
       tabla(['Etapa', `Costo mensual (${$})`, 'Cuotas anuales', 'Años restantes'], filas);
     });
   } else sinDatos.push('Gastos de educación');
@@ -9258,7 +9262,7 @@ async function exportarRelevamientoPDF(prospecto) {
   for (let i = 1; i <= pages; i++) {
     doc.setPage(i);
     doc.setFontSize(7.5); doc.setTextColor(120, 120, 140); doc.setFont('helvetica', 'normal');
-    doc.text('www.broker-ifs.com — Confidencial', 12, pageH - 6);
+    doc.text('www.broker-ifs.com - Confidencial', 12, pageH - 6);
     doc.text(`Página ${i} de ${pages}`, pageW - 12, pageH - 6, { align: 'right' });
   }
 
@@ -13166,7 +13170,6 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
 //   tarea manual (sin prospecto vinculado) → violeta
 const CAL_COLOR_VERDE    = { color: '#065f46', bg: '#d1fae5', border: '#065f46' };
 const CAL_COLOR_GRIS     = { color: '#374151', bg: '#e5e7eb', border: '#374151' };
-const CAL_COLOR_AZUL     = { color: '#1e40af', bg: '#dbeafe', border: '#1e40af' };
 // Gris oscuro / pizarra para "mensaje sin respuesta" (antes azul, se confundía
 // con el color de los calendarios externos personales de Google).
 const CAL_COLOR_GRIS_OSC = { color: '#0f172a', bg: '#94a3b8', border: '#334155' };
