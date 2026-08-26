@@ -238,6 +238,63 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, people });
     }
 
+    // MI PROPIA agenda de la semana, CON títulos (es solo para mi vista). La usa
+    // el check "Mostrar mi agenda" del calendario compartido para pintarme mis
+    // reuniones en gris y no doble-bookear al agendar algo compartido.
+    // Una sola fuente por modo (evita duplicar): en piloto TODO vive en Google
+    // (citas Abordaje + agendas + externas); en non-piloto vive en la DB.
+    if (op === "my_agenda") {
+      const timeMin: string = body?.timeMin || "";
+      const timeMax: string = body?.timeMax || "";
+      if (!timeMin || !timeMax) return jsonResponse({ error: "missing timeMin/timeMax" }, 400);
+      const { data: meProf } = await supabase.from("profiles").select("email, gcal_enabled").eq("id", user.id).maybeSingle();
+      const blocks: Array<{ start: string; end: string; title: string }> = [];
+
+      if (meProf?.gcal_enabled && meProf?.email) {
+        // Piloto: Google es la foto completa, con los títulos reales.
+        const token = await accessTokenForOwner(supabase, { id: user.id, email: meProf.email });
+        if (token) {
+          try {
+            const cals = await listCalendars(token);
+            const calIds = cals.length ? cals.map((c) => c.id) : ["primary"];
+            for (const calId of calIds) {
+              const evs = await listEvents(token, calId, timeMin, timeMax);
+              for (const ev of evs) {
+                if (ev.status === "cancelled") continue;
+                if (ev.transparency === "transparent") continue; // "disponible" en Google
+                const start = ev.start?.dateTime || (ev.start?.date ? `${ev.start.date}T00:00:00` : null);
+                const end = ev.end?.dateTime || (ev.end?.date ? `${ev.end.date}T00:00:00` : null);
+                if (!start || !end) continue;
+                blocks.push({ start: new Date(start).toISOString(), end: new Date(end).toISOString(), title: ev.summary || "Ocupado" });
+              }
+            }
+          } catch (_) { /* best-effort */ }
+        }
+      } else {
+        // Non-piloto: la agenda vive en la DB (agendas directas + citas de prospecto).
+        const { data: ags } = await supabase.from("abordaje_agendados")
+          .select("fecha, nota").eq("agente_id", user.id).gte("fecha", timeMin).lte("fecha", timeMax);
+        for (const a of ags ?? []) {
+          const s = new Date(a.fecha);
+          const e = new Date(s.getTime() + DEFAULT_DUR_MIN * 60000);
+          blocks.push({ start: s.toISOString(), end: e.toISOString(), title: (a.nota || "").split(/\r?\n/)[0] || "Agenda" });
+        }
+        const { data: cts } = await supabase.from("abordaje_prospecto_contactos")
+          .select("fecha, hora, abordaje_prospectos(nombre)").eq("agente_id", user.id).eq("tipo", "agendado")
+          .gte("fecha", timeMin.slice(0, 10)).lte("fecha", timeMax.slice(0, 10));
+        for (const c of cts ?? []) {
+          if (!c.fecha) continue;
+          const hhmm = (c.hora || "09:00").slice(0, 5);
+          const s = new Date(`${c.fecha}T${hhmm}:00`);
+          if (isNaN(s.getTime())) continue;
+          const e = new Date(s.getTime() + DEFAULT_DUR_MIN * 60000);
+          const nombre = (c as any).abordaje_prospectos?.nombre || "Prospecto";
+          blocks.push({ start: s.toISOString(), end: e.toISOString(), title: `Cita: ${nombre}` });
+        }
+      }
+      return jsonResponse({ ok: true, blocks });
+    }
+
     return jsonResponse({ error: `unknown op: ${op}` }, 400);
   } catch (err) {
     console.error("shared-calendar error:", err);

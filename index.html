@@ -10762,6 +10762,10 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
   const [mTick, setMTick] = useState(0);          // fuerza recarga de meetings
   const [slotDraft, setSlotDraft] = useState(null);   // { date, startMin } para crear
   const [openMeeting, setOpenMeeting] = useState(null);
+  // "Mostrar mi agenda": overlay gris de MIS propias reuniones (con título, solo mi
+  // vista) para no doble-bookear al agendar algo compartido. Preferencia local.
+  const [showMine, setShowMine] = useState(() => { try { return localStorage.getItem('abordaje_calcomp_showmine') === '1'; } catch (e) { return false; } });
+  const [myAgenda, setMyAgenda] = useState([]);   // [{ start, end, title }]
   // Colores por agente elegibles con click derecho (override local por viewer,
   // persistido en localStorage). Cada usuario elige los colores de SU vista.
   const [agentColors, setAgentColors] = useState(() => {
@@ -10832,6 +10836,20 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
   const myInvite = (mId) => mInvites.find(i => i.meeting_id === mId && i.invitee_id === meId);
   const invitesOf = (mId) => mInvites.filter(i => i.meeting_id === mId);
 
+  // Mi propia agenda de la semana (solo si el check está activo). Con título — es
+  // solo mi vista. La trae la edge (my_agenda) desde una única fuente por modo.
+  useEffect(() => {
+    try { localStorage.setItem('abordaje_calcomp_showmine', showMine ? '1' : '0'); } catch (e) {}
+    if (!showMine) { setMyAgenda([]); return; }
+    const tMin = new Date(weekStart); tMin.setHours(0, 0, 0, 0);
+    const tMax = new Date(weekStart); tMax.setDate(tMax.getDate() + 7); tMax.setHours(0, 0, 0, 0);
+    let vivo = true;
+    sharedCal('my_agenda', { timeMin: tMin.toISOString(), timeMax: tMax.toISOString() })
+      .then(d => { if (vivo) setMyAgenda(d.blocks || []); })
+      .catch(() => { if (vivo) setMyAgenda([]); });
+    return () => { vivo = false; };
+  }, [showMine, weekStart]);
+
   const wsMin = (settings.workStartHour || 8) * 60 + (settings.workStartMin || 0);
   const weMin = (settings.workEndHour || 20) * 60 + (settings.workEndMin || 0);
   // La grilla muestra el día completo (0-24) igual que el calendario normal, para
@@ -10900,6 +10918,23 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
     return items.map(it => ({ ...it, lanes }));
   };
 
+  // Mis propios eventos del día (overlay gris del check "Mostrar mi agenda"),
+  // con carriles para que no se pisen. Backdrop informativo, no interactivo.
+  const dayMine = (d) => {
+    const items = myAgenda
+      .filter(a => sameDay(a.start, d))
+      .map(a => ({ a, s: minutesOf(a.start), e: Math.max(minutesOf(a.start) + 15, minutesOf(a.end)) }))
+      .sort((x, y) => x.s - y.s || x.e - y.e);
+    const laneEnds = [];
+    items.forEach(it => {
+      let lane = laneEnds.findIndex(end => end <= it.s);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.e); } else laneEnds[lane] = it.e;
+      it.lane = lane;
+    });
+    const lanes = Math.max(1, laneEnds.length);
+    return items.map(it => ({ ...it, lanes }));
+  };
+
   // Click en la grilla → crear evento a esa hora (snap a 30', floor).
   const onGridClick = (d, e) => {
     if (e.target.closest('.calcomp-meeting')) return; // click sobre un evento existente
@@ -10923,7 +10958,12 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
             {days[0].getDate()} {NOMBRES_MES[days[0].getMonth()].slice(0, 3)} – {days[days.length - 1].getDate()} {NOMBRES_MES[days[days.length - 1].getMonth()].slice(0, 3)}
           </span>
         </div>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto', background: '#eef2ff', borderRadius: 999, padding: 3 }}>
+        <label title="Pinta tus propias reuniones en gris (solo tu vista) para no superponerte al agendar algo compartido"
+          style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', fontSize: '0.8rem', fontWeight: 600, color: '#475569', cursor: 'pointer', userSelect: 'none' }}>
+          <input type="checkbox" checked={showMine} onChange={e => setShowMine(e.target.checked)} />
+          Mostrar mi agenda
+        </label>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 10, background: '#eef2ff', borderRadius: 999, padding: 3 }}>
           {[['ocupado', 'Ocupado'], ['disponible', 'Disponible']].map(([k, label]) => (
             <button key={k} type="button" onClick={() => setMode(k)}
               style={{ border: 'none', borderRadius: 999, padding: '5px 14px', fontSize: '0.8rem', fontWeight: 700, cursor: 'pointer',
@@ -11014,6 +11054,7 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
                 const free = mode === 'disponible' ? dayFree(d) : [];
                 const nOwn = Math.max(1, activeOwners.length);
                 const mtgs = dayMeetings(d);
+                const mine = showMine ? dayMine(d) : [];
                 return (
                   <div key={di} className="cal-day-col clickable" style={{ cursor: 'cell' }} onClick={(e) => onGridClick(d, e)}>
                     {hours.map(h => <div key={h} className="cal-hour-cell" style={{ height: HOUR_HEIGHT }} />)}
@@ -11022,6 +11063,19 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
                     {weMin < DAY_MAX && <div className="cal-offhours" style={{ top: yOf(weMin), height: gridH - yOf(weMin) }} />}
                     <div className="cal-workhours-line" style={{ top: yOf(wsMin) }} />
                     <div className="cal-workhours-line" style={{ top: yOf(weMin) }} />
+                    {/* "Mostrar mi agenda": MIS reuniones en gris claro CON título (solo mi
+                        vista), como backdrop para no doble-bookear. Detrás de los meetings. */}
+                    {mine.map((it, i) => (
+                      <div key={'mine' + i} title={it.a.title} style={{
+                        position: 'absolute', top: yOf(it.s), height: Math.max(14, yOf(it.e) - yOf(it.s)),
+                        left: `calc(${(it.lane / it.lanes) * 100}% + 1px)`, width: `calc(${100 / it.lanes}% - 2px)`,
+                        background: '#e5e7eb', border: '1px solid #cbd5e1', borderRadius: 4, zIndex: 2,
+                        padding: '1px 4px', overflow: 'hidden', fontSize: '0.68rem', fontWeight: 600,
+                        color: '#64748b', lineHeight: 1.15, pointerEvents: 'none',
+                      }}>
+                        <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.a.title}</span>
+                      </div>
+                    ))}
                     {/* En modo disponible, base gris dentro del horario laboral = ocupado (verde = libre encima) */}
                     {mode === 'disponible' && <div style={{ position: 'absolute', left: 0, right: 0, top: yOf(wsMin), height: yOf(weMin) - yOf(wsMin), background: '#94a3b8', opacity: 0.28, zIndex: 1 }} />}
                     {mode === 'ocupado'
