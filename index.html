@@ -4279,6 +4279,29 @@ const storage = {
     } catch (e) { console.warn('updateMeetingBySourceRef:', e); }
   },
 
+  // Crea el meeting espejo + invitaciones cuando el evento origen recién se crea
+  // (ej. "Nueva agenda"): en ese momento ya existe el id, así que el source_ref
+  // queda bien anclado (no huérfano). Idempotente por source_ref: si ya hay un
+  // meeting para ese origen, reusa ese y solo suma invitados. Best-effort.
+  async createMeetingWithInvites(sourceRef, { creatorId, title, startAt, endAt, inviteeIds }) {
+    if (!creatorId || !sourceRef || !inviteeIds || !inviteeIds.length) return;
+    try {
+      const { data: existing } = await sb.from('abordaje_calendar_meetings')
+        .select('id').eq('creator_id', creatorId).eq('source_ref', sourceRef).maybeSingle();
+      let mId = existing?.id;
+      if (!mId) {
+        const { data: m, error } = await sb.from('abordaje_calendar_meetings')
+          .insert({ creator_id: creatorId, source_ref: sourceRef, title: (title || '').trim() || 'Evento', start_at: startAt, end_at: endAt, creator_agenda: false })
+          .select('id').single();
+        if (error) { console.warn('createMeetingWithInvites:', error); return; }
+        mId = m.id;
+      }
+      const { error: e2 } = await sb.from('abordaje_calendar_meeting_invites')
+        .insert(inviteeIds.map(invitee_id => ({ meeting_id: mId, invitee_id })));
+      if (e2) console.warn('createMeetingWithInvites invites:', e2);
+    } catch (e) { console.warn('createMeetingWithInvites:', e); }
+  },
+
   async updateAgendado(id, patch) {
     const dbPatch = {};
     if ('fecha' in patch) dbPatch.fecha = patch.fecha;
@@ -6218,9 +6241,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   useEffect(() => {
     if (isAssistant || agente?.compartir_calendario !== true || !user?.id) { setCalCompPending(0); return; }
     let vivo = true;
+    // Solo cuenta invitaciones pendientes de reuniones NO vencidas (end_at >= ahora):
+    // una invitación a un meeting que ya pasó es ruido, no acción pendiente.
+    const ahora = new Date().toISOString();
     sb.from('abordaje_calendar_meeting_invites')
-      .select('id', { count: 'exact', head: true })
+      .select('id, abordaje_calendar_meetings!inner(end_at)', { count: 'exact', head: true })
       .eq('invitee_id', user.id).eq('status', 'pending')
+      .gte('abordaje_calendar_meetings.end_at', ahora)
       .then(({ count }) => { if (vivo) setCalCompPending(count || 0); });
     return () => { vivo = false; };
   }, [isAssistant, agente?.compartir_calendario, user?.id, calCompTick, view]);
@@ -7203,16 +7230,32 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         );
       } else if (isPilot) {
         // Agenda standalone en Google directo (sin prospect, sin abordaje_agendados).
-        await gcalApi.create(buildGoogleEventBody({
+        const ev = await gcalApi.create(buildGoogleEventBody({
           startIso: agendadoParaIso,
           summary: (form.titulo || '').trim() || 'Agenda IFS',
           description: form.observacion || '',
         }));
         bumpGcal();
+        // Invitaciones diferidas: ya con el id del evento, el meeting espejo queda
+        // anclado por source_ref (no huérfano).
+        if (ev?.id && form.invitees?.length) {
+          await storage.createMeetingWithInvites(`gcal:${ev.id}`, {
+            creatorId: user?.id, title: (form.titulo || '').trim(),
+            startAt: agendadoParaIso, endAt: new Date(local.getTime() + 60 * 60000).toISOString(),
+            inviteeIds: form.invitees,
+          });
+        }
       } else {
         // Non-piloto: agenda standalone en DB.
         const ag = await storage.createAgendado(null, agendadoParaIso, nota);
         setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
+        if (ag?.id && form.invitees?.length) {
+          await storage.createMeetingWithInvites(`agenda:${ag.id}`, {
+            creatorId: user?.id, title: (form.titulo || '').trim(),
+            startAt: agendadoParaIso, endAt: new Date(local.getTime() + 60 * 60000).toISOString(),
+            inviteeIds: form.invitees,
+          });
+        }
       }
       setNuevaAgendaSlot(null);
       showToast('Agenda creada');
@@ -10841,6 +10884,9 @@ function CalendarioCompartidoView({ settings, meId, onInvitesChanged }) {
   const dayMeetings = (d) => {
     const items = meetings
       .filter(m => sameDay(m.start_at, d))
+      // Ocultar del invitado los meetings que rechazó (declined). El creador siempre
+      // ve los suyos. Se filtra antes del layout para no reservar un carril vacío.
+      .filter(m => m.creator_id === meId || (myInvite(m.id)?.status !== 'declined'))
       .map(m => ({ m, s: minutesOf(m.start_at), e: Math.max(minutesOf(m.start_at) + 15, minutesOf(m.end_at)) }))
       .sort((a, b) => a.s - b.s || a.e - b.e);
     // asignación greedy de carriles
@@ -11285,7 +11331,11 @@ function MeetingDetalleLoader({ meetingId, meId, onClose, onChanged }) {
 // cubre el calendario del creador) + sus invitaciones. Idempotente por
 // source_ref cuando se lo pasan (evento ya existente). Vive en Abordaje: no
 // toca Google. Si el usuario no participa del calendario compartido, no renderiza.
-function MeetingInviteSection({ meId, sourceRef, title, startAt, endAt }) {
+// deferred: el evento origen todavía NO existe (ej. "Nueva agenda") → no persiste
+// el meeting acá; solo junta los invitados y los reporta con onChange. El padre
+// crea el meeting con el source_ref real (ya con id) al guardar. Evita el meeting
+// huérfano sin source_ref que después no se puede borrar/re-sincronizar.
+function MeetingInviteSection({ meId, sourceRef, title, startAt, endAt, deferred = false, onChange }) {
   const [owners, setOwners] = useState(null);
   const [invited, setInvited] = useState(() => new Set());
   const [savedInvited, setSavedInvited] = useState(() => new Set());
@@ -11314,7 +11364,15 @@ function MeetingInviteSection({ meId, sourceRef, title, startAt, endAt }) {
 
   if (!owners || owners.length === 0) return null;
 
-  const toggle = (id) => { setSaved(false); setInvited(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; }); };
+  const toggle = (id) => {
+    setSaved(false);
+    setInvited(prev => {
+      const s = new Set(prev);
+      s.has(id) ? s.delete(id) : s.add(id);
+      if (deferred && onChange) onChange([...s]);   // el padre persiste al guardar
+      return s;
+    });
+  };
   const setsEqual = (a, b) => a.size === b.size && [...a].every(x => b.has(x));
   const dirty = !setsEqual(invited, savedInvited);
 
@@ -11364,14 +11422,18 @@ function MeetingInviteSection({ meId, sourceRef, title, startAt, endAt }) {
         })}
       </div>
       {error && <div className="field-error" style={{ marginTop: 6 }}>{error}</div>}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9 }}>
-        <button type="button" className="btn-secondary" onClick={guardar} disabled={busy || !dirty}>
-          {busy ? 'Guardando…' : (meetingId ? 'Actualizar invitaciones' : 'Enviar invitaciones')}
-        </button>
-        {saved && !dirty && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>✓ Invitaciones guardadas</span>}
-      </div>
+      {!deferred && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 9 }}>
+          <button type="button" className="btn-secondary" onClick={guardar} disabled={busy || !dirty}>
+            {busy ? 'Guardando…' : (meetingId ? 'Actualizar invitaciones' : 'Enviar invitaciones')}
+          </button>
+          {saved && !dirty && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>✓ Invitaciones guardadas</span>}
+        </div>
+      )}
       <div style={{ fontSize: 11, color: 'var(--texto-suave)', marginTop: 6, lineHeight: 1.4 }}>
-        Les llega una invitación en "Calendario compartido" (no toca Google). Al aceptar, el evento aparece en su calendario con contorno.
+        {deferred
+          ? 'Se enviarán al guardar la agenda. Les llega en "Calendario compartido" (no toca Google); al aceptar, aparece en su calendario con contorno.'
+          : 'Les llega una invitación en "Calendario compartido" (no toca Google). Al aceptar, el evento aparece en su calendario con contorno.'}
       </div>
     </div>
   );
@@ -18050,6 +18112,7 @@ function NuevaAgendaModal({ slot, onCancel, onSave, inviteMeId }) {
   const [observacion, setObservacion] = useState('');
   const [crearProspect, setCrearProspect] = useState(false);
   const [prospectoNombre, setProspectoNombre] = useState('');
+  const [invitees, setInvitees] = useState([]);   // ids a invitar al calendario compartido (diferido)
   const [err, setErr] = useState('');
   // Fecha + hora editables; arrancan con los valores del slot clickeado.
   const [fecha, setFecha] = useState(
@@ -18075,7 +18138,7 @@ function NuevaAgendaModal({ slot, onCancel, onSave, inviteMeId }) {
     if (crearProspect && !prospectoNombre.trim()) { setErr('Falta el nombre del prospecto.'); return; }
     setSubmitting(true);
     try {
-      await onSave({ titulo, observacion, crearProspect, prospectoNombre, fecha, hora });
+      await onSave({ titulo, observacion, crearProspect, prospectoNombre, fecha, hora, invitees: crearProspect ? [] : invitees });
     } finally {
       setSubmitting(false);
     }
@@ -18125,12 +18188,12 @@ function NuevaAgendaModal({ slot, onCancel, onSave, inviteMeId }) {
             </div>
           )}
           {err && <div className="field-error" style={{ marginTop: 8 }}>{err}</div>}
-          {inviteMeId && (() => {
+          {inviteMeId && !crearProspect && (() => {
             const [y, m, d] = fecha.split('-').map(Number);
             const [hh, mm] = (hora || '').split(':').map(Number);
             const st = new Date(y || 2026, (m || 1) - 1, d || 1, hh || 0, mm || 0, 0);
             return (
-              <MeetingInviteSection meId={inviteMeId} sourceRef={null}
+              <MeetingInviteSection meId={inviteMeId} sourceRef={null} deferred onChange={setInvitees}
                 title={titulo} startAt={st.toISOString()} endAt={new Date(st.getTime() + 60 * 60000).toISOString()} />
             );
           })()}

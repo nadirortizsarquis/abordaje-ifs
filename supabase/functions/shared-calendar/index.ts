@@ -211,19 +211,27 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, blocks, noAccess });
     }
 
-    // Resuelve nombres de TODOS los que participan en meetings del caller (creador
-    // o invitado), para poder mostrar "X te invitó" aunque no sea un owner tuyo.
-    // Seguro: solo devuelve gente que comparte un meeting con vos.
+    // Resuelve SOLO los nombres que el caller realmente necesita mostrar, con
+    // minimización de datos (data minimization):
+    //   - meetings que CREÓ  -> nombres de SUS invitados (los muestra en la lista).
+    //   - meetings a los que lo INVITARON -> nombre del CREADOR ("X te invitó").
+    // Así un invitado NO recibe los nombres de sus co-invitados (la UI tampoco se
+    // los muestra): antes el endpoint los devolvía igual aunque no se rendericen.
     if (op === "meeting_people") {
-      const { data: mine } = await supabase.from("abordaje_calendar_meetings").select("id, creator_id").eq("creator_id", user.id);
-      const { data: invited } = await supabase.from("abordaje_calendar_meeting_invites").select("meeting_id").eq("invitee_id", user.id);
-      const meetingIds = [...new Set([...(mine ?? []).map((m: any) => m.id), ...(invited ?? []).map((i: any) => i.meeting_id)])];
       const ids = new Set<string>([user.id]);
-      if (meetingIds.length) {
-        const { data: ms } = await supabase.from("abordaje_calendar_meetings").select("creator_id").in("id", meetingIds);
-        (ms ?? []).forEach((m: any) => ids.add(m.creator_id));
-        const { data: iv } = await supabase.from("abordaje_calendar_meeting_invites").select("invitee_id").in("meeting_id", meetingIds);
+      // Invitados de los meetings que yo creé.
+      const { data: mine } = await supabase.from("abordaje_calendar_meetings").select("id").eq("creator_id", user.id);
+      const myMeetingIds = (mine ?? []).map((m: any) => m.id);
+      if (myMeetingIds.length) {
+        const { data: iv } = await supabase.from("abordaje_calendar_meeting_invites").select("invitee_id").in("meeting_id", myMeetingIds);
         (iv ?? []).forEach((i: any) => ids.add(i.invitee_id));
+      }
+      // Creadores de los meetings a los que me invitaron.
+      const { data: invited } = await supabase.from("abordaje_calendar_meeting_invites").select("meeting_id").eq("invitee_id", user.id);
+      const invMeetingIds = [...new Set((invited ?? []).map((i: any) => i.meeting_id))];
+      if (invMeetingIds.length) {
+        const { data: ms } = await supabase.from("abordaje_calendar_meetings").select("creator_id").in("id", invMeetingIds);
+        (ms ?? []).forEach((m: any) => ids.add(m.creator_id));
       }
       const { data: profs } = await supabase.from("profiles").select("id, display_name, email").in("id", [...ids]);
       const people = (profs ?? []).map((p: any) => ({ id: p.id, name: p.display_name || p.email || "Agente" }));
