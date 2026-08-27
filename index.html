@@ -12148,6 +12148,15 @@ const CALPAGO_MUT = { bg: '#f3f4f6', bd: '#d1d5db', tx: '#9ca3af', label: 'Mensu
 // Mensuales que paga el cliente: azul clarito (se ve que es cliente, pero suave
 // porque son recurrentes/muchas).
 const CALPAGO_CLI_MENSUAL = { bg: '#eff6ff', bd: '#93c5fd', tx: '#3b82f6', label: 'Cliente' };
+// Pólizas caídas / que no van a renovar: gris muy apagado + tachado, para que NO
+// se lean como una renovación viva en el calendario. Gana sobre el color de pagador.
+const CALPAGO_LAPSED = { bg: '#f8fafc', bd: '#e2e8f0', tx: '#94a3b8', label: 'Caída' };
+// Estados del reporte OLE que NO son renovaciones vivas (terminadas / no tomadas).
+// GRACE PERIOD y NOT PAYMENT RECEIVED se dejan normales (tienen un pago relevante).
+const CALPAGO_INACTIVA_ESTADOS = new Set(['LAPSED', 'CANCELLED', 'REJECTED', 'NOT TAKEN', 'APPLICATION WITHDRAWN']);
+function calpagoEsInactiva(estado) {
+  return CALPAGO_INACTIVA_ESTADOS.has((estado || '').toString().trim().toUpperCase());
+}
 function calpagoStyle(pagador, freq) {
   // Mensual del cliente → azul clarito. Mensual sin definir → gris apagado
   // (ruido de fondo). El resto usa el color pleno del pagador.
@@ -12191,7 +12200,11 @@ function CalpagoLogoBox({ compania, h = 30 }) {
     </span>
   );
 }
-const calpagoBadgeStyle = e => { const st = calpagoStyle(e.pagador, e.freq); return { background: st.bg, borderColor: st.bd, color: st.tx }; };
+const calpagoBadgeStyle = e => {
+  const inactiva = calpagoEsInactiva(e.estado);
+  const st = inactiva ? CALPAGO_LAPSED : calpagoStyle(e.pagador, e.freq);
+  return { background: st.bg, borderColor: st.bd, color: st.tx, textDecoration: inactiva ? 'line-through' : undefined };
+};
 function calpagoDayLabel(k) {
   const p = k.split('-').map(Number);
   const dt = new Date(p[0], p[1] - 1, p[2]);
@@ -12300,7 +12313,12 @@ function CalpagoEditModal({ ev, current, isAdmin, onSave, onEdit, onClose }) {
       <div className="calpago-modal" onClick={e => e.stopPropagation()}>
         <div className="calpago-modal-head">
           <div style={{ minWidth: 0 }}>
-            <div className="calpago-modal-title">{ev.asegurado}</div>
+            <div className="calpago-modal-title" style={{ textDecoration: calpagoEsInactiva(ev.estado) ? 'line-through' : undefined }}>{ev.asegurado}</div>
+            {calpagoEsInactiva(ev.estado) && (
+              <div style={{ display: 'inline-block', marginTop: 4, fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.3px', textTransform: 'uppercase', color: '#475569', background: '#e2e8f0', borderRadius: 6, padding: '2px 8px' }}>
+                Póliza caída · {(ev.estado || '').toString().trim()}
+              </div>
+            )}
             {isAdmin && ev.asesorNombre && <div className="calpago-modal-sub" style={{ fontWeight: 700, opacity: 1, color: '#c4b5fd' }}>{ev.asesorNombre}</div>}
             <div className="calpago-modal-sub">{[CALPAGO_FREQ_LABEL[ev.freq] || ev.freqRaw, ev.estado].filter(Boolean).join(' · ')}</div>
             {calpagoFmtPrima(ev.prima) && <div className="calpago-modal-sub" style={{ fontSize: '0.95rem', fontWeight: 800, opacity: 1 }}>Prima: {calpagoFmtPrima(ev.prima)}</div>}
@@ -12536,19 +12554,21 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   const abrirEvento = (e) => setEditing(e);
 
   const renderChip = (e, key) => {
-    const st = calpagoStyle(e.pagador, e.freq);
+    const inactiva = calpagoEsInactiva(e.estado);
+    const st = inactiva ? CALPAGO_LAPSED : calpagoStyle(e.pagador, e.freq);
     const hasObs = !!(e.obs && e.obs.length);
     const cia = calpagoCompaniaCfg(e.compania);
     const logo = calpagoCompaniaLogo(e.compania);
     return (
-      <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '')}
-        style={{ background: st.bg, borderColor: st.bd, color: st.tx }}
+      <button key={key} className={'calpago-chip' + (st === CALPAGO_MUT ? ' mut' : '') + (inactiva ? ' lapsed' : '')}
+        style={{ background: st.bg, borderColor: st.bd, color: st.tx, textDecoration: inactiva ? 'line-through' : undefined }}
+        title={inactiva ? `${e.asegurado} — póliza ${(e.estado || '').toString().trim() || 'caída'}` : undefined}
         onMouseEnter={ev => { const r = ev.currentTarget.getBoundingClientRect(); setHover({ e, x: r.left, y: r.bottom }); }}
         onMouseLeave={() => setHover(null)}
         onClick={ev => { ev.stopPropagation(); setHover(null); abrirEvento(e); }}>
         {hasObs && <span className="calpago-chip-note" style={{ background: st.bd }}></span>}
         {logo && (
-          <span className="calpago-chip-logobox" style={{ background: cia.logoBg }} title={calpagoCompaniaLabel(e.compania)}>
+          <span className="calpago-chip-logobox" style={{ background: cia.logoBg, opacity: inactiva ? 0.55 : 1 }} title={calpagoCompaniaLabel(e.compania)}>
             <img src={logo} alt="" />
           </span>
         )}
@@ -12675,7 +12695,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
             <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => abrirEvento(e)}>
               <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
+                <div style={{ fontWeight: 700, color: calpagoEsInactiva(e.estado) ? '#94a3b8' : '#1e1b4b', textDecoration: calpagoEsInactiva(e.estado) ? 'line-through' : undefined }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem', textDecoration: 'none' }}> · {e.asesorNombre}</span> : null}</div>
                 <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[e.plan, CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')}{calpagoFmtPrima(e.prima) ? (' · ' + calpagoFmtPrima(e.prima)) : ''}</div>
                 {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
               </div>
@@ -12729,6 +12749,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
           ); })}
           <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_CLI_MENSUAL.bg, borderColor: CALPAGO_CLI_MENSUAL.bd }}></span>Cliente mensual</span>
           <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_SIN.bg, borderColor: CALPAGO_SIN.bd }}></span>Sin definir</span>
+          <span className="calpago-legend-item"><span className="calpago-dot" style={{ background: CALPAGO_LAPSED.bg, borderColor: CALPAGO_LAPSED.bd }}></span><span style={{ textDecoration: 'line-through', color: '#94a3b8' }}>Caída</span></span>
         </div>
       </div>
 
@@ -12757,7 +12778,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
             <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.date) { goToDate(e.date); setQ(''); } else abrirEvento(e); }}>
               <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: '#1e1b4b' }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem' }}> · {e.asesorNombre}</span> : null}</div>
+                <div style={{ fontWeight: 700, color: calpagoEsInactiva(e.estado) ? '#94a3b8' : '#1e1b4b', textDecoration: calpagoEsInactiva(e.estado) ? 'line-through' : undefined }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem', textDecoration: 'none' }}> · {e.asesorNombre}</span> : null}</div>
                 <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')} · renueva {e.date ? e.date.toLocaleDateString('es-AR') : 'sin fecha'}</div>
                 {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
               </div>
@@ -12789,7 +12810,12 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
 
       {hover && (
         <div className="calpago-pop" style={{ left: Math.max(8, Math.min(hover.x, winW - 285)), top: hover.y + 6 }}>
-          <div style={{ fontWeight: 800, color: '#1e1b4b', fontSize: '0.95rem', lineHeight: 1.25 }}>{hover.e.asegurado}</div>
+          <div style={{ fontWeight: 800, color: '#1e1b4b', fontSize: '0.95rem', lineHeight: 1.25, textDecoration: calpagoEsInactiva(hover.e.estado) ? 'line-through' : undefined }}>{hover.e.asegurado}</div>
+          {calpagoEsInactiva(hover.e.estado) && (
+            <div style={{ display: 'inline-block', marginTop: 4, fontSize: '0.64rem', fontWeight: 800, letterSpacing: '0.3px', textTransform: 'uppercase', color: '#64748b', background: '#f1f5f9', border: '1px solid #cbd5e1', borderRadius: 6, padding: '2px 7px' }}>
+              Póliza caída · {(hover.e.estado || '').toString().trim()}
+            </div>
+          )}
           {isAdmin && hover.e.asesorNombre && <div style={{ fontSize: '0.72rem', color: '#7C3AED', fontWeight: 700, marginTop: 2 }}>{hover.e.asesorNombre}</div>}
           <div style={{ marginTop: 7, marginBottom: 9, paddingBottom: 9, borderBottom: '1px solid #eef2f7' }}>
             <CalpagoLogoBox compania={hover.e.compania} h={26} />
