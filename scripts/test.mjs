@@ -198,6 +198,23 @@ test('appendBitacora: si ya está incluida -> undefined (no duplica)', () => {
   assert.equal(g('appendBitacora')('Vieja\n· Nueva', 'Nueva'), undefined);
 });
 
+// ── combinarFechaHora (refactor #32): inversa de splitFechaHora ──────────────
+test('combinarFechaHora: sin fecha -> null', () => {
+  assert.equal(g('combinarFechaHora')(null, '10:00'), null);
+});
+test('combinarFechaHora: fecha + hora -> ISO con T', () => {
+  assert.equal(g('combinarFechaHora')('2026-09-01', '10:00'), '2026-09-01T10:00');
+});
+test('combinarFechaHora: fecha sin hora -> date-only', () => {
+  assert.equal(g('combinarFechaHora')('2026-09-01', null), '2026-09-01');
+});
+test('combinarFechaHora + splitFechaHora: round-trip', () => {
+  const iso = g('combinarFechaHora')('2026-09-01', '14:30');
+  const { fecha, hora } = g('splitFechaHora')(iso);
+  assert.equal(fecha, '2026-09-01');
+  assert.equal(hora, '14:30');
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {

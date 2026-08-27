@@ -3847,6 +3847,12 @@ function splitFechaHora(iso) {
   }
   return { fecha: iso, hora: null };
 }
+// Inversa de splitFechaHora: arma el "agendadoPara" desde fecha + hora (opcional).
+// Sin fecha → null. Con fecha y sin hora → solo la fecha (date-only). Pura y testeable.
+function combinarFechaHora(fecha, hora) {
+  if (!fecha) return null;
+  return hora ? `${fecha}T${hora}` : fecha;
+}
 
 // ── Auth ───────────────────────────────────────────────────────
 // Cache local del profile minimo (id + assistant_of_id) para resolver rápido
@@ -6800,7 +6806,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     // origen (columna contacto_id) y sincronizar contra ese id.
     const ultimo = contactos[contactos.length - 1];
     if (!ultimo || ultimo.tipo === 'agendado') return;
-    const nuevoAgendado = nuevaFecha ? (nuevaHora ? `${nuevaFecha}T${nuevaHora}` : nuevaFecha) : null;
+    const nuevoAgendado = combinarFechaHora(nuevaFecha, nuevaHora);
     // El contacto activo pasa a "recordatorio" (violeta) con la fecha de la tarea.
     // La línea de bitácora nueva se AGREGA a la observación (no pisa la nota
     // original de la gestión); no se duplica si ya estaba.
@@ -6880,9 +6886,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         if ('agendadoPara' in patch) {
           merged.agendadoPara = patch.agendadoPara;
         } else if ('fecha' in patch || 'hora' in patch) {
-          merged.agendadoPara = merged.fecha
-            ? (merged.hora ? `${merged.fecha}T${merged.hora}` : merged.fecha)
-            : null;
+          merged.agendadoPara = combinarFechaHora(merged.fecha, merged.hora);
         }
         return merged;
       });
