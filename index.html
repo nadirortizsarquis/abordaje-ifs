@@ -6222,6 +6222,235 @@ function useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr }) {
   return { handleSetCompania, handleDropTarea, handleTogglePin };
 }
 
+// Motor de seguimiento (refactor #32, extraído de App): sincroniza la tarea/agenda del
+// prospecto según su contacto activo (delete+recreate serializado por lock por prospectoId)
+// + el sync inverso tarea→prospecto. Cluster autocontenido; App consume sincronizarSeguimiento
+// y _syncTareaAProspecto. Bodies VERBATIM (comportamiento idéntico).
+function useSeguimientoEngine({ state, setState, isPilot, bumpGcal }) {
+  const syncLocksRef = useRef(new Map());
+  const _syncSeguimientoBody = async (prospectoId, contactoActivo, prevState, opts = {}) => {
+    // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
+    //    Consultamos directamente a Supabase en lugar de filtrar prevState.tareas.items
+    //    para evitar duplicados cuando se encadenan gestiones rápidas (el closure
+    //    puede tener un state stale y dejar tareas viejas sin borrar).
+    const agenteEffectiveId = await auth.getEffectiveAgenteId();
+    let tareasAuto = [];
+    if (agenteEffectiveId) {
+      const { data: tareasDB, error: tareasErr } = await sb.from('abordaje_tareas')
+        .select('id, google_event_id')
+        .eq('agente_id', agenteEffectiveId)
+        .eq('prospecto_id', prospectoId)
+        .eq('archivada', false);
+      if (tareasErr) {
+        console.warn('listado tareas auto:', tareasErr.message);
+        // Fallback al state local si la query falla.
+        tareasAuto = (prevState.tareas?.items || [])
+          .filter(t => t.prospectoId === prospectoId)
+          .map(t => ({ id: t.id, google_event_id: t.googleEventId }));
+      } else {
+        tareasAuto = tareasDB || [];
+      }
+    }
+    for (const t of tareasAuto) {
+      try {
+        if (isPilot && t.google_event_id) {
+          try { await gcalApi.delete(t.google_event_id); } catch (e) { console.warn('gcal del tarea auto:', e); }
+        }
+        await storage.deleteTarea(t.id);
+      } catch (e) { console.error('limpieza tarea auto:', e); }
+    }
+    // 2. Limpiar agendados anteriores del prospect que NO estén vencidos.
+    //    En piloto los agendados de prospect viven en Google (no en abordaje_agendados),
+    //    así que listamos eventos de Google con abordaje_prospect_id=prospectoId y los borramos.
+    const ahora = new Date();
+    let idsAgendadosBorrados = new Set();
+    if (isPilot) {
+      try {
+        // Rango -1d / +10 años. El "+6 meses" original dejaba huérfanas agendas
+        // a 7+ meses (zombies que aparecen luego como del prospect viejo).
+        // Mantenemos `now` como floor (no tocamos pasado: histórico intacto).
+        const now = new Date();
+        const futuroMax = new Date(); futuroMax.setFullYear(futuroMax.getFullYear() + 10);
+        const evts = await gcalApi.list(now.toISOString(), futuroMax.toISOString());
+        for (const ev of (evts || [])) {
+          const pid = ev.extendedProperties?.private?.abordaje_prospect_id;
+          if (pid === prospectoId) {
+            try { await gcalApi.delete(ev.id); } catch (e) { console.warn('gcal del agenda prospect:', e); }
+          }
+        }
+      } catch (e) { console.warn('gcal list prospect:', e); }
+    } else {
+      const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
+        if (a.prospectoId !== prospectoId) return false;
+        return parseFechaLocal(a.fecha) >= ahora;
+      });
+      for (const a of agendadosNoVencidos) {
+        try { await storage.deleteAgendado(a.id); }
+        catch (e) { console.error('limpieza agendado:', e); }
+      }
+      idsAgendadosBorrados = new Set(agendadosNoVencidos.map(a => a.id));
+    }
+    const idsTareasBorradas = new Set(tareasAuto.map(t => t.id));
+    setState(s => ({
+      ...s,
+      tareas: { ...s.tareas, items: s.tareas.items.filter(t => !idsTareasBorradas.has(t.id)) },
+      agendados: s.agendados.filter(a => !idsAgendadosBorrados.has(a.id))
+    }));
+
+    // 3. Si no hay contacto activo o no tiene fecha objetivo, salir
+    const decision = decidirSeguimiento(contactoActivo);
+    if (decision === 'nada') {
+      if (isPilot) bumpGcal();
+      return;
+    }
+
+    // 4. Generar lo nuevo según el tipo
+    if (decision === 'agenda') {
+      if (isPilot) {
+        // Crear evento en Google vinculado al prospect.
+        const prospect = prevState.prospectos.find(p => p.id === prospectoId);
+        try {
+          await gcalApi.create(buildGoogleEventBody({
+            startIso: contactoActivo.agendadoPara,
+            // Si el caller pasó un título explícito (típicamente "Nueva agenda"
+            // desde el calendar con form.titulo lleno), lo usamos en lugar del
+            // default. Sino, "Cita — <nombre>".
+            summary: opts.summaryOverride || `Cita — ${prospect?.nombre || 'prospecto'}`,
+            description: contactoActivo.observacion || '',
+            prospectId: prospectoId,
+          }));
+          bumpGcal();
+        } catch (e) { console.error('gcal create agenda prospect:', e); }
+      } else {
+        try {
+          const ag = await calendarApi.agendar(prospectoId, contactoActivo.agendadoPara, contactoActivo.observacion || '');
+          setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
+        } catch (e) { console.error('agendar:', e); }
+      }
+    } else {
+      // Preferimos la columna 'abordar'; si el usuario la renombró/borró, caemos
+      // a la primera columna por orden (mismo criterio que handleCreateTareaEnSlot),
+      // para que la tarea del seguimiento aparezca en algún lado y no se pierda.
+      const colAbordar = pickColumnaAbordar(prevState.tareas?.columnas);
+      if (!colAbordar) { console.warn('No hay columnas de tareas'); return; }
+      const prospect = prevState.prospectos.find(p => p.id === prospectoId);
+      const titulo = prospect?.nombre || 'Seguimiento';
+      const { fecha, hora } = splitFechaHora(contactoActivo.agendadoPara);
+      const obsTarea = buildObsTarea(contactoActivo.tipo, contactoActivo.observacion);
+      try {
+        const tarea = await storage.createTarea({
+          columnaId: colAbordar.id,
+          prospectoId,
+          titulo,
+          fechaRecordatorio: fecha,
+          horaRecordatorio: hora,
+          observacion: obsTarea
+        });
+        // En piloto, también crear evento en Google para que aparezca en el calendar.
+        if (isPilot) {
+          try {
+            // Local string directo, sin pasar por toISOString (que convierte
+            // a UTC y desfasaba la hora cuando el browser no estaba en ARG).
+            const startIso = `${fecha}T${hora || '09:00'}`;
+            const evt = await gcalApi.create(buildGoogleEventBody({
+              startIso,
+              summary: titulo,
+              description: obsTarea,
+              tareaId: tarea.id,
+            }));
+            if (evt?.id) {
+              await storage.updateTarea(tarea.id, { googleEventId: evt.id });
+              tarea.googleEventId = evt.id;
+            }
+          } catch (e) { console.warn('gcal create tarea auto:', e); }
+        }
+        setState(s => ({ ...s, tareas: { ...s.tareas, items: [...s.tareas.items, tarea] } }));
+        if (isPilot) bumpGcal();
+      } catch (e) { console.error('crear tarea auto:', e); }
+    }
+  };
+
+  // Wrapper público de sincronizarSeguimiento. Serializa las invocaciones por
+  // prospectoId — si llega una segunda mientras corre la primera, espera a que
+  // termine antes de arrancar. Esto evita duplicados en Google Calendar cuando
+  // dos gestiones se registran rápido (doble tap mobile, auto-save, etc.).
+  // `opts.summaryOverride`: si se pasa, se usa como título del evento Google
+  // en lugar del default "Cita — <nombre>". Útil cuando el user creó la agenda
+  // desde el calendar con un título explícito.
+  // Serializa una operación contra el resto de operaciones del MISMO prospecto
+  // (cola por prospectoId). Evita carreras entre sincronizarSeguimiento y otros
+  // writes al mismo prospecto (estado/proximoContacto/contactos).
+  const _runLockedProspecto = (prospectoId, fn) => {
+    const prevLock = syncLocksRef.current.get(prospectoId) || Promise.resolve();
+    const run = prevLock.catch(() => {}).then(() => fn());
+    syncLocksRef.current.set(prospectoId, run);
+    return (async () => {
+      try { return await run; }
+      finally {
+        if (syncLocksRef.current.get(prospectoId) === run) syncLocksRef.current.delete(prospectoId);
+      }
+    })();
+  };
+
+  const sincronizarSeguimiento = (prospectoId, contactoActivo, prevState, opts = {}) =>
+    _runLockedProspecto(prospectoId, () => _syncSeguimientoBody(prospectoId, contactoActivo, prevState, opts));
+
+  // Sync INVERSO (tarea → prospecto). La tarea auto-generada de un prospecto es
+  // una proyección de su último contacto; si el usuario le cambia la fecha/hora
+  // desde el Kanban o arrastrándola en el calendario, propagamos el nuevo
+  // `agendadoPara` al contacto activo para que Lista de Abordaje NO quede stale.
+  // NO llamamos sincronizarSeguimiento (evita el delete+recreate: la tarea ya
+  // refleja el cambio). Solo aplica si el último contacto genera tarea (no una
+  // cita 'agendado'). (extraerUltimaLineaBitacora se movió a nivel módulo.)
+  const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora, nota) => {
+    const prospectoId = tarea?.prospectoId;
+    if (!prospectoId) return;
+    const prospecto = state.prospectos.find(p => p.id === prospectoId);
+    if (!prospecto) return;
+    const contactos = prospecto.contactos || [];
+    // INVARIANTE (no romper): una tarea de prospecto se crea SOLO en
+    // _syncSeguimientoBody, que borra-y-recrea, así que a lo sumo hay UNA tarea
+    // por prospecto y siempre espeja al ÚLTIMO contacto. Por eso acá operamos
+    // sobre contactos[último]. Si alguna vez se permite crear tareas de prospecto
+    // por otra vía (sin regenerar), habría que ligar la tarea a su contacto de
+    // origen (columna contacto_id) y sincronizar contra ese id.
+    const ultimo = contactos[contactos.length - 1];
+    if (!ultimo || ultimo.tipo === 'agendado') return;
+    const nuevoAgendado = combinarFechaHora(nuevaFecha, nuevaHora);
+    // El contacto activo pasa a "recordatorio" (violeta) con la fecha de la tarea.
+    // La línea de bitácora nueva se AGREGA a la observación (no pisa la nota
+    // original de la gestión); no se duplica si ya estaba.
+    const patchContacto = { tipo: 'recordatorio', agendadoPara: nuevoAgendado };
+    const nuevaObs = appendBitacora(ultimo.observacion, nota);
+    if (nuevaObs !== undefined) patchContacto.observacion = nuevaObs;
+    const yaIgual = ultimo.tipo === 'recordatorio'
+      && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
+      && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
+    if (yaIgual) return; // nada cambió
+    // Reflejar el actor (quién tocó) en el state, como hace storage.updateContacto.
+    const me = await auth.getUser();
+    const patchLocal = { ...patchContacto, actorId: me?.id || ultimo.actorId };
+    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchLocal } : c);
+    const proxNuevo = deriveProximoContacto(contactosAct);
+    const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
+    try {
+      // Serializado con sincronizarSeguimiento del mismo prospecto (evita carrera
+      // de estado/proximoContacto).
+      await _runLockedProspecto(prospectoId, async () => {
+        await storage.updateContacto(ultimo.id, patchContacto);
+        await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+        setState(s => ({
+          ...s,
+          prospectos: s.prospectos.map(p => p.id === prospectoId
+            ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+            : p)
+        }));
+      });
+    } catch (e) { console.warn('sync tarea->prospecto:', e?.message || e); }
+  };
+  return { sincronizarSeguimiento, _syncTareaAProspecto };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -6607,7 +6836,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Lock por prospectoId para serializar invocaciones de sincronizarSeguimiento.
   // Sin esto, dos handleAddContacto rápidos (doble tap, auto-save) disparaban
   // dos syncs concurrentes que duplican eventos en Google Calendar.
-  const syncLocksRef = useRef(new Map());
+  // Motor de seguimiento: extraído a useSeguimientoEngine (refactor #32).
+  const { sincronizarSeguimiento, _syncTareaAProspecto } = useSeguimientoEngine({ state, setState, isPilot, bumpGcal });
   useEffect(() => {
     if (firstTabSwitchSkipRef.current) {
       firstTabSwitchSkipRef.current = false;
@@ -6831,226 +7061,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // sólo limpia (no crea nada).
   // _syncSeguimientoBody hace el trabajo crudo. sincronizarSeguimiento (más abajo)
   // lo envuelve en un lock por prospectoId para evitar duplicados por race condition.
-  const _syncSeguimientoBody = async (prospectoId, contactoActivo, prevState, opts = {}) => {
-    // 1. Limpiar tareas auto-generadas del prospect (incluye sync a Google si piloto+evento).
-    //    Consultamos directamente a Supabase en lugar de filtrar prevState.tareas.items
-    //    para evitar duplicados cuando se encadenan gestiones rápidas (el closure
-    //    puede tener un state stale y dejar tareas viejas sin borrar).
-    const agenteEffectiveId = await auth.getEffectiveAgenteId();
-    let tareasAuto = [];
-    if (agenteEffectiveId) {
-      const { data: tareasDB, error: tareasErr } = await sb.from('abordaje_tareas')
-        .select('id, google_event_id')
-        .eq('agente_id', agenteEffectiveId)
-        .eq('prospecto_id', prospectoId)
-        .eq('archivada', false);
-      if (tareasErr) {
-        console.warn('listado tareas auto:', tareasErr.message);
-        // Fallback al state local si la query falla.
-        tareasAuto = (prevState.tareas?.items || [])
-          .filter(t => t.prospectoId === prospectoId)
-          .map(t => ({ id: t.id, google_event_id: t.googleEventId }));
-      } else {
-        tareasAuto = tareasDB || [];
-      }
-    }
-    for (const t of tareasAuto) {
-      try {
-        if (isPilot && t.google_event_id) {
-          try { await gcalApi.delete(t.google_event_id); } catch (e) { console.warn('gcal del tarea auto:', e); }
-        }
-        await storage.deleteTarea(t.id);
-      } catch (e) { console.error('limpieza tarea auto:', e); }
-    }
-    // 2. Limpiar agendados anteriores del prospect que NO estén vencidos.
-    //    En piloto los agendados de prospect viven en Google (no en abordaje_agendados),
-    //    así que listamos eventos de Google con abordaje_prospect_id=prospectoId y los borramos.
-    const ahora = new Date();
-    let idsAgendadosBorrados = new Set();
-    if (isPilot) {
-      try {
-        // Rango -1d / +10 años. El "+6 meses" original dejaba huérfanas agendas
-        // a 7+ meses (zombies que aparecen luego como del prospect viejo).
-        // Mantenemos `now` como floor (no tocamos pasado: histórico intacto).
-        const now = new Date();
-        const futuroMax = new Date(); futuroMax.setFullYear(futuroMax.getFullYear() + 10);
-        const evts = await gcalApi.list(now.toISOString(), futuroMax.toISOString());
-        for (const ev of (evts || [])) {
-          const pid = ev.extendedProperties?.private?.abordaje_prospect_id;
-          if (pid === prospectoId) {
-            try { await gcalApi.delete(ev.id); } catch (e) { console.warn('gcal del agenda prospect:', e); }
-          }
-        }
-      } catch (e) { console.warn('gcal list prospect:', e); }
-    } else {
-      const agendadosNoVencidos = (prevState.agendados || []).filter(a => {
-        if (a.prospectoId !== prospectoId) return false;
-        return parseFechaLocal(a.fecha) >= ahora;
-      });
-      for (const a of agendadosNoVencidos) {
-        try { await storage.deleteAgendado(a.id); }
-        catch (e) { console.error('limpieza agendado:', e); }
-      }
-      idsAgendadosBorrados = new Set(agendadosNoVencidos.map(a => a.id));
-    }
-    const idsTareasBorradas = new Set(tareasAuto.map(t => t.id));
-    setState(s => ({
-      ...s,
-      tareas: { ...s.tareas, items: s.tareas.items.filter(t => !idsTareasBorradas.has(t.id)) },
-      agendados: s.agendados.filter(a => !idsAgendadosBorrados.has(a.id))
-    }));
-
-    // 3. Si no hay contacto activo o no tiene fecha objetivo, salir
-    const decision = decidirSeguimiento(contactoActivo);
-    if (decision === 'nada') {
-      if (isPilot) bumpGcal();
-      return;
-    }
-
-    // 4. Generar lo nuevo según el tipo
-    if (decision === 'agenda') {
-      if (isPilot) {
-        // Crear evento en Google vinculado al prospect.
-        const prospect = prevState.prospectos.find(p => p.id === prospectoId);
-        try {
-          await gcalApi.create(buildGoogleEventBody({
-            startIso: contactoActivo.agendadoPara,
-            // Si el caller pasó un título explícito (típicamente "Nueva agenda"
-            // desde el calendar con form.titulo lleno), lo usamos en lugar del
-            // default. Sino, "Cita — <nombre>".
-            summary: opts.summaryOverride || `Cita — ${prospect?.nombre || 'prospecto'}`,
-            description: contactoActivo.observacion || '',
-            prospectId: prospectoId,
-          }));
-          bumpGcal();
-        } catch (e) { console.error('gcal create agenda prospect:', e); }
-      } else {
-        try {
-          const ag = await calendarApi.agendar(prospectoId, contactoActivo.agendadoPara, contactoActivo.observacion || '');
-          setState(s => ({ ...s, agendados: [...s.agendados, ag] }));
-        } catch (e) { console.error('agendar:', e); }
-      }
-    } else {
-      // Preferimos la columna 'abordar'; si el usuario la renombró/borró, caemos
-      // a la primera columna por orden (mismo criterio que handleCreateTareaEnSlot),
-      // para que la tarea del seguimiento aparezca en algún lado y no se pierda.
-      const colAbordar = pickColumnaAbordar(prevState.tareas?.columnas);
-      if (!colAbordar) { console.warn('No hay columnas de tareas'); return; }
-      const prospect = prevState.prospectos.find(p => p.id === prospectoId);
-      const titulo = prospect?.nombre || 'Seguimiento';
-      const { fecha, hora } = splitFechaHora(contactoActivo.agendadoPara);
-      const obsTarea = buildObsTarea(contactoActivo.tipo, contactoActivo.observacion);
-      try {
-        const tarea = await storage.createTarea({
-          columnaId: colAbordar.id,
-          prospectoId,
-          titulo,
-          fechaRecordatorio: fecha,
-          horaRecordatorio: hora,
-          observacion: obsTarea
-        });
-        // En piloto, también crear evento en Google para que aparezca en el calendar.
-        if (isPilot) {
-          try {
-            // Local string directo, sin pasar por toISOString (que convierte
-            // a UTC y desfasaba la hora cuando el browser no estaba en ARG).
-            const startIso = `${fecha}T${hora || '09:00'}`;
-            const evt = await gcalApi.create(buildGoogleEventBody({
-              startIso,
-              summary: titulo,
-              description: obsTarea,
-              tareaId: tarea.id,
-            }));
-            if (evt?.id) {
-              await storage.updateTarea(tarea.id, { googleEventId: evt.id });
-              tarea.googleEventId = evt.id;
-            }
-          } catch (e) { console.warn('gcal create tarea auto:', e); }
-        }
-        setState(s => ({ ...s, tareas: { ...s.tareas, items: [...s.tareas.items, tarea] } }));
-        if (isPilot) bumpGcal();
-      } catch (e) { console.error('crear tarea auto:', e); }
-    }
-  };
-
-  // Wrapper público de sincronizarSeguimiento. Serializa las invocaciones por
-  // prospectoId — si llega una segunda mientras corre la primera, espera a que
-  // termine antes de arrancar. Esto evita duplicados en Google Calendar cuando
-  // dos gestiones se registran rápido (doble tap mobile, auto-save, etc.).
-  // `opts.summaryOverride`: si se pasa, se usa como título del evento Google
-  // en lugar del default "Cita — <nombre>". Útil cuando el user creó la agenda
-  // desde el calendar con un título explícito.
-  // Serializa una operación contra el resto de operaciones del MISMO prospecto
-  // (cola por prospectoId). Evita carreras entre sincronizarSeguimiento y otros
-  // writes al mismo prospecto (estado/proximoContacto/contactos).
-  const _runLockedProspecto = (prospectoId, fn) => {
-    const prevLock = syncLocksRef.current.get(prospectoId) || Promise.resolve();
-    const run = prevLock.catch(() => {}).then(() => fn());
-    syncLocksRef.current.set(prospectoId, run);
-    return (async () => {
-      try { return await run; }
-      finally {
-        if (syncLocksRef.current.get(prospectoId) === run) syncLocksRef.current.delete(prospectoId);
-      }
-    })();
-  };
-
-  const sincronizarSeguimiento = (prospectoId, contactoActivo, prevState, opts = {}) =>
-    _runLockedProspecto(prospectoId, () => _syncSeguimientoBody(prospectoId, contactoActivo, prevState, opts));
-
-  // Sync INVERSO (tarea → prospecto). La tarea auto-generada de un prospecto es
-  // una proyección de su último contacto; si el usuario le cambia la fecha/hora
-  // desde el Kanban o arrastrándola en el calendario, propagamos el nuevo
-  // `agendadoPara` al contacto activo para que Lista de Abordaje NO quede stale.
-  // NO llamamos sincronizarSeguimiento (evita el delete+recreate: la tarea ya
-  // refleja el cambio). Solo aplica si el último contacto genera tarea (no una
-  // cita 'agendado'). (extraerUltimaLineaBitacora se movió a nivel módulo.)
-  const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora, nota) => {
-    const prospectoId = tarea?.prospectoId;
-    if (!prospectoId) return;
-    const prospecto = state.prospectos.find(p => p.id === prospectoId);
-    if (!prospecto) return;
-    const contactos = prospecto.contactos || [];
-    // INVARIANTE (no romper): una tarea de prospecto se crea SOLO en
-    // _syncSeguimientoBody, que borra-y-recrea, así que a lo sumo hay UNA tarea
-    // por prospecto y siempre espeja al ÚLTIMO contacto. Por eso acá operamos
-    // sobre contactos[último]. Si alguna vez se permite crear tareas de prospecto
-    // por otra vía (sin regenerar), habría que ligar la tarea a su contacto de
-    // origen (columna contacto_id) y sincronizar contra ese id.
-    const ultimo = contactos[contactos.length - 1];
-    if (!ultimo || ultimo.tipo === 'agendado') return;
-    const nuevoAgendado = combinarFechaHora(nuevaFecha, nuevaHora);
-    // El contacto activo pasa a "recordatorio" (violeta) con la fecha de la tarea.
-    // La línea de bitácora nueva se AGREGA a la observación (no pisa la nota
-    // original de la gestión); no se duplica si ya estaba.
-    const patchContacto = { tipo: 'recordatorio', agendadoPara: nuevoAgendado };
-    const nuevaObs = appendBitacora(ultimo.observacion, nota);
-    if (nuevaObs !== undefined) patchContacto.observacion = nuevaObs;
-    const yaIgual = ultimo.tipo === 'recordatorio'
-      && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
-      && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
-    if (yaIgual) return; // nada cambió
-    // Reflejar el actor (quién tocó) en el state, como hace storage.updateContacto.
-    const me = await auth.getUser();
-    const patchLocal = { ...patchContacto, actorId: me?.id || ultimo.actorId };
-    const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchLocal } : c);
-    const proxNuevo = deriveProximoContacto(contactosAct);
-    const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
-    try {
-      // Serializado con sincronizarSeguimiento del mismo prospecto (evita carrera
-      // de estado/proximoContacto).
-      await _runLockedProspecto(prospectoId, async () => {
-        await storage.updateContacto(ultimo.id, patchContacto);
-        await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
-        setState(s => ({
-          ...s,
-          prospectos: s.prospectos.map(p => p.id === prospectoId
-            ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
-            : p)
-        }));
-      });
-    } catch (e) { console.warn('sync tarea->prospecto:', e?.message || e); }
-  };
 
   const handleAddContacto = async (prospectoId, contacto, opts = {}) => {
     if (guardReadOnly()) return;
