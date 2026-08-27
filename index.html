@@ -6013,6 +6013,115 @@ function useCalPagoUI(prodAgentes, isAdminProd, agente, user) {
   return { calPagoSel, setCalPagoSel, calPagoNuevoSignal, setCalPagoNuevoSignal, calPagoQ, setCalPagoQ, calRoster, calPagoEffIds, calPagoNombreDe, calPagoSelfCanon };
 }
 
+// Gestión de columnas del Kanban (refactor #32, extraído de App). Dominio acotado:
+// maneja state.tareas.columnas + su propio estado de modales. Comportamiento idéntico
+// (los handlers se recrean por render igual que antes). ctx = deps de App.
+function useColumnas({ state, setState, guardReadOnly, handleErr, isPilot, bumpGcal }) {
+  const [pendingColMove, setPendingColMove] = useState(null);
+  const [addingColumna, setAddingColumna] = useState(false);
+
+  const handleAddColumna = () => {
+    if (guardReadOnly()) return;
+    setAddingColumna(true);
+  };
+  const handleConfirmAddColumna = async (titulo) => {
+    setAddingColumna(false);
+    const t = (titulo || '').trim();
+    if (!t) return;
+    try {
+      const orden = state.tareas.columnas.length;
+      const c = await storage.createColumna(t, orden);
+      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: [...s.tareas.columnas, c] } }));
+    } catch (e) { handleErr(e, 'createColumna'); }
+  };
+
+  // El drop del drag de columna llama acá: en vez de mover directo, armamos un modal
+  // de confirmación (previene reorders accidentales, sobre todo en mobile).
+  const handleRequestMoveColumna = (columnaId, targetColumnaId, position) => {
+    if (guardReadOnly()) return;
+    if (columnaId === targetColumnaId) return;
+    const cols = state.tareas?.columnas || [];
+    const moving = cols.find(c => c.id === columnaId);
+    const target = cols.find(c => c.id === targetColumnaId);
+    if (!moving || !target) return;
+    setPendingColMove({ columnaId, targetColumnaId, position, movingName: moving.titulo, targetName: target.titulo });
+  };
+
+  const handleConfirmMoveColumna = async () => {
+    const req = pendingColMove;
+    setPendingColMove(null);
+    if (!req) return;
+    if (guardReadOnly()) return;
+    const { columnaId, targetColumnaId, position } = req;
+    if (columnaId === targetColumnaId) return;
+    const prev = state.tareas.columnas;
+    const ordenadas = [...prev].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
+    const moving = ordenadas.find(c => c.id === columnaId);
+    if (!moving) return;
+    const sinMover = ordenadas.filter(c => c.id !== columnaId);
+    const targetIdx = sinMover.findIndex(c => c.id === targetColumnaId);
+    if (targetIdx === -1) return;
+    const insertIdx = position === 'after' ? targetIdx + 1 : targetIdx;
+    sinMover.splice(insertIdx, 0, moving);
+    const nuevas = sinMover.map((c, i) => ({ ...c, orden: i }));
+    setState(s => ({ ...s, tareas: { ...s.tareas, columnas: nuevas } }));
+    try {
+      for (const c of nuevas) {
+        const previo = prev.find(p => p.id === c.id);
+        if (previo && previo.orden !== c.orden) await storage.updateColumna(c.id, { orden: c.orden });
+      }
+    } catch (e) {
+      handleErr(e, 'moveColumna');
+      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: prev } }));
+    }
+  };
+
+  const handleRenameColumna = async (columnaId, nuevoTitulo) => {
+    if (guardReadOnly()) return;
+    if (!nuevoTitulo || !nuevoTitulo.trim()) return;
+    const col = state.tareas.columnas.find(c => c.id === columnaId);
+    if (col?.protegida) { showToast('La columna "Abordar" no se puede renombrar'); return; }
+    const prev = state.tareas.columnas;
+    setState(s => ({ ...s, tareas: { ...s.tareas, columnas: s.tareas.columnas.map(c => c.id === columnaId ? { ...c, titulo: nuevoTitulo.trim() } : c) } }));
+    try {
+      await storage.updateColumna(columnaId, { titulo: nuevoTitulo.trim() });
+    } catch (e) {
+      handleErr(e, 'renameColumna');
+      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: prev } }));
+    }
+  };
+
+  const handleDeleteColumna = async (columnaId) => {
+    if (guardReadOnly()) return;
+    const col = state.tareas.columnas.find(c => c.id === columnaId);
+    if (col?.protegida) { showToast('La columna "Abordar" no se puede eliminar'); return; }
+    const tareasEnCol = state.tareas.items.filter(t => t.columnaId === columnaId);
+    let msg = '¿Eliminar esta columna?';
+    if (tareasEnCol.length > 0) {
+      msg = `Esta columna tiene ${tareasEnCol.length} tarea${tareasEnCol.length === 1 ? '' : 's'}. Si la eliminás, esas tareas también se eliminan. ¿Continuar?`;
+    }
+    if (!confirm(msg)) return;
+    try {
+      // ANTES de borrar (el cascade del FK borra las tareas), eliminamos los eventos
+      // Google asociados — sino quedan huérfanos con abordaje_tarea_id a ids muertos.
+      if (isPilot) {
+        for (const t of tareasEnCol) {
+          if (t.googleEventId) {
+            try { await gcalApi.delete(t.googleEventId); }
+            catch (e) { console.warn('gcal del tarea (deleteColumna):', e?.message || e); }
+          }
+        }
+      }
+      await storage.deleteColumna(columnaId);
+      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: s.tareas.columnas.filter(c => c.id !== columnaId), items: s.tareas.items.filter(t => t.columnaId !== columnaId) } }));
+      if (isPilot) bumpGcal();
+    } catch (e) { handleErr(e, 'deleteColumna'); }
+  };
+
+  return { pendingColMove, setPendingColMove, addingColumna, setAddingColumna,
+    handleAddColumna, handleConfirmAddColumna, handleRequestMoveColumna, handleConfirmMoveColumna, handleRenameColumna, handleDeleteColumna };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -6274,8 +6383,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const [tareaEditando, setTareaEditando] = useState(null);
   // Estado del modal de confirmación de reorden de columnas. Cuando el user
   // suelta el drag de una columna, el handler arma este state y se renderiza
-  // ConfirmColMoveModal. Si confirma, ejecutamos el move. Si cancela, descartamos.
-  const [pendingColMove, setPendingColMove] = useState(null);
+  // ConfirmColMoveModal. (pendingColMove/addingColumna + handlers viven en useColumnas.)
   // Modal de confirmación al eliminar una tarea. Si la tarea tiene fecha, da
   // opción de "solo sacar del calendar" además de "borrar tarea completa".
   // Si no tiene fecha, solo pregunta borrar / cancelar.
@@ -6297,9 +6405,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Detecta si el evento es parte de una serie recurrente y avisa al user
   // que se borra toda la serie (la edge function aún no maneja "esta sola").
   const [pendingDeleteAgenda, setPendingDeleteAgenda] = useState(null);
-  // Modal para crear nueva columna del Kanban (reemplaza el prompt() nativo
-  // por uno coherente con el resto de la app, validación y autofocus).
-  const [addingColumna, setAddingColumna] = useState(false);
   // Modal de acciones al clickear un evento del calendar que viene de un
   // prospect (kind='prospecto'). Ofrece "eliminar la gestión" (que limpia
   // contacto + evento Google) o "abrir ficha del prospect" (comportamiento
@@ -7654,138 +7759,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }
   };
 
-  // Click en "+ Nueva columna" abre modal. El modal hace la validación de
-  // título no vacío y autofocus; al confirmar dispara handleConfirmAddColumna.
-  const handleAddColumna = () => {
-    if (guardReadOnly()) return;
-    setAddingColumna(true);
-  };
-  const handleConfirmAddColumna = async (titulo) => {
-    setAddingColumna(false);
-    const t = (titulo || '').trim();
-    if (!t) return;
-    try {
-      const orden = state.tareas.columnas.length;
-      const c = await storage.createColumna(t, orden);
-      setState(s => ({
-        ...s,
-        tareas: { ...s.tareas, columnas: [...s.tareas.columnas, c] }
-      }));
-    } catch (e) { handleErr(e, 'createColumna'); }
-  };
-
-  // El drop del drag de columna llama acá: en vez de mover directo, armamos
-  // un modal de confirmación. Esto previene reorders accidentales (sobre todo
-  // en mobile donde el long-press de header puede ser involuntario).
-  const handleRequestMoveColumna = (columnaId, targetColumnaId, position) => {
-    if (guardReadOnly()) return;
-    if (columnaId === targetColumnaId) return;
-    const cols = state.tareas?.columnas || [];
-    const moving = cols.find(c => c.id === columnaId);
-    const target = cols.find(c => c.id === targetColumnaId);
-    if (!moving || !target) return;
-    setPendingColMove({
-      columnaId,
-      targetColumnaId,
-      position,
-      movingName: moving.titulo,
-      targetName: target.titulo,
-    });
-  };
-
-  const handleConfirmMoveColumna = async () => {
-    const req = pendingColMove;
-    setPendingColMove(null);
-    if (!req) return;
-    if (guardReadOnly()) return;
-    const { columnaId, targetColumnaId, position } = req;
-    if (columnaId === targetColumnaId) return;
-    const prev = state.tareas.columnas;
-    const ordenadas = [...prev].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
-    const moving = ordenadas.find(c => c.id === columnaId);
-    if (!moving) return;
-    const sinMover = ordenadas.filter(c => c.id !== columnaId);
-    const targetIdx = sinMover.findIndex(c => c.id === targetColumnaId);
-    if (targetIdx === -1) return;
-    const insertIdx = position === 'after' ? targetIdx + 1 : targetIdx;
-    sinMover.splice(insertIdx, 0, moving);
-    const nuevas = sinMover.map((c, i) => ({ ...c, orden: i }));
-    setState(s => ({ ...s, tareas: { ...s.tareas, columnas: nuevas } }));
-    try {
-      for (const c of nuevas) {
-        const previo = prev.find(p => p.id === c.id);
-        if (previo && previo.orden !== c.orden) {
-          await storage.updateColumna(c.id, { orden: c.orden });
-        }
-      }
-    } catch (e) {
-      handleErr(e, 'moveColumna');
-      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: prev } }));
-    }
-  };
-
-  const handleRenameColumna = async (columnaId, nuevoTitulo) => {
-    if (guardReadOnly()) return;
-    if (!nuevoTitulo || !nuevoTitulo.trim()) return;
-    const col = state.tareas.columnas.find(c => c.id === columnaId);
-    if (col?.protegida) {
-      showToast('La columna "Abordar" no se puede renombrar');
-      return;
-    }
-    const prev = state.tareas.columnas;
-    setState(s => ({
-      ...s,
-      tareas: {
-        ...s.tareas,
-        columnas: s.tareas.columnas.map(c => c.id === columnaId ? { ...c, titulo: nuevoTitulo.trim() } : c)
-      }
-    }));
-    try {
-      await storage.updateColumna(columnaId, { titulo: nuevoTitulo.trim() });
-    } catch (e) {
-      handleErr(e, 'renameColumna');
-      setState(s => ({ ...s, tareas: { ...s.tareas, columnas: prev } }));
-    }
-  };
-
-  const handleDeleteColumna = async (columnaId) => {
-    if (guardReadOnly()) return;
-    const col = state.tareas.columnas.find(c => c.id === columnaId);
-    if (col?.protegida) {
-      showToast('La columna "Abordar" no se puede eliminar');
-      return;
-    }
-    const tareasEnCol = state.tareas.items.filter(t => t.columnaId === columnaId);
-    let msg = '¿Eliminar esta columna?';
-    if (tareasEnCol.length > 0) {
-      msg = `Esta columna tiene ${tareasEnCol.length} tarea${tareasEnCol.length === 1 ? '' : 's'}. Si la eliminás, esas tareas también se eliminan. ¿Continuar?`;
-    }
-    if (!confirm(msg)) return;
-    try {
-      // ANTES de borrar la columna (DB cascade borra las tareas), eliminamos
-      // los eventos Google asociados a las tareas — sino quedarían huérfanos
-      // en el calendar con abordaje_tarea_id apuntando a ids muertos.
-      if (isPilot) {
-        for (const t of tareasEnCol) {
-          if (t.googleEventId) {
-            try { await gcalApi.delete(t.googleEventId); }
-            catch (e) { console.warn('gcal del tarea (deleteColumna):', e?.message || e); }
-          }
-        }
-      }
-      // El cascade del FK en DB borra las tareas asociadas
-      await storage.deleteColumna(columnaId);
-      setState(s => ({
-        ...s,
-        tareas: {
-          ...s.tareas,
-          columnas: s.tareas.columnas.filter(c => c.id !== columnaId),
-          items: s.tareas.items.filter(t => t.columnaId !== columnaId)
-        }
-      }));
-      if (isPilot) bumpGcal();
-    } catch (e) { handleErr(e, 'deleteColumna'); }
-  };
+  // Columnas del Kanban: estado + handlers extraídos a useColumnas (refactor #32).
+  const { pendingColMove, setPendingColMove, addingColumna, setAddingColumna,
+    handleAddColumna, handleConfirmAddColumna, handleRequestMoveColumna, handleConfirmMoveColumna,
+    handleRenameColumna, handleDeleteColumna } = useColumnas({ state, setState, guardReadOnly, handleErr, isPilot, bumpGcal });
 
   const selectedProspecto = state.prospectos.find(p => p.id === selectedId) || null;
 
