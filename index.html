@@ -6122,6 +6122,95 @@ function useColumnas({ state, setState, guardReadOnly, handleErr, isPilot, bumpG
     handleAddColumna, handleConfirmAddColumna, handleRequestMoveColumna, handleConfirmMoveColumna, handleRenameColumna, handleDeleteColumna };
 }
 
+// Interacciones del tablero de Tareas (refactor #32, extraído de App): compañía,
+// drag&drop/reorden y fijar. Dominio tarea-only: NO toca sync ni Google Calendar
+// ni otros dominios. Comportamiento idéntico (verbatim). ctx = deps de App.
+function useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr }) {
+  // Asigna (o quita, pasando null) la compañía de una tarea. Solo el campo `compania`.
+  const handleSetCompania = useCallback(async (tareaId, compania) => {
+    if (guardReadOnly()) return;
+    const prev = state.tareas.items;
+    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === tareaId
+      ? { ...t, compania: compania || null, updatedAt: new Date().toISOString() } : t) } }));
+    try {
+      await storage.updateTarea(tareaId, { compania: compania || null });
+    } catch (e) {
+      handleErr(e, 'setCompania');
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
+    }
+  }, [state.tareas, guardReadOnly]);
+
+  // Drop de una tarjeta tras arrastrarla: mover de columna y/o reordenar. Renumera el
+  // `orden` de las no-fijadas de la columna destino (0..n) y persiste solo lo que cambió.
+  const handleDropTarea = async (tareaId, targetColId, beforeTareaId = null) => {
+    if (guardReadOnly()) return;
+    const tarea = state.tareas.items.find(t => t.id === tareaId);
+    if (!tarea) return;
+    const colDest = state.tareas.columnas.find(c => c.id === targetColId);
+    if (!colDest) { showToast('La columna destino ya no existe'); return; }
+    const sameCol = tarea.columnaId === targetColId;
+
+    if (tarea.fijadaAt) {
+      if (sameCol) return;
+      const prev = state.tareas.items;
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
+        t.id === tareaId ? { ...t, columnaId: targetColId } : t) } }));
+      try { await storage.updateTarea(tareaId, { columnaId: targetColId }); }
+      catch (e) { handleErr(e, 'moveTarea'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
+      return;
+    }
+
+    const destNoFijadas = state.tareas.items
+      .filter(t => t.columnaId === targetColId && !t.fijadaAt && t.id !== tareaId)
+      .sort((a, b) => ((a.orden == null ? Infinity : a.orden) - (b.orden == null ? Infinity : b.orden))
+        || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
+
+    let idx = beforeTareaId ? destNoFijadas.findIndex(t => t.id === beforeTareaId) : -1;
+    if (idx < 0) {
+      const bt = beforeTareaId ? state.tareas.items.find(t => t.id === beforeTareaId) : null;
+      idx = (bt && bt.fijadaAt && bt.columnaId === targetColId) ? 0 : destNoFijadas.length;
+    }
+    const lista = [...destNoFijadas];
+    lista.splice(idx, 0, tarea);
+    const ordenById = {};
+    lista.forEach((t, i) => { ordenById[t.id] = i; });
+
+    const prev = state.tareas.items;
+    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t => {
+      if (t.id === tareaId) return { ...t, columnaId: targetColId, orden: ordenById[t.id] };
+      if (t.id in ordenById) return { ...t, orden: ordenById[t.id] };
+      return t;
+    }) } }));
+
+    try {
+      await storage.updateTarea(tareaId, { columnaId: targetColId, orden: ordenById[tareaId] });
+      for (const t of destNoFijadas) {
+        if ((t.orden == null ? null : t.orden) !== ordenById[t.id]) {
+          await storage.updateTarea(t.id, { orden: ordenById[t.id] });
+        }
+      }
+    } catch (e) {
+      handleErr(e, 'reorderTarea');
+      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
+    }
+  };
+
+  // Fijar / desfijar una tarjeta arriba de su columna.
+  const handleTogglePin = async (tareaId) => {
+    if (guardReadOnly()) return;
+    const tarea = state.tareas.items.find(t => t.id === tareaId);
+    if (!tarea) return;
+    const nuevo = tarea.fijadaAt ? null : new Date().toISOString();
+    const prev = state.tareas.items;
+    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
+      t.id === tareaId ? { ...t, fijadaAt: nuevo } : t) } }));
+    try { await storage.updateTarea(tareaId, { fijadaAt: nuevo }); }
+    catch (e) { handleErr(e, 'togglePin'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
+  };
+
+  return { handleSetCompania, handleDropTarea, handleTogglePin };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -7465,103 +7554,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     } catch (e) { handleErr(e, 'convertirProspectoTarea'); }
   };
 
-  // Asigna (o quita, pasando null) la compañía de una tarea. Solo afecta
-  // el campo `compania` — la lógica del Kanban / calendar no cambia,
-  // solo cambia el badge/logo en la esquina superior derecha de la card.
-  const handleSetCompania = useCallback(async (tareaId, compania) => {
-    if (guardReadOnly()) return;
-    const prev = state.tareas.items;
-    setState(s => ({
-      ...s,
-      tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === tareaId
-        ? { ...t, compania: compania || null, updatedAt: new Date().toISOString() }
-        : t) }
-    }));
-    try {
-      await storage.updateTarea(tareaId, { compania: compania || null });
-    } catch (e) {
-      handleErr(e, 'setCompania');
-      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
-    }
-  }, [state.tareas, guardReadOnly]);
-
-  // Drop de una tarjeta tras arrastrarla. Cubre dos casos con una sola pasada:
-  //  - mover a otra columna (targetColId != columna actual)
-  //  - reordenar dentro de la columna (mismo target, orden manual)
-  // `beforeTareaId` = id de la tarjeta ANTES de la cual soltamos (null = al
-  // final de las no-fijadas). Renumera el `orden` de las no-fijadas de la
-  // columna destino de forma contigua (0..n) y persiste solo lo que cambió.
-  // Las fijadas no participan del orden manual (van siempre arriba por fecha
-  // de fijado); si se arrastra una fijada solo cambiamos su columna.
-  const handleDropTarea = async (tareaId, targetColId, beforeTareaId = null) => {
-    if (guardReadOnly()) return;
-    const tarea = state.tareas.items.find(t => t.id === tareaId);
-    if (!tarea) return;
-    const colDest = state.tareas.columnas.find(c => c.id === targetColId);
-    if (!colDest) { showToast('La columna destino ya no existe'); return; }
-    const sameCol = tarea.columnaId === targetColId;
-
-    // Tarjeta fijada: mantenemos el pin, solo puede cambiar de columna.
-    if (tarea.fijadaAt) {
-      if (sameCol) return;
-      const prev = state.tareas.items;
-      setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
-        t.id === tareaId ? { ...t, columnaId: targetColId } : t) } }));
-      try { await storage.updateTarea(tareaId, { columnaId: targetColId }); }
-      catch (e) { handleErr(e, 'moveTarea'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
-      return;
-    }
-
-    // No-fijadas de la columna destino (sin la que arrastramos), en su orden manual.
-    const destNoFijadas = state.tareas.items
-      .filter(t => t.columnaId === targetColId && !t.fijadaAt && t.id !== tareaId)
-      .sort((a, b) => ((a.orden == null ? Infinity : a.orden) - (b.orden == null ? Infinity : b.orden))
-        || String(a.createdAt || '').localeCompare(String(b.createdAt || '')));
-
-    // Índice de inserción.
-    let idx = beforeTareaId ? destNoFijadas.findIndex(t => t.id === beforeTareaId) : -1;
-    if (idx < 0) {
-      // beforeTareaId puede ser una fijada (soltó en la zona de arriba) → al inicio.
-      const bt = beforeTareaId ? state.tareas.items.find(t => t.id === beforeTareaId) : null;
-      idx = (bt && bt.fijadaAt && bt.columnaId === targetColId) ? 0 : destNoFijadas.length;
-    }
-    const lista = [...destNoFijadas];
-    lista.splice(idx, 0, tarea);
-    const ordenById = {};
-    lista.forEach((t, i) => { ordenById[t.id] = i; });
-
-    const prev = state.tareas.items;
-    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t => {
-      if (t.id === tareaId) return { ...t, columnaId: targetColId, orden: ordenById[t.id] };
-      if (t.id in ordenById) return { ...t, orden: ordenById[t.id] };
-      return t;
-    }) } }));
-
-    try {
-      await storage.updateTarea(tareaId, { columnaId: targetColId, orden: ordenById[tareaId] });
-      for (const t of destNoFijadas) {
-        if ((t.orden == null ? null : t.orden) !== ordenById[t.id]) {
-          await storage.updateTarea(t.id, { orden: ordenById[t.id] });
-        }
-      }
-    } catch (e) {
-      handleErr(e, 'reorderTarea');
-      setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
-    }
-  };
-
-  // Fijar / desfijar una tarjeta arriba de su columna.
-  const handleTogglePin = async (tareaId) => {
-    if (guardReadOnly()) return;
-    const tarea = state.tareas.items.find(t => t.id === tareaId);
-    if (!tarea) return;
-    const nuevo = tarea.fijadaAt ? null : new Date().toISOString();
-    const prev = state.tareas.items;
-    setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.map(t =>
-      t.id === tareaId ? { ...t, fijadaAt: nuevo } : t) } }));
-    try { await storage.updateTarea(tareaId, { fijadaAt: nuevo }); }
-    catch (e) { handleErr(e, 'togglePin'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
-  };
+  // Tablero de Tareas: compañía + drag&drop + fijar, extraídos a useTareaBoardHandlers (#32).
+  const { handleSetCompania, handleDropTarea, handleTogglePin } = useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr });
 
   const handleUpdateTarea = async (id, patch) => {
     if (guardReadOnly()) return;
