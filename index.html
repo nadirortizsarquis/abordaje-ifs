@@ -5986,6 +5986,33 @@ function useNotificaciones(state, isPilot, user) {
   return { notificaciones, notifUrgentes, dismissNotif };
 }
 
+// Estado + derivados del Calendario de pagos (refactor #32, extraído de App).
+// Autocontenido: NO depende del `state` grande, solo del roster de producción y de
+// quién es el usuario/admin. Devuelve exactamente lo que App le pasaba a la fila de
+// tabs y a CalendarioPagosOLE. Comportamiento idéntico.
+function useCalPagoUI(prodAgentes, isAdminProd, agente, user) {
+  const [calPagoSel, setCalPagoSel] = useState(null);          // null = Todos
+  const [calPagoNuevoSignal, setCalPagoNuevoSignal] = useState(0); // ++ abre "Nuevo pago"
+  const [calPagoQ, setCalPagoQ] = useState('');               // buscador
+  const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
+  const calPagoEffIds = useMemo(() => {
+    const selfId = agente?.id || user?.id;
+    if (!isAdminProd) return selfId ? [selfId] : [];
+    if (!calPagoSel) return calRoster.map(a => a.id);
+    const arr = calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
+    return arr.length ? arr : (selfId ? [selfId] : []);
+  }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
+  const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
+  // canon del grupo del usuario logueado (para que el pago manual no quede invisible
+  // en el libro colapsado; ver #31/#0). Guardamos siempre bajo el canon.
+  const calPagoSelfCanon = useMemo(() => {
+    const selfId = agente?.id || user?.id;
+    const unit = calRoster.find(u => (u.memberIds || []).includes(selfId));
+    return (unit && unit.id) || selfId;
+  }, [calRoster, agente?.id, user?.id]);
+  return { calPagoSel, setCalPagoSel, calPagoNuevoSignal, setCalPagoNuevoSignal, calPagoQ, setCalPagoQ, calRoster, calPagoEffIds, calPagoNombreDe, calPagoSelfCanon };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -6020,28 +6047,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Estado del selector de "Mi producción" (elevado para mostrarlo en la fila de tabs)
   const [prodTarget, setProdTarget] = useState(null);
   const [prodAgentes, setProdAgentes] = useState([]);
-  // Calendario de pagos: filtro multi-asesor elevado a App (mismo patrón que prodTarget).
-  const [calPagoSel, setCalPagoSel] = useState(null);   // null = Todos
-  const [calPagoNuevoSignal, setCalPagoNuevoSignal] = useState(0); // ++ abre el modal "Nuevo pago" en el calendario
-  const [calPagoQ, setCalPagoQ] = useState(''); // buscador del calendario de pagos (subido a App para ir al lado del botón)
-  const calRoster = useMemo(() => buildCalpagoRoster(prodAgentes, isAdminProd, agente?.id || user?.id, agente?.display_name || user?.email), [prodAgentes, isAdminProd, agente?.id, agente?.display_name, user?.email]);
-  const calPagoEffIds = useMemo(() => {
-    const selfId = agente?.id || user?.id;
-    if (!isAdminProd) return selfId ? [selfId] : [];
-    if (!calPagoSel) return calRoster.map(a => a.id);
-    const arr = calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
-    return arr.length ? arr : (selfId ? [selfId] : []);
-  }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
-  const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
-  // canon del grupo del usuario logueado: el calendario colapsado lee los pagos
-  // manuales por user_id ∈ effIds (que son solo canons). Si guardáramos bajo el id
-  // crudo de un socio no-canónico (ej. Nadir cuando el canon del libro IFS es Federico),
-  // el pago quedaría invisible para ambos. Guardamos siempre bajo el canon.
-  const calPagoSelfCanon = useMemo(() => {
-    const selfId = agente?.id || user?.id;
-    const unit = calRoster.find(u => (u.memberIds || []).includes(selfId));
-    return (unit && unit.id) || selfId;
-  }, [calRoster, agente?.id, user?.id]);
+  // Calendario de pagos: estado + derivados, extraídos a useCalPagoUI (refactor #32).
+  const { calPagoSel, setCalPagoSel, calPagoNuevoSignal, setCalPagoNuevoSignal, calPagoQ, setCalPagoQ,
+    calRoster, calPagoEffIds, calPagoNombreDe, calPagoSelfCanon } = useCalPagoUI(prodAgentes, isAdminProd, agente, user);
   useEffect(() => {
     if (!agente) return;
     setProdTarget(viewAs
