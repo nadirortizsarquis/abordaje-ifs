@@ -176,6 +176,28 @@ test('pickColumnaAbordar: sin columnas -> null', () => {
   assert.equal(g('pickColumnaAbordar')(undefined), null);
 });
 
+// ── Núcleo del motor de seguimiento (refactor #32): buildObsTarea ────────────
+test('buildObsTarea: junta label del tipo + observación con " — "', () => {
+  assert.equal(g('buildObsTarea')('llamar_manana', 'Insistir'), 'Llamar mañana — Insistir');
+});
+test('buildObsTarea: omite la observación vacía (solo el label)', () => {
+  assert.equal(g('buildObsTarea')('contestador', ''), 'Contestador');
+});
+
+// ── Núcleo del motor de seguimiento (refactor #32): appendBitacora ───────────
+test('appendBitacora: nota vacía -> undefined (sin cambio)', () => {
+  assert.equal(g('appendBitacora')('algo', ''), undefined);
+});
+test('appendBitacora: observación vacía -> la nota tal cual', () => {
+  assert.equal(g('appendBitacora')('', 'Nueva'), 'Nueva');
+});
+test('appendBitacora: agrega con separador si no estaba', () => {
+  assert.equal(g('appendBitacora')('Vieja', 'Nueva'), 'Vieja\n· Nueva');
+});
+test('appendBitacora: si ya está incluida -> undefined (no duplica)', () => {
+  assert.equal(g('appendBitacora')('Vieja\n· Nueva', 'Nueva'), undefined);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {

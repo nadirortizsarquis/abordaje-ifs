@@ -4844,6 +4844,23 @@ function pickColumnaAbordar(columnas) {
     || null;
 }
 
+// Nota de la tarea de seguimiento: "<label del tipo> — <observación>" (omite los
+// vacíos). Ej: "Llamar mañana — Insistir con la propuesta". Pura y testeable.
+function buildObsTarea(tipo, observacion) {
+  return [tipoConfig(tipo)?.label, observacion].filter(Boolean).join(' — ');
+}
+
+// Append de una línea a la bitácora del contacto SIN pisar ni duplicar (sync inverso
+// tarea→prospecto). Devuelve la nueva observación, o `undefined` si no hay cambio
+// (nota vacía o ya incluida). Pura y testeable.
+function appendBitacora(origObservacion, nota) {
+  if (!nota) return undefined;
+  const orig = (origObservacion || '').trim();
+  if (!orig) return nota;
+  if (orig.includes(nota)) return undefined;   // ya está: no duplicar
+  return `${orig}\n· ${nota}`;
+}
+
 // Devuelve "YYYY-MM-DDTHH:MM" en hora LOCAL (sin Z, sin UTC).
 // Importante: toISOString() convierte a UTC, lo cual genera bugs de timezone
 // cuando la app divide la fecha y hora para guardarlos en columnas separadas (date/time).
@@ -6693,9 +6710,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       const prospect = prevState.prospectos.find(p => p.id === prospectoId);
       const titulo = prospect?.nombre || 'Seguimiento';
       const { fecha, hora } = splitFechaHora(contactoActivo.agendadoPara);
-      const cfgTipo = tipoConfig(contactoActivo.tipo);
-      const obsTarea = [cfgTipo?.label, contactoActivo.observacion]
-        .filter(Boolean).join(' — ');
+      const obsTarea = buildObsTarea(contactoActivo.tipo, contactoActivo.observacion);
       try {
         const tarea = await storage.createTarea({
           columnaId: colAbordar.id,
@@ -6790,12 +6805,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     // La línea de bitácora nueva se AGREGA a la observación (no pisa la nota
     // original de la gestión); no se duplica si ya estaba.
     const patchContacto = { tipo: 'recordatorio', agendadoPara: nuevoAgendado };
-    if (nota) {
-      const orig = (ultimo.observacion || '').trim();
-      if (!orig) patchContacto.observacion = nota;
-      else if (!orig.includes(nota)) patchContacto.observacion = `${orig}\n· ${nota}`;
-      // si ya la incluye, no tocamos la observación
-    }
+    const nuevaObs = appendBitacora(ultimo.observacion, nota);
+    if (nuevaObs !== undefined) patchContacto.observacion = nuevaObs;
     const yaIgual = ultimo.tipo === 'recordatorio'
       && (ultimo.agendadoPara || null) === (nuevoAgendado || null)
       && (patchContacto.observacion === undefined || (ultimo.observacion || '') === patchContacto.observacion);
