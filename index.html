@@ -4867,6 +4867,16 @@ function appendBitacora(origObservacion, nota) {
   return `${orig}\n· ${nota}`;
 }
 
+// Último contacto (recorriendo de atrás para adelante) que tiene fecha objetivo
+// (agendadoPara). Devuelve el contacto o undefined. Pura y testeable.
+function ultimoContactoConFecha(contactos) {
+  return [...(contactos || [])].reverse().find(c => c.agendadoPara);
+}
+// proximoContacto derivado = la fecha objetivo del último contacto con fecha, o null.
+function deriveProximoContacto(contactos) {
+  return ultimoContactoConFecha(contactos)?.agendadoPara || null;
+}
+
 // Devuelve "YYYY-MM-DDTHH:MM" en hora LOCAL (sin Z, sin UTC).
 // Importante: toISOString() convierte a UTC, lo cual genera bugs de timezone
 // cuando la app divide la fecha y hora para guardarlos en columnas separadas (date/time).
@@ -6821,7 +6831,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     const me = await auth.getUser();
     const patchLocal = { ...patchContacto, actorId: me?.id || ultimo.actorId };
     const contactosAct = contactos.map(c => c.id === ultimo.id ? { ...c, ...patchLocal } : c);
-    const proxNuevo = [...contactosAct].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
+    const proxNuevo = deriveProximoContacto(contactosAct);
     const estadoNuevo = deriveEstado({ ...prospecto, contactos: contactosAct });
     try {
       // Serializado con sincronizarSeguimiento del mismo prospecto (evita carrera
@@ -7153,7 +7163,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       const contactosNuevos = (prospect.contactos || []).map(c =>
         c.id === ultimoAgendado.id ? { ...c, agendadoPara: null } : c
       );
-      const proxNuevo = [...contactosNuevos].reverse().find(c => c.agendadoPara)?.agendadoPara || null;
+      const proxNuevo = deriveProximoContacto(contactosNuevos);
       const estadoNuevo = deriveEstado({ ...prospect, contactos: contactosNuevos });
       setState(s => ({
         ...s,
@@ -13039,7 +13049,7 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
   for (const p of prospectos) {
     if (!p.proximoContacto) continue;
     if (deriveEstado(p) === 'rechazado') continue;
-    const ultimoAgendado = [...(p.contactos || [])].reverse().find(c => c.agendadoPara);
+    const ultimoAgendado = ultimoContactoConFecha(p.contactos);
     if (ultimoAgendado?.tipo !== 'agendado') continue;
     events.push({
       id: p.id + '_proximo',
@@ -13090,7 +13100,7 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
       let tipoContacto = null;
       if (t.prospectoId) {
         const prosp = prospectos.find(x => x.id === t.prospectoId);
-        const ultimo = prosp ? [...(prosp.contactos || [])].reverse().find(c => c.agendadoPara) : null;
+        const ultimo = prosp ? ultimoContactoConFecha(prosp.contactos) : null;
         tipoContacto = ultimo?.tipo || null;
       }
       events.push({
@@ -13192,7 +13202,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       // prospecto (si la tarea cuelga de uno). Manual (sin prospecto) → null → violeta.
       if (tarea?.prospectoId) {
         const p = prospectos.find(x => x.id === tarea.prospectoId);
-        const ultimo = p ? [...(p.contactos || [])].reverse().find(c => c.agendadoPara) : null;
+        const ultimo = p ? ultimoContactoConFecha(p.contactos) : null;
         tipoEvento = ultimo?.tipo || null;
       } else {
         tipoEvento = null;

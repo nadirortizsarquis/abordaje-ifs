@@ -215,6 +215,30 @@ test('combinarFechaHora + splitFechaHora: round-trip', () => {
   assert.equal(hora, '14:30');
 });
 
+// ── deriveProximoContacto / ultimoContactoConFecha (refactor #32) ────────────
+test('deriveProximoContacto: toma la fecha del ÚLTIMO contacto con fecha', () => {
+  const cs = [
+    { tipo: 'llamar_manana', agendadoPara: '2026-09-01' },
+    { tipo: 'agendado', agendadoPara: '2026-09-10T10:00' },
+  ];
+  assert.equal(g('deriveProximoContacto')(cs), '2026-09-10T10:00');
+});
+test('deriveProximoContacto: ignora los contactos sin fecha (retrocede)', () => {
+  const cs = [
+    { tipo: 'llamar_manana', agendadoPara: '2026-09-01' },
+    { tipo: 'contestador', agendadoPara: null },
+  ];
+  assert.equal(g('deriveProximoContacto')(cs), '2026-09-01');
+});
+test('deriveProximoContacto: ninguno con fecha -> null', () => {
+  assert.equal(g('deriveProximoContacto')([{ tipo: 'contestador', agendadoPara: null }]), null);
+  assert.equal(g('deriveProximoContacto')([]), null);
+});
+test('ultimoContactoConFecha: devuelve el contacto (no la fecha)', () => {
+  const c2 = { tipo: 'agendado', agendadoPara: '2026-09-10T10:00' };
+  assert.equal(g('ultimoContactoConFecha')([{ tipo: 'contestador' }, c2]), c2);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
