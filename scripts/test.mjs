@@ -239,6 +239,17 @@ test('ultimoContactoConFecha: devuelve el contacto (no la fecha)', () => {
   assert.equal(g('ultimoContactoConFecha')([{ tipo: 'contestador' }, c2]), c2);
 });
 
+// ── extraerUltimaLineaBitacora (refactor #32): tope con timestamp [...] ──────
+test('extraerUltimaLineaBitacora: entrada con [timestamp] -> el texto', () => {
+  assert.equal(g('extraerUltimaLineaBitacora')('[27/08 10:00] Llamé, no atendió'), 'Llamé, no atendió');
+});
+test('extraerUltimaLineaBitacora: tope sin timestamp (Label — nota) -> null', () => {
+  assert.equal(g('extraerUltimaLineaBitacora')('Llamar mañana — Insistir'), null);
+});
+test('extraerUltimaLineaBitacora: vacío -> null', () => {
+  assert.equal(g('extraerUltimaLineaBitacora')(''), null);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {

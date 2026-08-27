@@ -4867,6 +4867,16 @@ function appendBitacora(origObservacion, nota) {
   return `${orig}\n· ${nota}`;
 }
 
+// Última línea REAL de bitácora (entrada con timestamp `[...]`) del texto de una
+// tarea. Devuelve null si el tope no es una entrada de bitácora (ej. el "Label — nota"
+// inicial): en ese caso no pisamos la observación. Pura y testeable.
+function extraerUltimaLineaBitacora(obs) {
+  if (!obs) return null;
+  const top = (obs.split(/\n\n+/)[0] || '').trim();
+  const m = top.match(/^\[[^\]]*\]\s*([\s\S]*)$/);
+  return m ? m[1].trim() : null;
+}
+
 // Último contacto (recorriendo de atrás para adelante) que tiene fecha objetivo
 // (agendadoPara). Devuelve el contacto o undefined. Pura y testeable.
 function ultimoContactoConFecha(contactos) {
@@ -6994,17 +7004,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // `agendadoPara` al contacto activo para que Lista de Abordaje NO quede stale.
   // NO llamamos sincronizarSeguimiento (evita el delete+recreate: la tarea ya
   // refleja el cambio). Solo aplica si el último contacto genera tarea (no una
-  // cita 'agendado').
-  // Extrae la última línea REAL de bitácora (entrada con timestamp `[...]`) del
-  // texto de una tarea. Devuelve null si el tope no es una entrada de bitácora
-  // (ej. el "Label — nota" inicial): en ese caso no pisamos la observación.
-  const extraerUltimaLineaBitacora = (obs) => {
-    if (!obs) return null;
-    const top = (obs.split(/\n\n+/)[0] || '').trim();
-    const m = top.match(/^\[[^\]]*\]\s*([\s\S]*)$/);
-    return m ? m[1].trim() : null;
-  };
-
+  // cita 'agendado'). (extraerUltimaLineaBitacora se movió a nivel módulo.)
   const _syncTareaAProspecto = async (tarea, nuevaFecha, nuevaHora, nota) => {
     const prospectoId = tarea?.prospectoId;
     if (!prospectoId) return;
