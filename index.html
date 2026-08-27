@@ -5998,9 +5998,10 @@ function useCalPagoUI(prodAgentes, isAdminProd, agente, user) {
   const calPagoEffIds = useMemo(() => {
     const selfId = agente?.id || user?.id;
     if (!isAdminProd) return selfId ? [selfId] : [];
-    if (!calPagoSel) return calRoster.map(a => a.id);
-    const arr = calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
-    return arr.length ? arr : (selfId ? [selfId] : []);
+    if (!calPagoSel) return calRoster.map(a => a.id);          // null = todos
+    // Selección explícita (Set): devolvemos EXACTAMENTE lo tildado. Si destildó
+    // todo → array vacío → el calendario queda vacío (antes caía en "lo mío", bug).
+    return calRoster.map(a => a.id).filter(id => calPagoSel.has(id));
   }, [isAdminProd, calPagoSel, calRoster, agente?.id, user?.id]);
   const calPagoNombreDe = useMemo(() => { const m = {}; calRoster.forEach(a => { m[a.id] = a.nombre; }); return m; }, [calRoster]);
   // canon del grupo del usuario logueado (para que el pago manual no quede invisible
