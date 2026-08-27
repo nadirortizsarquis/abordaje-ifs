@@ -145,6 +145,37 @@ test('calColorPorTipo distingue fecha_exacta de llamar_manana', () => {
   assert.equal(c('desconocido_xyz'), null);   // tipo desconocido -> null (cae a violeta en el caller)
 });
 
+// ── Núcleo del motor de seguimiento (refactor #32): decidirSeguimiento ───────
+test('decidirSeguimiento: sin contacto -> nada', () => {
+  assert.equal(g('decidirSeguimiento')(null), 'nada');
+});
+test('decidirSeguimiento: contacto sin agendadoPara -> nada', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'contestador', agendadoPara: null }), 'nada');
+});
+test('decidirSeguimiento: agendado con fecha -> agenda', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'agendado', agendadoPara: '2026-09-01T10:00' }), 'agenda');
+});
+test('decidirSeguimiento: llamar_manana con fecha -> tarea', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'llamar_manana', agendadoPara: '2026-09-01' }), 'tarea');
+});
+test('decidirSeguimiento: recordatorio con fecha -> tarea (no es agendado)', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'recordatorio', agendadoPara: '2026-09-01T10:00' }), 'tarea');
+});
+
+// ── Núcleo del motor de seguimiento (refactor #32): pickColumnaAbordar ───────
+test('pickColumnaAbordar: prefiere la columna con slug abordar', () => {
+  const cols = [{ id: 'x', slug: null, orden: 0 }, { id: 'ab', slug: 'abordar', orden: 5 }];
+  assert.equal(g('pickColumnaAbordar')(cols).id, 'ab');
+});
+test('pickColumnaAbordar: sin abordar -> primera por orden', () => {
+  const cols = [{ id: 'b', slug: null, orden: 2 }, { id: 'a', slug: null, orden: 1 }];
+  assert.equal(g('pickColumnaAbordar')(cols).id, 'a');
+});
+test('pickColumnaAbordar: sin columnas -> null', () => {
+  assert.equal(g('pickColumnaAbordar')([]), null);
+  assert.equal(g('pickColumnaAbordar')(undefined), null);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {

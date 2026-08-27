@@ -4823,6 +4823,27 @@ function deriveEstado(prospecto) {
   return cfg ? cfg.estado : 'nuevo';
 }
 
+// ── Núcleo PURO del motor de seguimiento (refactor #32, extraído para testear) ──
+// Decide QUÉ artefacto genera el seguimiento a partir del contacto activo (el último
+// contacto que define el seguimiento vigente). Sin efectos: solo decide.
+//   - sin contacto, o sin fecha objetivo (agendadoPara) → 'nada'
+//   - tipo 'agendado'                                    → 'agenda' (cita en el calendario)
+//   - cualquier otro tipo CON fecha                      → 'tarea'  (recordatorio en el Kanban)
+function decidirSeguimiento(contactoActivo) {
+  if (!contactoActivo || !contactoActivo.agendadoPara) return 'nada';
+  return contactoActivo.tipo === 'agendado' ? 'agenda' : 'tarea';
+}
+
+// Elige la columna del Kanban donde cae la tarea de seguimiento: preferimos la
+// protegida 'abordar'; si no existe (renombrada/borrada), la primera por orden.
+// Devuelve null si no hay columnas. Pura y testeable.
+function pickColumnaAbordar(columnas) {
+  const cols = columnas || [];
+  return cols.find(c => c.slug === 'abordar')
+    || [...cols].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999))[0]
+    || null;
+}
+
 // Devuelve "YYYY-MM-DDTHH:MM" en hora LOCAL (sin Z, sin UTC).
 // Importante: toISOString() convierte a UTC, lo cual genera bugs de timezone
 // cuando la app divide la fecha y hora para guardarlos en columnas separadas (date/time).
@@ -6634,13 +6655,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     }));
 
     // 3. Si no hay contacto activo o no tiene fecha objetivo, salir
-    if (!contactoActivo || !contactoActivo.agendadoPara) {
+    const decision = decidirSeguimiento(contactoActivo);
+    if (decision === 'nada') {
       if (isPilot) bumpGcal();
       return;
     }
 
     // 4. Generar lo nuevo según el tipo
-    if (contactoActivo.tipo === 'agendado') {
+    if (decision === 'agenda') {
       if (isPilot) {
         // Crear evento en Google vinculado al prospect.
         const prospect = prevState.prospectos.find(p => p.id === prospectoId);
@@ -6666,9 +6688,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       // Preferimos la columna 'abordar'; si el usuario la renombró/borró, caemos
       // a la primera columna por orden (mismo criterio que handleCreateTareaEnSlot),
       // para que la tarea del seguimiento aparezca en algún lado y no se pierda.
-      const cols0 = prevState.tareas?.columnas || [];
-      const colAbordar = cols0.find(c => c.slug === 'abordar')
-        || [...cols0].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999))[0];
+      const colAbordar = pickColumnaAbordar(prevState.tareas?.columnas);
       if (!colAbordar) { console.warn('No hay columnas de tareas'); return; }
       const prospect = prevState.prospectos.find(p => p.id === prospectoId);
       const titulo = prospect?.nombre || 'Seguimiento';
