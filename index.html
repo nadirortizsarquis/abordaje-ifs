@@ -6451,6 +6451,128 @@ function useSeguimientoEngine({ state, setState, isPilot, bumpGcal }) {
   return { sincronizarSeguimiento, _syncTareaAProspecto };
 }
 
+// Handlers de contacto (refactor #32, extraído de App): agregar/editar/borrar gestión.
+// Consumen el motor (sincronizarSeguimiento). Bodies VERBATIM. Dueños del modal de
+// confirmación de borrado (setPendingDeleteContacto viene de App). ctx = deps de App.
+function useContactoHandlers({ state, setState, guardReadOnly, handleErr, isPilot, sincronizarSeguimiento, setPendingDeleteContacto }) {
+  const handleAddContacto = async (prospectoId, contacto, opts = {}) => {
+    if (guardReadOnly()) return;
+    try {
+      const nuevo = await storage.createContacto(prospectoId, contacto);
+      // estado persistido = deriveEstado (misma fuente que el render), para que la
+      // columna DB no diverja de lo que ve el usuario (incluye el backtrack de
+      // agendado/recordatorio sin fecha). No usar tipoConfig(...).estado a secas.
+      const prospActualAdd = state.prospectos.find(p => p.id === prospectoId);
+      const contactosActAdd = [...((prospActualAdd?.contactos) || []), nuevo];
+      const nuevoEstado = deriveEstado({ ...(prospActualAdd || {}), contactos: contactosActAdd });
+      const nuevoProx = nuevo.agendadoPara || null;
+
+      // Update local: agregar contacto al prospecto + estado/próximoContacto derivados
+      setState(s => ({
+        ...s,
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: [...(p.contactos || []), nuevo], proximoContacto: nuevoProx, estado: nuevoEstado, updatedAt: new Date().toISOString() }
+          : p)
+      }));
+      await storage.updateProspecto(prospectoId, { estado: nuevoEstado, proximoContacto: nuevoProx });
+
+      // Sincronización tarea/agenda automática. La llamamos SIEMPRE (incluso
+      // cuando el contacto nuevo no trae agendadoPara, ej. 'rechazado' o
+      // 'contestador'): así limpiamos cualquier tarea auto / agenda anterior
+      // que ya no aplica. La función maneja el caso sin agendadoPara como
+      // "solo limpiar, no crear nada".
+      await sincronizarSeguimiento(prospectoId, nuevo, state, opts);
+
+      showToast('Gestión registrada');
+    } catch (e) { handleErr(e, 'createContacto'); }
+  };
+
+  const handleEditContacto = async (prospectoId, contactoId, patch) => {
+    if (guardReadOnly()) return;
+    try {
+      await storage.updateContacto(contactoId, patch);
+
+      // Reconstruir el contacto con el patch aplicado (para usarlo en sincronización)
+      const prevState = state;
+      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
+      if (!prospectAnterior) return;
+      const contactosAct = (prospectAnterior.contactos || []).map(c => {
+        if (c.id !== contactoId) return c;
+        const merged = { ...c, ...patch };
+        if ('agendadoPara' in patch) {
+          merged.agendadoPara = patch.agendadoPara;
+        } else if ('fecha' in patch || 'hora' in patch) {
+          merged.agendadoPara = combinarFechaHora(merged.fecha, merged.hora);
+        }
+        return merged;
+      });
+      const ultimo = contactosAct[contactosAct.length - 1];
+      const proxNuevo = ultimo?.agendadoPara || null;
+      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosAct });
+
+      setState(s => ({
+        ...s,
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
+      }));
+      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+
+      // Si el contacto editado es el último (define el seguimiento vigente),
+      // resincronizamos tarea/agenda con la versión nueva.
+      const editadoEsUltimo = ultimo?.id === contactoId;
+      if (editadoEsUltimo) {
+        await sincronizarSeguimiento(prospectoId, ultimo, prevState);
+      }
+
+      showToast('Gestión actualizada');
+    } catch (e) { handleErr(e, 'updateContacto'); }
+  };
+
+  const handleDeleteContacto = async (prospectoId, contactoId, opts = {}) => {
+    if (guardReadOnly()) return;
+    // opts.skipConfirm: para callers que ya confirmaron via modal propio
+    // (ej. eliminar agenda desde el calendar). Evita doble confirmación.
+    // opts.confirmed: viene del modal ConfirmDeleteContactoModal.
+    if (!opts.skipConfirm && !opts.confirmed) {
+      setPendingDeleteContacto({ prospectoId, contactoId });
+      return;
+    }
+    try {
+      const prevState = state;
+      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
+      if (!prospectAnterior) return;
+
+      // Determinar si el contacto borrado era el último (define el seguimiento vigente)
+      const contactosPrev = prospectAnterior.contactos || [];
+      const eraUltimo = contactosPrev[contactosPrev.length - 1]?.id === contactoId;
+
+      await storage.deleteContacto(contactoId);
+
+      // Lista nueva de contactos + último nuevo
+      const contactosNuevos = contactosPrev.filter(c => c.id !== contactoId);
+      const nuevoUltimo = contactosNuevos[contactosNuevos.length - 1] || null;
+      const proxNuevo = nuevoUltimo?.agendadoPara || null;
+      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosNuevos });
+
+      setState(s => ({
+        ...s,
+        prospectos: s.prospectos.map(p => p.id === prospectoId
+          ? { ...p, contactos: contactosNuevos, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
+          : p)
+      }));
+      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
+
+      // Si el contacto borrado era el último, resincronizamos tarea/agenda.
+      // sincronizarSeguimiento con nuevoUltimo (puede ser null → solo limpia).
+      if (eraUltimo) {
+        await sincronizarSeguimiento(prospectoId, nuevoUltimo, prevState);
+      }
+    } catch (e) { handleErr(e, 'deleteContacto'); }
+  };
+  return { handleAddContacto, handleEditContacto, handleDeleteContacto };
+}
+
 // ── APP ────────────────────────────────────────────────────────
 function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout }) {
   const readOnly = !!viewAs;
@@ -7062,121 +7184,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // _syncSeguimientoBody hace el trabajo crudo. sincronizarSeguimiento (más abajo)
   // lo envuelve en un lock por prospectoId para evitar duplicados por race condition.
 
-  const handleAddContacto = async (prospectoId, contacto, opts = {}) => {
-    if (guardReadOnly()) return;
-    try {
-      const nuevo = await storage.createContacto(prospectoId, contacto);
-      // estado persistido = deriveEstado (misma fuente que el render), para que la
-      // columna DB no diverja de lo que ve el usuario (incluye el backtrack de
-      // agendado/recordatorio sin fecha). No usar tipoConfig(...).estado a secas.
-      const prospActualAdd = state.prospectos.find(p => p.id === prospectoId);
-      const contactosActAdd = [...((prospActualAdd?.contactos) || []), nuevo];
-      const nuevoEstado = deriveEstado({ ...(prospActualAdd || {}), contactos: contactosActAdd });
-      const nuevoProx = nuevo.agendadoPara || null;
-
-      // Update local: agregar contacto al prospecto + estado/próximoContacto derivados
-      setState(s => ({
-        ...s,
-        prospectos: s.prospectos.map(p => p.id === prospectoId
-          ? { ...p, contactos: [...(p.contactos || []), nuevo], proximoContacto: nuevoProx, estado: nuevoEstado, updatedAt: new Date().toISOString() }
-          : p)
-      }));
-      await storage.updateProspecto(prospectoId, { estado: nuevoEstado, proximoContacto: nuevoProx });
-
-      // Sincronización tarea/agenda automática. La llamamos SIEMPRE (incluso
-      // cuando el contacto nuevo no trae agendadoPara, ej. 'rechazado' o
-      // 'contestador'): así limpiamos cualquier tarea auto / agenda anterior
-      // que ya no aplica. La función maneja el caso sin agendadoPara como
-      // "solo limpiar, no crear nada".
-      await sincronizarSeguimiento(prospectoId, nuevo, state, opts);
-
-      showToast('Gestión registrada');
-    } catch (e) { handleErr(e, 'createContacto'); }
-  };
-
-  const handleEditContacto = async (prospectoId, contactoId, patch) => {
-    if (guardReadOnly()) return;
-    try {
-      await storage.updateContacto(contactoId, patch);
-
-      // Reconstruir el contacto con el patch aplicado (para usarlo en sincronización)
-      const prevState = state;
-      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
-      if (!prospectAnterior) return;
-      const contactosAct = (prospectAnterior.contactos || []).map(c => {
-        if (c.id !== contactoId) return c;
-        const merged = { ...c, ...patch };
-        if ('agendadoPara' in patch) {
-          merged.agendadoPara = patch.agendadoPara;
-        } else if ('fecha' in patch || 'hora' in patch) {
-          merged.agendadoPara = combinarFechaHora(merged.fecha, merged.hora);
-        }
-        return merged;
-      });
-      const ultimo = contactosAct[contactosAct.length - 1];
-      const proxNuevo = ultimo?.agendadoPara || null;
-      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosAct });
-
-      setState(s => ({
-        ...s,
-        prospectos: s.prospectos.map(p => p.id === prospectoId
-          ? { ...p, contactos: contactosAct, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
-          : p)
-      }));
-      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
-
-      // Si el contacto editado es el último (define el seguimiento vigente),
-      // resincronizamos tarea/agenda con la versión nueva.
-      const editadoEsUltimo = ultimo?.id === contactoId;
-      if (editadoEsUltimo) {
-        await sincronizarSeguimiento(prospectoId, ultimo, prevState);
-      }
-
-      showToast('Gestión actualizada');
-    } catch (e) { handleErr(e, 'updateContacto'); }
-  };
-
-  const handleDeleteContacto = async (prospectoId, contactoId, opts = {}) => {
-    if (guardReadOnly()) return;
-    // opts.skipConfirm: para callers que ya confirmaron via modal propio
-    // (ej. eliminar agenda desde el calendar). Evita doble confirmación.
-    // opts.confirmed: viene del modal ConfirmDeleteContactoModal.
-    if (!opts.skipConfirm && !opts.confirmed) {
-      setPendingDeleteContacto({ prospectoId, contactoId });
-      return;
-    }
-    try {
-      const prevState = state;
-      const prospectAnterior = prevState.prospectos.find(x => x.id === prospectoId);
-      if (!prospectAnterior) return;
-
-      // Determinar si el contacto borrado era el último (define el seguimiento vigente)
-      const contactosPrev = prospectAnterior.contactos || [];
-      const eraUltimo = contactosPrev[contactosPrev.length - 1]?.id === contactoId;
-
-      await storage.deleteContacto(contactoId);
-
-      // Lista nueva de contactos + último nuevo
-      const contactosNuevos = contactosPrev.filter(c => c.id !== contactoId);
-      const nuevoUltimo = contactosNuevos[contactosNuevos.length - 1] || null;
-      const proxNuevo = nuevoUltimo?.agendadoPara || null;
-      const estadoNuevo = deriveEstado({ ...prospectAnterior, contactos: contactosNuevos });
-
-      setState(s => ({
-        ...s,
-        prospectos: s.prospectos.map(p => p.id === prospectoId
-          ? { ...p, contactos: contactosNuevos, proximoContacto: proxNuevo, estado: estadoNuevo, updatedAt: new Date().toISOString() }
-          : p)
-      }));
-      await storage.updateProspecto(prospectoId, { estado: estadoNuevo, proximoContacto: proxNuevo });
-
-      // Si el contacto borrado era el último, resincronizamos tarea/agenda.
-      // sincronizarSeguimiento con nuevoUltimo (puede ser null → solo limpia).
-      if (eraUltimo) {
-        await sincronizarSeguimiento(prospectoId, nuevoUltimo, prevState);
-      }
-    } catch (e) { handleErr(e, 'deleteContacto'); }
-  };
+  // Handlers de contacto: extraídos a useContactoHandlers (refactor #32).
+  const { handleAddContacto, handleEditContacto, handleDeleteContacto } = useContactoHandlers({ state, setState, guardReadOnly, handleErr, isPilot, sincronizarSeguimiento, setPendingDeleteContacto });
 
 
   // ── TAREAS HANDLERS ──
