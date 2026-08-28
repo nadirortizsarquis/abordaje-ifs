@@ -8661,6 +8661,15 @@ function MultiSelectEtiqueta({ value, onChange }) {
 
 // ── TABLA ──────────────────────────────────────────────────────
 function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds = null, onToggleSelect = null, onToggleAll = null }) {
+  // Cap de RENDER para listas grandes (refactor #32, Parte 4): dibujamos hasta N
+  // filas y ofrecemos "mostrar más". Evita miles de <tr> en el DOM. Solo afecta a
+  // libros muy grandes; con el uso normal (<500) no se ve. Se resetea al re-filtrar.
+  const PAGE_SIZE = 500;
+  const [renderLimit, setRenderLimit] = useState(PAGE_SIZE);
+  useEffect(() => { setRenderLimit(PAGE_SIZE); }, [prospectos]);
+  const prospectosShown = prospectos.slice(0, renderLimit);
+  const nColumnas = selectable ? 8 : 7;
+
   // Cantidad de items seleccionados visibles (para el master checkbox)
   const totalVisibles = prospectos.length;
   const selCount = selectable && selectedIds
@@ -8710,7 +8719,7 @@ function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds
           </tr>
         </thead>
         <tbody>
-          {prospectos.map(p => (
+          {prospectosShown.map(p => (
             <FilaProspecto
               key={p.id}
               prospecto={p}
@@ -8720,6 +8729,15 @@ function ProspectosTable({ prospectos, onSelect, selectable = false, selectedIds
               onToggleSelect={onToggleSelect}
             />
           ))}
+          {prospectos.length > renderLimit && (
+            <tr>
+              <td colSpan={nColumnas} style={{ textAlign: 'center', padding: '14px' }}>
+                <button type="button" className="btn-secondary" onClick={() => setRenderLimit(v => v + PAGE_SIZE)}>
+                  Mostrar más ({prospectos.length - renderLimit} restantes)
+                </button>
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
     </div>
