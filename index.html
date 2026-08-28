@@ -6153,7 +6153,7 @@ function useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr }) {
 
   // Drop de una tarjeta tras arrastrarla: mover de columna y/o reordenar. Renumera el
   // `orden` de las no-fijadas de la columna destino (0..n) y persiste solo lo que cambió.
-  const handleDropTarea = async (tareaId, targetColId, beforeTareaId = null) => {
+  const handleDropTarea = useCallback(async (tareaId, targetColId, beforeTareaId = null) => {
     if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
     if (!tarea) return;
@@ -6204,10 +6204,10 @@ function useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr }) {
       handleErr(e, 'reorderTarea');
       setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } }));
     }
-  };
+  }, [state.tareas, guardReadOnly, handleErr]);
 
   // Fijar / desfijar una tarjeta arriba de su columna.
-  const handleTogglePin = async (tareaId) => {
+  const handleTogglePin = useCallback(async (tareaId) => {
     if (guardReadOnly()) return;
     const tarea = state.tareas.items.find(t => t.id === tareaId);
     if (!tarea) return;
@@ -6217,7 +6217,7 @@ function useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr }) {
       t.id === tareaId ? { ...t, fijadaAt: nuevo } : t) } }));
     try { await storage.updateTarea(tareaId, { fijadaAt: nuevo }); }
     catch (e) { handleErr(e, 'togglePin'); setState(s => ({ ...s, tareas: { ...s.tareas, items: prev } })); }
-  };
+  }, [state.tareas, guardReadOnly, handleErr]);
 
   return { handleSetCompania, handleDropTarea, handleTogglePin };
 }
@@ -6807,13 +6807,14 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   }, []);
 
   // Guard común para handlers de escritura: bloquea si estamos viendo como otro
-  const guardReadOnly = () => {
+  // Estable (useCallback) para que los handlers que lo usan puedan memoizarse (#32).
+  const guardReadOnly = useCallback(() => {
     if (readOnly) {
       showToast('Vista de solo lectura — volvé a tu vista para editar');
       return true;
     }
     return false;
-  };
+  }, [readOnly]);
 
   const { notificaciones, notifUrgentes, dismissNotif } = useNotificaciones(state, isPilot, user);
   const { settings, setSettings, saveSettings, handleSetCalendarColor, handleResetCalendarColors } = useSettings(user, agente);
@@ -6985,10 +6986,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     return () => { cancel = true; };
   }, [view]);
 
-  const handleErr = (e, ctx) => {
+  const handleErr = useCallback((e, ctx) => {
     console.error(ctx, e);
     showToast(`Error: ${e.message || e}`, { duration: 4000 });
-  };
+  }, []);
 
   const upsertProspecto = useCallback(async (id, patch) => {
     if (readOnly) { showToast('Vista de solo lectura'); return; }
@@ -8065,7 +8066,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onAddTarea={handleAddTarea}
           onDropTarea={handleDropTarea}
           onTogglePin={handleTogglePin}
-          onEditarTarea={(t) => setTareaEditando(t)}
+          onEditarTarea={setTareaEditando}
           onAddColumna={handleAddColumna}
           onRenameColumna={handleRenameColumna}
           onDeleteColumna={handleDeleteColumna}
@@ -16787,7 +16788,7 @@ function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, 
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} tipoGestion={t.prospectoId ? (tipoPorProspecto?.[t.prospectoId] || null) : null} readOnly={readOnly} autoOrden={autoOrden} onClick={() => onEditarTarea(t)} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} tipoGestion={t.prospectoId ? (tipoPorProspecto?.[t.prospectoId] || null) : null} readOnly={readOnly} autoOrden={autoOrden} onEditarTarea={onEditarTarea} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
         )}
       </div>
       {!readOnly && (agregando ? (
@@ -16807,7 +16808,10 @@ function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, 
   );
 }
 
-function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTarea, onTogglePin, onSetCompania }) {
+// React.memo: en el Kanban, cuando App re-renderiza por algo ajeno a la tarjeta, las
+// que no cambiaron no se re-renderean. Efectivo porque los handlers (onEditarTarea=
+// setTareaEditando, onDropTarea/onTogglePin/onSetCompania en useCallback) son estables.
+const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onEditarTarea, onDropTarea, onTogglePin, onSetCompania }) {
   // Popover de compañías (solo desktop, via click derecho onContextMenu).
   // En mobile no se habilita por ahora — el long-press está reservado para drag.
   const [companiaPicker, setCompaniaPicker] = useState(null); // {x, y} o null
@@ -16908,7 +16912,7 @@ function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTar
       const onUpWait = () => {
         // Soltó antes del long-press = tap → abrir editor.
         clearTouchPending();
-        onClick();
+        onEditarTarea(tarea);
       };
       document.addEventListener('pointermove', onMoveWait);
       document.addEventListener('pointerup', onUpWait);
@@ -17002,7 +17006,7 @@ function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTar
       setDragging(false);
     } else if (commit && !armed) {
       // Mouse sin drag = click. (Touch sin drag ya se manejó en onUpWait.)
-      onClick();
+      onEditarTarea(tarea);
     }
     document.body.classList.remove('kanban-dragging');
     setArmed(false);
@@ -17033,7 +17037,7 @@ function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTar
       onContextMenu={onContextMenu}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onEditarTarea(tarea); } }}
     >
       {!readOnly && onTogglePin && (
         <button
@@ -17095,7 +17099,7 @@ function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onClick, onDropTar
       )}
     </div>
   );
-}
+});
 
 // Badge con el logo de la compañía en la esquina sup. derecha de la card.
 // Para "patrimonial" no hay logo: renderizamos texto con tipografía IFS.
