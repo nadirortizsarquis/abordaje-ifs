@@ -3481,6 +3481,9 @@
     .bell-btn { width: 36px; height: 36px; }
 
     .main { padding: 20px 16px; }
+    /* En mobile la línea del footer rompe el padding de .main (16px) para
+       llegar de punta a punta del tablero; el texto sigue centrado. */
+    .app-footer-line { margin-left: -16px; margin-right: -16px; border-radius: 0; }
     /* En mobile, la tabla de prospectos se convierte en lista de cards
        verticales: cada fila ocupa el ancho completo, sin scroll horizontal,
        y los datos se apilan dentro de la card. Esto reemplaza el approach
