@@ -7444,15 +7444,25 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const handleRequestDeleteAgenda = (agenda, agendaId, gcalCalendarId) => {
     if (guardReadOnly()) return;
     const ev = agenda?.googleEvent || null;
-    const isRecurring = !!(ev?.recurringEventId || (ev?.recurrence && ev.recurrence.length > 0));
-    setPendingDeleteAgenda({ agendaId, gcalCalendarId, isRecurring });
+    // recurringEventId = el ID del evento MAESTRO de la serie (Google lo expone en
+    // cada instancia porque list usa singleEvents=true). Con él borramos la serie
+    // entera; con agendaId (el ID de la instancia) borramos solo esta fecha.
+    const recurringEventId = ev?.recurringEventId || null;
+    const isRecurring = !!(recurringEventId || (ev?.recurrence && ev.recurrence.length > 0));
+    setPendingDeleteAgenda({ agendaId, gcalCalendarId, isRecurring, recurringEventId });
   };
 
-  const handleConfirmDeleteAgenda = async () => {
+  // scope: 'instance' (solo esta fecha) | 'series' (toda la serie). Para agendas
+  // no recurrentes siempre llega 'instance'.
+  const handleConfirmDeleteAgenda = async (scope) => {
     const req = pendingDeleteAgenda;
     setPendingDeleteAgenda(null);
     if (!req) return;
-    const { agendaId, gcalCalendarId } = req;
+    const { agendaId, gcalCalendarId, recurringEventId } = req;
+    const borrarSerie = scope === 'series' && !!recurringEventId;
+    // Serie → borramos el maestro (recurringEventId): la edge hace DELETE completo.
+    // Instancia → borramos agendaId: la edge cancela solo esa ocurrencia.
+    const gcalTargetId = borrarSerie ? recurringEventId : agendaId;
     // UI optimista: cerramos modal y mostramos toast al toque. El delete real
     // va en background. En non-piloto guardamos el snapshot por si hay rollback.
     const prevAgendados = state.agendados;
@@ -7460,12 +7470,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       setState(s => ({ ...s, agendados: s.agendados.filter(a => a.id !== agendaId) }));
     }
     setAgendaEditando(null);
-    showToast('Agenda eliminada');
+    showToast(borrarSerie ? 'Serie eliminada' : 'Agenda eliminada');
 
     (async () => {
       try {
         if (isPilot) {
-          await gcalApi.delete(agendaId, gcalCalendarId);
+          await gcalApi.delete(gcalTargetId, gcalCalendarId);
           bumpGcal();
           await storage.deleteMeetingBySourceRef(`gcal:${agendaId}`);
         } else {
@@ -17976,22 +17986,24 @@ function AddColumnaModal({ onCancel, onConfirm }) {
 }
 
 // ── MODAL: CONFIRMAR ELIMINAR AGENDA ──────────────────────────
-// Reemplaza el confirm() nativo. Si la agenda es parte de una serie
-// recurrente de Google Calendar, avisa al user que se borra TODA la serie
-// (el backend gcal-events actual no diferencia "esta sola" vs "todas").
+// Reemplaza el confirm() nativo. Si la agenda es parte de una serie recurrente
+// de Google Calendar, ofrece elegir: borrar solo esta fecha (la edge cancela la
+// instancia) o toda la serie (la edge borra el evento maestro). onConfirm recibe
+// el scope: 'instance' | 'series'.
 function ConfirmDeleteAgendaModal({ isRecurring, onCancel, onConfirm }) {
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape') onCancel();
-      if (e.key === 'Enter') onConfirm();
+      // Enter confirma solo cuando NO es recurrente (ahí hay una sola acción).
+      if (e.key === 'Enter' && !isRecurring) onConfirm('instance');
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onCancel, onConfirm]);
+  }, [onCancel, onConfirm, isRecurring]);
 
   return (
     <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}>
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-agenda-title" style={{ maxWidth: 440 }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-del-agenda-title" style={{ maxWidth: 460 }}>
         <div className="modal-header">
           <h3 id="confirm-del-agenda-title">Eliminar agenda</h3>
           <button className="modal-close" onClick={onCancel} aria-label="Cerrar">×</button>
@@ -18000,10 +18012,11 @@ function ConfirmDeleteAgendaModal({ isRecurring, onCancel, onConfirm }) {
           {isRecurring ? (
             <>
               <p style={{ fontSize: '0.92rem', color: 'var(--texto)', margin: '4px 0 10px', lineHeight: 1.5 }}>
-                Esta agenda forma parte de una <strong>serie recurrente</strong>.
+                Esta agenda forma parte de una <strong>serie recurrente</strong> (se repite en varias fechas). ¿Qué querés borrar?
               </p>
-              <div className="help-callout danger" style={{ fontSize: '0.84rem' }}>
-                <strong>Atención:</strong> al confirmar se borra <strong>toda la serie</strong> del Google Calendar, no solo esta instancia.
+              <div className="help-callout" style={{ fontSize: '0.84rem', lineHeight: 1.6 }}>
+                <strong>Solo esta fecha:</strong> borra únicamente esta reunión; el resto de la serie sigue.<br />
+                <strong>Toda la serie:</strong> borra todas las repeticiones del Google Calendar.
               </div>
             </>
           ) : (
@@ -18014,7 +18027,14 @@ function ConfirmDeleteAgendaModal({ isRecurring, onCancel, onConfirm }) {
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onCancel}>Cancelar</button>
-          <button className="btn-danger" onClick={onConfirm} autoFocus>Eliminar</button>
+          {isRecurring ? (
+            <>
+              <button className="btn-secondary" onClick={() => onConfirm('instance')}>Borrar solo esta fecha</button>
+              <button className="btn-danger" onClick={() => onConfirm('series')}>Borrar toda la serie</button>
+            </>
+          ) : (
+            <button className="btn-danger" onClick={() => onConfirm('instance')} autoFocus>Eliminar</button>
+          )}
         </div>
       </div>
     </div>
