@@ -222,8 +222,11 @@ agente/admin/asistente.
   (`delete-user`). Mover a variable de entorno o tabla `app_settings`.
 - `GCAL_TZ` hardcodeado a Buenos Aires (cuando IFS opere internacional,
   extraer a setting por user).
-- `handleDeleteAgenda` para recurrentes: ofrecer "esta instancia" vs "toda
-  la serie" (hoy borra toda la serie, avisa con modal pero no diferencia).
+- ✓ `handleDeleteAgenda` recurrentes: RESUELTO (2026-08-31). El modal ofrece
+  "solo esta fecha" (borra el ID de la instancia → la edge cancela la ocurrencia)
+  vs "toda la serie" (borra el `recurringEventId` maestro → DELETE completo).
+  Client-only, sin tocar la edge (que ya cancelaba la instancia; el modal viejo
+  avisaba mal que borraba toda la serie).
 - Optional: habilitar Leaked Password Protection en Supabase Auth (1 click).
 
 **No urgente / descartado**:
