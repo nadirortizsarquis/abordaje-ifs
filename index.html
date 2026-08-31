@@ -16472,6 +16472,18 @@ function ErroresSection() {
     finally { setBusy(false); }
   };
 
+  const borrarUno = async (id) => {
+    if (!window.confirm('Borrar este registro de error?')) return;
+    setBusy(true); setError(null);
+    try {
+      const { error } = await sb.from('abordaje_client_errors').delete().eq('id', id);
+      if (error) throw error;
+      setOpenId(null);
+      setRows(prev => (prev || []).filter(x => x.id !== id));   // saca la fila sin recargar todo
+    } catch (e) { setError(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
   const wrap = { marginTop: 22, padding: '18px 20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14 };
   const selSty = { ...adminInpStyle, width: 'auto', cursor: 'pointer', padding: '6px 8px', fontSize: 12 };
   const th = { textAlign: 'left', padding: '7px 10px', fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' };
@@ -16539,6 +16551,12 @@ function ErroresSection() {
                                 ? <pre style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: '#374151', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.stack}</pre>
                                 : <div style={{ fontSize: 12, color: '#9ca3af' }}>Sin stack.</div>}
                               {r.user_agent && <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 6, wordBreak: 'break-all' }}>{r.user_agent}</div>}
+                              <div style={{ marginTop: 10, textAlign: 'right' }}>
+                                <button onClick={(e) => { e.stopPropagation(); borrarUno(r.id); }} disabled={busy}
+                                  style={{ border: '1px solid #fecaca', background: '#fff', color: '#b91c1c', borderRadius: 8, padding: '5px 12px', fontSize: 11.5, fontWeight: 700, cursor: 'pointer' }}>
+                                  Borrar este registro
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         )}
