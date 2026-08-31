@@ -3687,7 +3687,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-06-23';
+const APP_VERSION = '2026-08-31';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -18780,6 +18780,7 @@ class ErrorBoundary extends React.Component {
   static getDerivedStateFromError(error) { return { error }; }
   componentDidCatch(error, info) {
     console.error('ErrorBoundary capturó:', error, info);
+    try { logClientError('boundary', error, info && info.componentStack); } catch (e) {}
     try { showToast('Ocurrió un error en la aplicación', { duration: 4000, dismissible: true }); } catch (e) {}
   }
   render() {
@@ -18895,14 +18896,57 @@ function AppShell() {
   );
 }
 
+// Error tracking en producción: registra cada error de runtime en
+// `abordaje_client_errors` (Supabase) para tener visibilidad de lo que rompe en la
+// cancha. Fire-and-forget y best-effort — si el logging falla, se traga el error
+// (nunca debe generar un segundo error). Guarda anti-recursión, dedup por
+// fingerprint y tope por carga para no inundar la tabla ante un loop.
+let _errLogging = false;
+let _errLogCount = 0;
+const _errSeen = new Set();
+const ERR_LOG_MAX = 30;   // tope de errores logueados por carga de página
+async function logClientError(source, err, extra) {
+  if (_errLogging || _errLogCount >= ERR_LOG_MAX) return;
+  try {
+    const message = String((err && (err.message || err.reason)) || err || 'error desconocido').slice(0, 2000);
+    let stack = '';
+    if (err && err.stack) stack = String(err.stack);
+    else if (extra) stack = String(extra);
+    stack = stack.slice(0, 6000);
+    const fp = source + '|' + message + '|' + stack.split('\n')[0];
+    if (_errSeen.has(fp)) return;   // ya lo registramos este load
+    _errSeen.add(fp);
+    _errLogging = true;
+    _errLogCount++;
+    let email = null, uid = null;
+    try {
+      const { data } = await sb.auth.getSession();   // lee de localStorage, sin red
+      email = data?.session?.user?.email || null;
+      uid = data?.session?.user?.id || null;
+    } catch (_) {}
+    await sb.from('abordaje_client_errors').insert({
+      user_id: uid, email, app_version: APP_VERSION, source,
+      message, stack: stack || null,
+      url: (typeof location !== 'undefined' ? location.href : null),
+      user_agent: (typeof navigator !== 'undefined' ? navigator.userAgent : null),
+    });
+  } catch (_) {
+    // best-effort: nunca propagar un fallo del logger
+  } finally {
+    _errLogging = false;
+  }
+}
+
 // Errores fuera del árbol React (promesas colgadas, handlers async, libs) no los
 // atrapa el ErrorBoundary: los canalizamos a un toast en vez de que mueran silenciosos.
 window.addEventListener('error', (e) => {
   console.error('window.onerror:', e.error || e.message);
+  try { logClientError('window', e.error || e.message); } catch (_) {}
   try { showToast('Ocurrió un error inesperado', { duration: 3500, dismissible: true }); } catch (_) {}
 });
 window.addEventListener('unhandledrejection', (e) => {
   console.error('unhandledrejection:', e.reason);
+  try { logClientError('promise', e.reason); } catch (_) {}
   try { showToast('Ocurrió un error de red o datos', { duration: 3500, dismissible: true }); } catch (_) {}
 });
 

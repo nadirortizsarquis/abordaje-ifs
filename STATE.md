@@ -154,6 +154,13 @@ Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
   evento origen; helpers `can_see_meeting`/`is_meeting_creator`/`is_meeting_invitee`)
 - ~~`calendar_sync_watches`~~ (dropeada 2026-05-21, era legacy del refactor
   viejo y no se usaba en ninguna parte)
+- `abordaje_client_errors` (`20260831120000`) — error tracking en producción:
+  cada error de runtime (ErrorBoundary, `window.error`, `unhandledrejection`) se
+  registra vía `logClientError` (fire-and-forget, dedup + tope anti-flood).
+  Columnas: user_id/email/app_version/source/message/stack/url/user_agent. RLS:
+  INSERT abierto (anon+authenticated, el logging debe andar con sesión rota o en
+  login), SELECT/DELETE solo admin. Leerlos: `select ... from
+  abordaje_client_errors order by created_at desc` (por SQL/MCP; falta UI admin).
 
 Todas (excepto `user_google_tokens`) tienen RLS con policies
 agente/admin/asistente.
@@ -244,9 +251,10 @@ agente/admin/asistente.
   - `npm run smoke` — monta la app real en jsdom + React; atrapa
     ReferenceErrors de runtime (hooks fuera de orden, `state` usado antes de
     declararse, etc.) que el check no ve.
-  - `npm run test` — `scripts/test.mjs`, 34 tests de invariantes sobre las
-    funciones puras (parseFechaLocal, deriveEstado, normDoc, dedup,
-    decidirSeguimiento, appendBitacora, combinarFechaHora, etc.).
+  - `npm run test` — `scripts/test.mjs`, 44 tests de invariantes sobre las
+    funciones puras (parseFechaLocal, deriveEstado con backtracking multinivel,
+    normDoc, dedup, decidirSeguimiento con todos los tipos, appendBitacora,
+    combinarFechaHora, etc.) — el núcleo de decisión del motor de sync.
   Hook local `.git/hooks/pre-push` corre `check && smoke && test` automático (el
   hook no se versiona: reinstalar con `printf '#!/bin/sh\nnpm run verify\n' >
   .git/hooks/pre-push && chmod +x .git/hooks/pre-push`).

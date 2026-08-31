@@ -250,6 +250,68 @@ test('extraerUltimaLineaBitacora: vacío -> null', () => {
   assert.equal(g('extraerUltimaLineaBitacora')(''), null);
 });
 
+// ── Motor de sync: núcleo de decisión (backtracking + qué artefacto genera) ──
+// Es la pieza donde vivieron TODOS los bugs históricos (TZ, race conditions,
+// borrado en Google, estado pegado). Cubrimos el cerebro puro que decide.
+const F = '2026-09-01T10:00:00';   // una fecha objetivo cualquiera
+
+test('deriveEstado: backtrack multinivel salta 2 trailing sin fecha', () => {
+  // el último con fecha es llamar_manana (estado pendiente); los dos de atrás
+  // son agendado/recordatorio SIN fecha (citas canceladas desde el calendar).
+  const p = { contactos: [
+    { tipo: 'llamar_manana', agendadoPara: F },
+    { tipo: 'agendado',      agendadoPara: null },
+    { tipo: 'recordatorio',  agendadoPara: null },
+  ] };
+  assert.equal(g('deriveEstado')(p), 'pendiente');
+});
+test('deriveEstado: agendado sin fecha con fecha_exacta previa -> programado', () => {
+  const p = { contactos: [
+    { tipo: 'fecha_exacta', agendadoPara: F },
+    { tipo: 'agendado',     agendadoPara: null },
+  ] };
+  assert.equal(g('deriveEstado')(p), 'programado');
+});
+test('deriveEstado: todos agendado/recordatorio sin fecha -> nuevo', () => {
+  const p = { contactos: [
+    { tipo: 'recordatorio', agendadoPara: null },
+    { tipo: 'agendado',     agendadoPara: null },
+  ] };
+  assert.equal(g('deriveEstado')(p), 'nuevo');
+});
+test('deriveEstado: recordatorio CON fecha al final -> programado', () => {
+  const p = { contactos: [{ tipo: 'recordatorio', agendadoPara: F }] };
+  assert.equal(g('deriveEstado')(p), 'programado');
+});
+test('deriveEstado: rechazado NO se retrocede aunque haya agendado previo', () => {
+  const p = { contactos: [
+    { tipo: 'agendado',  agendadoPara: F },
+    { tipo: 'rechazado', agendadoPara: null },
+  ] };
+  assert.equal(g('deriveEstado')(p), 'rechazado');
+});
+
+test('decidirSeguimiento: fecha_exacta con fecha -> tarea', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'fecha_exacta', agendadoPara: F }), 'tarea');
+});
+test('decidirSeguimiento: contestador con fecha -> tarea (cualquier no-agendado)', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'contestador', agendadoPara: F }), 'tarea');
+});
+test('decidirSeguimiento: agendado SIN fecha -> nada (sin fecha no genera cita)', () => {
+  assert.equal(g('decidirSeguimiento')({ tipo: 'agendado', agendadoPara: null }), 'nada');
+});
+
+test('buildObsTarea: tipo desconocido (config null) -> solo la observación', () => {
+  assert.equal(g('buildObsTarea')('tipo_inexistente', 'Insistir'), 'Insistir');
+});
+test('pickColumnaAbordar: abordar gana aunque tenga orden mayor', () => {
+  const cols = [
+    { slug: 'otra',     orden: 0 },
+    { slug: 'abordar',  orden: 5 },
+  ];
+  assert.equal(g('pickColumnaAbordar')(cols).slug, 'abordar');
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
