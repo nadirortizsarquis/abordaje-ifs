@@ -1,11 +1,15 @@
 # Planificador de Abordaje IFS — Estado actual
 
-Estado vigente al 2026-08-21. Para la historia completa del proyecto y las
+Estado vigente al 2026-08-31. Para la historia completa del proyecto y las
 fases de migración ver `CHANGELOG.md`.
 
 ## Stack
-- **Frontend**: single-file `index.html` con React 18 (CDN) + Babel
-  standalone. Sin build (solo `npm run build` copia el HTML a `public/`).
+- **Frontend**: single-file `index.html` con React 18 + Babel standalone.
+  El `npm run build` precompila el JSX y sirve `public/index.html` sin Babel.
+- **Libs vendorizadas (2026-08)**: React, ReactDOM, supabase-js, XLSX y jsPDF
+  se sirven self-hosted desde `/vendor/` (archivos en `static/vendor/`, copiados
+  a `public/vendor/` por el build), NO desde CDN. Elimina el riesgo de
+  supply-chain y de caída de CDN. El build aborta si falta algún vendor.
 - **Backend**: Supabase (Postgres + RLS + Edge Functions + Auth).
 - **Calendar**: Google Calendar como fuente única para users que activan
   `gcal_enabled`. Domain-Wide Delegation para `@ifs-broker.com`, OAuth
@@ -65,6 +69,18 @@ fases de migración ver `CHANGELOG.md`.
   indigo. Aceptar/rechazar en el detalle; badge (N) en la solapa; al aceptar
   aparece en el calendario normal (render-only, sin duplicar el ocupado).
   Modal de tarea reestilado (más ancho + secciones tipo ficha de prospecto).
+  - **"Mostrar mi agenda" (2026-08-31).** Check en el calendario compartido que
+    superpone TUS propios eventos (con info, en gris) sobre la grilla de
+    ocupados anónimos — solo en tu vista. Op `my_agenda` en `shared-calendar`.
+- **Convertir prospecto en tarjeta (2026-08-31).** Botón en la ficha del
+  prospecto que crea una tarjeta Kanban conservando el historial de abordaje
+  (snapshot en la nota + link blando `abordaje_tareas.prospecto_ref_id`, que el
+  sync NO toca — la tarjeta nunca se pisa). Migración `20260826120000`.
+- **Calendario de pagos: pólizas inactivas (2026-08-31).** Las pólizas Lapsed /
+  Cancelled / Rejected / etc. se muestran atenuadas y tachadas (`CALPAGO_LAPSED`,
+  set `CALPAGO_INACTIVA_ESTADOS`) para distinguirlas de las vigentes.
+- **Footer de punta a punta en mobile (2026-08-31).** La línea del footer rompe
+  el padding lateral de `.main` en mobile para tocar los bordes del tablero.
 - **Integración con el CRM de Bruno (2026-08, EN PRODUCCIÓN).** Botón "Convertir
   a cliente CRM" (`CrmVinculoLanzador`) en prospecto/tarea/agenda/cita: busca por
   DNI, vincula o crea el cliente, y vuelca la gestión a su bitácora. Typeahead
@@ -91,16 +107,16 @@ detalle en `supabase/README.md`.
 
 | Función | Versión | Propósito |
 |---|---|---|
-| `gcal-events` | v12 | Calendar de Google (list/create/update/delete/listCalendars/unlink). Soporta DWD, OAuth user-level y modo asistente. |
-| `gcal-events-admin` | v2 | Acceso admin al calendar de cualquier user (auth por service-role, sin JWT). Para MCP/Claude. |
-| `gcal-oauth-init` | v2 | Inicia flujo OAuth para gmail externos. Firma state con HMAC. |
-| `gcal-oauth-callback` | v2 | Recibe code de Google, guarda refresh_token, redirige a la app. |
-| `create-user` | v10 | Alta de usuarios (admin). |
-| `delete-user` | v8 | Baja de usuarios (megaadmin only). |
-| `update-user-email` | v6 | Cambio de email (admin). Guard: solo el megaadmin puede cambiar el email de otro admin. |
-| `update-user-password` | v8 | Cambio de password (admin). Guard: solo el megaadmin puede cambiar el password de otro admin. |
-| `shared-calendar` | v2 | Calendario compartido. Ops `owners` / `busy` (ocupados anonimizados, sin título) / `meeting_people` (nombres de participantes). Exige `compartir_calendario` ON. |
-| `crm-sync` | v7 | Integración con el CRM de Bruno. Ops search/lookup/create/sync (bitácora de clientes). Gating server-side por `advisors.crm_sync_enabled`. |
+| `gcal-events` | v14 | Calendar de Google (list/create/update/delete/listCalendars/unlink). Soporta DWD, OAuth user-level y modo asistente. |
+| `gcal-events-admin` | v5 | Acceso admin al calendar de cualquier user (auth por service-role, sin JWT — `verify_jwt=false`, crítico, no tocar). `timingSafeEqualStr` para el shared-secret. Para MCP/Claude. |
+| `gcal-oauth-init` | v4 | Inicia flujo OAuth para gmail externos. Firma state con HMAC. |
+| `gcal-oauth-callback` | v4 | Recibe code de Google, guarda refresh_token, redirige a la app. |
+| `create-user` | v12 | Alta de usuarios (admin). |
+| `delete-user` | v10 | Baja de usuarios (megaadmin only). |
+| `update-user-email` | v8 | Cambio de email (admin). Guard: solo el megaadmin puede cambiar el email de otro admin. |
+| `update-user-password` | v10 | Cambio de password (admin). Guard: solo el megaadmin puede cambiar el password de otro admin. |
+| `shared-calendar` | v4 | Calendario compartido. Ops `owners` / `busy` (ocupados anonimizados, sin título) / `meeting_people` (nombres de participantes, minimizado) / `my_agenda` (eventos propios para "Mostrar mi agenda"). Exige `compartir_calendario` ON. |
+| `crm-sync` | v13 | Integración con el CRM de Bruno. Ops search/lookup/create/sync. `normDoc` + dedup (409 `duplicate_document`), link fail-closed, `verify_advisor`. Gating server-side por `advisors.crm_sync_enabled`. |
 
 Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 
@@ -114,6 +130,12 @@ Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
   service_role la toca, los refresh_tokens viven aislados.
 - `private.is_admin()` y `private.is_assistant_of(target_id)` son
   helpers SECURITY DEFINER.
+- **Hardening 2026-08** (migración `20260825120000`): `WITH CHECK` en las
+  policies UPDATE que faltaban + trigger `meeting_invite_immutable` (un invitado
+  solo puede tocar su propio `status`, no reasignarse el invite). Auditoría
+  integral de 2026-08 (61 hallazgos en `docs/AUDITORIA_2026-08.json`): críticos y
+  bordes resueltos y deployados; quedan diferidos por decisión #34 (CORS
+  allowlist, no es vuln — el JWT mitiga) y #39 (paginación, mejora a futuro).
 
 ## Estructura de tablas (lado Abordaje)
 - `profiles` — perfil de usuario
@@ -121,7 +143,8 @@ Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
 - `abordaje_prospectos`
 - `abordaje_prospecto_contactos` (historial de gestiones)
 - `abordaje_tareas` + `abordaje_tareas_columnas` (`actor_id`/`updated_at`
-  agregados 2026-05-21)
+  agregados 2026-05-21; `prospecto_ref_id` agregado 2026-08-26 — link blando de
+  "convertir prospecto en tarjeta", `ON DELETE SET NULL`, el sync NO lo toca)
 - `abordaje_agendados` (legacy, solo non-piloto)
 - `abordaje_event_colors` (overrides visuales del calendar)
 - `abordaje_calendar_shares` (matriz owner→viewer del calendario compartido)
@@ -167,20 +190,20 @@ agente/admin/asistente.
   `actorMap` lazy load.
 
 **Backlog BAJA prioridad** (refactors sin cambio funcional, no urgentes):
-- **Refactor de `App` en custom hooks — EN CURSO, incremental (2026-06-16).**
-  Ya extraídos y en producción: `useSettings` (ajustes + colores por calendar)
-  y `useNotificaciones` (campanita: tick 60s, dismisses, lista). Salieron
-  limpios porque su estado no lo tocaba nadie más. **Pendiente: `useGcalSync`**
-  — agruparía toda la lógica de Google Calendar (handleToggleGcal/LinkOAuth/
-  UnlinkOAuth/ToggleShareCal, `sincronizarSeguimiento` + `_syncSeguimientoBody`
-  con `syncLocksRef`, `bumpGcal`/`gcalReloadKey`, `gcalActorIds`,
-  handleSetEventColor). Es el bloque más cohesivo pero también el MÁS sensible
-  (ahí vivieron todos los bugs de TZ / race conditions / borrado en Google) y
-  sigue necesitando state/setState/isPilot/principalProfile como entradas.
-  **Hacer en sesión dedicada, en local, con prueba exhaustiva del flujo de
-  calendario antes de pushear** (Nadir avisa cuándo). Los handlers de
-  prospectos y tareas NO se extraen a hooks: comparten state/setState y
-  `sincronizarSeguimiento`, así que separarlos no desacopla nada real.
+- ✓ **Refactor de `App` en custom hooks (#32) — HECHO (2026-08-31).** Se hizo en
+  branch aparte (`refactor-32`, 11 pasos, cada uno con check+smoke+34 tests),
+  se probó a mano en local (`localhost:3100`) y recién ahí se mergeó a
+  producción. Extraídos a nivel módulo: `useSeguimientoEngine` (el motor de
+  sync con `syncLocksRef`, `_runLockedProspecto`, `sincronizarSeguimiento`),
+  `useContactoHandlers`, `useColumnas`, `useTareaBoardHandlers`, `useCalPagoUI`,
+  más funciones puras testeables (`decidirSeguimiento`, `pickColumnaAbordar`,
+  `buildObsTarea`, `appendBitacora`, `combinarFechaHora`, `deriveProximoContacto`,
+  `extraerUltimaLineaBitacora`). `FilaProspecto` y `TareaCard` envueltos en
+  `React.memo` con handlers estabilizados (`useCallback`). Cap de render de 500
+  filas + "Mostrar más" en la lista de prospectos. `scripts/test.mjs` creció de
+  9 a 34 tests de invariantes. Ya en producción, verificado en vivo.
+  Anteriores (2026-06-16), también en producción: `useSettings` y
+  `useNotificaciones`.
 - `UsuariosSection` ~385 líneas: split candidato en `UsuariosTable` +
   `NuevoUsuarioForm` + `UsuarioRow`. Idem.
 - Labels en inputs de forms (40 inputs con `<label>Texto</label><input/>`
@@ -206,18 +229,26 @@ agente/admin/asistente.
   single-file editable y funciona sin build (conserva su script de Babel);
   lo que se sirve es el artefacto precompilado. Para probar local:
   `npm run build && npm start` (rebuildear tras cada edición).
-- **CDNs pineados a versión exacta** en index.html (React 18.3.1, Babel
-  standalone 7.29.7, supabase-js 2.108.1). Un release nuevo de esas libs ya
-  no puede romper producción solo; para actualizar, cambiar la versión a
-  mano y probar.
+- **Libs self-hosted en `/vendor/`** (2026-08): React 18.3.1, ReactDOM,
+  supabase-js, XLSX, jsPDF ya no vienen de CDN sino de `static/vendor/`. Ni un
+  release nuevo ni una caída de CDN pueden romper producción. Para actualizar:
+  reemplazar el archivo en `static/vendor/` y probar. Babel standalone solo se
+  usa en el index.html editable (el artefacto servido ya viene precompilado).
 - **`APP_VERSION`** (constante en index.html, visible en el footer del
   login). Bumpear en cada deploy — sirve para saber qué versión ve un user.
 - **Cache**: `serve.json` manda `Cache-Control: no-cache` para index.html →
   el browser revalida en cada carga y los deploys impactan al instante.
-- **Smoke test**: `npm run check` compila el bloque JSX con el mismo Babel
-  del browser; atrapa errores de sintaxis (pantalla blanca) antes de
-  pushear. Hook local `.git/hooks/pre-push` lo corre automático (el hook
-  no se versiona: reinstalar con `printf '#!/bin/sh\nnpm run check\n' >
+- **Validación pre-deploy — `npm run verify`** (corre las tres):
+  - `npm run check` — compila el JSX con el mismo Babel del browser; atrapa
+    errores de sintaxis (pantalla blanca).
+  - `npm run smoke` — monta la app real en jsdom + React; atrapa
+    ReferenceErrors de runtime (hooks fuera de orden, `state` usado antes de
+    declararse, etc.) que el check no ve.
+  - `npm run test` — `scripts/test.mjs`, 34 tests de invariantes sobre las
+    funciones puras (parseFechaLocal, deriveEstado, normDoc, dedup,
+    decidirSeguimiento, appendBitacora, combinarFechaHora, etc.).
+  Hook local `.git/hooks/pre-push` corre `check && smoke && test` automático (el
+  hook no se versiona: reinstalar con `printf '#!/bin/sh\nnpm run verify\n' >
   .git/hooks/pre-push && chmod +x .git/hooks/pre-push`).
 - **Rollback si un push rompe producción**: `git revert HEAD && git push`
   (o en Railway: Deployments → redeploy del deploy anterior).
