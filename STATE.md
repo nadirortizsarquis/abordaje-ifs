@@ -159,8 +159,9 @@ Las 4 funciones de gestión de usuarios comparten `_shared/admin-auth.ts`.
   registra vía `logClientError` (fire-and-forget, dedup + tope anti-flood).
   Columnas: user_id/email/app_version/source/message/stack/url/user_agent. RLS:
   INSERT abierto (anon+authenticated, el logging debe andar con sesión rota o en
-  login), SELECT/DELETE solo admin. Leerlos: `select ... from
-  abordaje_client_errors order by created_at desc` (por SQL/MCP; falta UI admin).
+  login), SELECT/DELETE solo admin. Se ven en Ajustes → solapa admin **Errores**
+  (`ErroresSection`): tabla read-only con filtros usuario/versión/texto, chip de
+  origen, stack expandible por fila y botón "Limpiar +30 días".
 
 Todas (excepto `user_google_tokens`) tienen RLS con policies
 agente/admin/asistente.
