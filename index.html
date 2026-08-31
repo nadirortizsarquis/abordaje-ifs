@@ -12440,7 +12440,9 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
   const [ciaF, setCiaF] = useState({}); // filtro por compañía; sin clave = mostrado
 
   useEffect(() => {
-    if (!effIds.length) { setRows([]); setLoading(false); return; }
+    // Sin asesores seleccionados: limpiar TODO (antes solo rows → los pagos manuales
+    // y el pagoMap quedaban stales y "IFS" seguía visible con el filtro vacío).
+    if (!effIds.length) { setRows([]); setManuales([]); setPagoMap({}); setLoading(false); return; }
     let cancel = false;
     setLoading(true); setErr(null); setSelDay(null);
     Promise.all([
