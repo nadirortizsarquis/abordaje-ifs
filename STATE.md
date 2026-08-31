@@ -42,7 +42,9 @@ fases de migración ver `CHANGELOG.md`.
   agenda, reordenar columna, agregar columna).
 - Footer sticky en todos los modales (Guardar/Cancelar siempre visibles).
 - Compañía por tarea: click derecho en card del Kanban asigna aseguradora,
-  logo en la esquina de la card (solo desktop; mobile pendiente).
+  logo en la esquina de la card. El LOGO se ve en mobile también; ASIGNAR la
+  compañía es solo desktop (click derecho) por decisión — no se complica el
+  mobile con eso (Nadir, ago 2026). No es un pendiente.
 - Pestañas Lista/Tareas/Calendario sticky bajo el header al scrollear.
 - Solapa "Archivo" en Lista: archivar prospects sin perder info.
 - Admin: panel de pagos de mantenimiento mes × agente con export PDF;
