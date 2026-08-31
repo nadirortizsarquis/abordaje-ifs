@@ -16428,6 +16428,133 @@ function DemoUserToggle() {
   );
 }
 
+// Solapa admin "Errores": lee abordaje_client_errors (los registra logClientError
+// en producción) para ver qué rompe en la cancha sin depender de SQL. Read-only +
+// filtros client-side + limpieza de viejos. RLS deja leer/borrar solo a admin.
+function ErroresSection() {
+  const [rows, setRows]       = useState(null);   // null = cargando
+  const [error, setError]     = useState(null);
+  const [fUser, setFUser]     = useState('');
+  const [fVer, setFVer]       = useState('');
+  const [fText, setFText]     = useState('');
+  const [openId, setOpenId]   = useState(null);
+  const [busy, setBusy]       = useState(false);
+
+  const load = () => {
+    setRows(null); setError(null);
+    return sb.from('abordaje_client_errors').select('*').order('created_at', { ascending: false }).limit(300)
+      .then(({ data, error }) => { if (error) { setError(error.message); setRows([]); } else setRows(data || []); });
+  };
+  useEffect(() => { load(); }, []);
+
+  const fmt = (iso) => { try { return new Date(iso).toLocaleString('es-AR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch (_) { return iso; } };
+  const SRC = { boundary: { t: 'Vista React', c: '#7c3aed', bg: '#ede9fe' }, window: { t: 'Error suelto', c: '#b45309', bg: '#fef3c7' }, promise: { t: 'Red / promesa', c: '#0e7490', bg: '#cffafe' } };
+
+  const all = rows || [];
+  const usuarios = [...new Set(all.map(r => r.email).filter(Boolean))].sort();
+  const versiones = [...new Set(all.map(r => r.app_version).filter(Boolean))].sort().reverse();
+  const q = fText.trim().toLowerCase();
+  const shown = all.filter(r =>
+    (!fUser || r.email === fUser) &&
+    (!fVer  || r.app_version === fVer) &&
+    (!q || (r.message || '').toLowerCase().includes(q) || (r.stack || '').toLowerCase().includes(q))
+  );
+
+  const limpiarViejos = async () => {
+    if (!window.confirm('Borrar todos los errores de más de 30 días?\n\nEs solo el registro de diagnóstico — no afecta ningún dato de la app.')) return;
+    setBusy(true);
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString();
+    try {
+      const { error } = await sb.from('abordaje_client_errors').delete().lt('created_at', cutoff);
+      if (error) throw error;
+      await load();
+    } catch (e) { setError(e.message || String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const wrap = { marginTop: 22, padding: '18px 20px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 14 };
+  const selSty = { ...adminInpStyle, width: 'auto', cursor: 'pointer', padding: '6px 8px', fontSize: 12 };
+  const th = { textAlign: 'left', padding: '7px 10px', fontSize: 10, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' };
+  const td = { padding: '8px 10px', fontSize: 12.5, color: '#1f2937', verticalAlign: 'top', borderTop: '1px solid #f3f4f6' };
+
+  return (
+    <section style={adminSectionStyle}>
+      <h3 style={adminSectionTitleStyle}>Errores en producción</h3>
+      <p style={adminSectionDescStyle}>
+        Cada error de runtime que ocurre en la app queda registrado acá (visible solo para admins). Sirve para ver qué le pasó a un asesor sin tener que reproducirlo. Es diagnóstico técnico, no expone datos de clientes.
+      </p>
+
+      <div style={{ ...wrap }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          <select value={fUser} onChange={e => setFUser(e.target.value)} style={selSty}>
+            <option value="">Todos los usuarios</option>
+            {usuarios.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+          <select value={fVer} onChange={e => setFVer(e.target.value)} style={selSty}>
+            <option value="">Todas las versiones</option>
+            {versiones.map(v => <option key={v} value={v}>v{v}</option>)}
+          </select>
+          <input value={fText} onChange={e => setFText(e.target.value)} placeholder="Buscar en el mensaje…"
+            style={{ ...adminInpStyle, flex: '1 1 180px', minWidth: 140, padding: '6px 10px', fontSize: 12 }} />
+          <button onClick={load} disabled={busy} style={{ ...adminBtnGhost, padding: '6px 12px', fontSize: 12 }}>Refrescar</button>
+          <button onClick={limpiarViejos} disabled={busy || !all.length} style={{ ...adminBtnGhost, padding: '6px 12px', fontSize: 12 }}>Limpiar +30 días</button>
+        </div>
+
+        {error && <div style={{ color: '#b91c1c', fontSize: 12, marginBottom: 10 }}>Error al cargar: {error}</div>}
+
+        {rows === null ? (
+          <div style={{ padding: '28px 0', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Cargando…</div>
+        ) : !all.length ? (
+          <div style={{ padding: '28px 16px', textAlign: 'center', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: 10, color: '#15803d', fontSize: 13, fontWeight: 600 }}>
+            Sin errores registrados — buena señal.
+          </div>
+        ) : !shown.length ? (
+          <div style={{ padding: '20px 0', textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Ningún error coincide con el filtro.</div>
+        ) : (
+          <>
+            <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 6 }}>{shown.length} de {all.length} {all.length === 1 ? 'error' : 'errores'} (últimos 300)</div>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr>
+                  <th style={th}>Fecha</th><th style={th}>Usuario</th><th style={th}>Versión</th><th style={th}>Dónde</th><th style={th}>Mensaje</th>
+                </tr></thead>
+                <tbody>
+                  {shown.map(r => {
+                    const s = SRC[r.source] || { t: r.source || '—', c: '#6b7280', bg: '#f3f4f6' };
+                    const abierto = openId === r.id;
+                    return (
+                      <React.Fragment key={r.id}>
+                        <tr onClick={() => setOpenId(abierto ? null : r.id)} style={{ cursor: 'pointer', background: abierto ? '#faf5ff' : 'transparent' }}>
+                          <td style={{ ...td, whiteSpace: 'nowrap', color: '#6b7280' }}>{fmt(r.created_at)}</td>
+                          <td style={{ ...td, whiteSpace: 'nowrap' }}>{r.email || <span style={{ color: '#9ca3af' }}>anónimo</span>}</td>
+                          <td style={{ ...td, whiteSpace: 'nowrap', color: '#6b7280' }}>v{r.app_version || '—'}</td>
+                          <td style={td}><span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 10.5, fontWeight: 700, color: s.c, background: s.bg, whiteSpace: 'nowrap' }}>{s.t}</span></td>
+                          <td style={{ ...td, maxWidth: 340, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: abierto ? 'normal' : 'nowrap' }}>{r.message || '—'}</td>
+                        </tr>
+                        {abierto && (
+                          <tr>
+                            <td colSpan={5} style={{ ...td, background: '#faf5ff' }}>
+                              {r.url && <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 6, wordBreak: 'break-all' }}>URL: {r.url}</div>}
+                              {r.stack
+                                ? <pre style={{ margin: 0, fontSize: 11, lineHeight: 1.5, color: '#374151', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 8, padding: 10, overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{r.stack}</pre>
+                                : <div style={{ fontSize: 12, color: '#9ca3af' }}>Sin stack.</div>}
+                              {r.user_agent && <div style={{ fontSize: 10.5, color: '#9ca3af', marginTop: 6, wordBreak: 'break-all' }}>{r.user_agent}</div>}
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
@@ -16485,7 +16612,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
         {esAdmin && (
           <div style={{ display: 'flex', gap: 4, padding: '0 20px', background: '#fff', borderBottom: '1px solid #e5e7eb', flex: '0 0 auto' }}>
-            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio'], ['compartidos', 'Compartidos']].map(([k, label]) => (
+            {[['general', 'General'], ['usuarios', 'Usuarios'], ['directorio', 'Directorio'], ['compartidos', 'Compartidos'], ['errores', 'Errores']].map(([k, label]) => (
               <button key={k} type="button" onClick={() => setTab(k)}
                 style={{ border: 'none', background: 'none', padding: '12px 14px', fontSize: 13, fontWeight: 700, cursor: 'pointer',
                   color: tab === k ? '#1e1b4b' : '#9ca3af',
@@ -16578,6 +16705,10 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
           {esAdmin && tab === 'compartidos' && (
             <CalendariosCompartidosSection />
+          )}
+
+          {esAdmin && tab === 'errores' && (
+            <ErroresSection />
           )}
         </div>
       </div>
