@@ -11788,7 +11788,9 @@ function OleChart({ chart }) {
   const exPndSegs = byInc.length
     ? byInc.filter(s => s.pend > 0).map((s, i) => ({ val: s.pend, color: _EX_PND_PAL[i % _EX_PND_PAL.length], tc: _EX_PND_TC[i % _EX_PND_TC.length], name: `Extra ${s.name} (pend.)` }))
     : (exPend > 0 ? [{ val: exPend, color: _SEG.extraPend, tc: _EX_PND_TC[0], name: 'Extra pend.' }] : []);
+  const caidasV = chart.caidas || 0;
   const segs = [
+    { val: caidasV, color: '#dc2626', tc: '#fca5a5', name: 'Caídas' },
     { val: chart.base, color: _SEG.base, tc: _TC.base, name: 'Activa' },
     ...exActSegs,
     { val: chart.pendiente, color: _SEG.pend, tc: _TC.pend, name: 'Pendiente' },
@@ -11796,6 +11798,7 @@ function OleChart({ chart }) {
   ].filter(s => s.val > 0);
   const shortInc = n => (n && n.length > 7) ? n.slice(0, 6) + '…' : (n || 'Extra');
   const compBars = [
+    ...(caidasV > 0 ? [{ label: 'Caídas', full: 'Caídas', val: caidasV, color: '#dc2626', tc: '#fca5a5' }] : []),
     { label: 'Activa', full: 'Activa', val: chart.base, color: _SEG.base, tc: _TC.base },
     ...(byInc.length
       ? byInc.map((s, i) => ({ label: shortInc(s.name), full: `Extra ${s.name}`, val: s.activo + s.pend, color: _EX_ACT_PAL[i % _EX_ACT_PAL.length], tc: _EX_ACT_TC[i % _EX_ACT_TC.length] }))
@@ -11994,17 +11997,17 @@ function ProduccionOLE({ target, selfUserId }) {
   const VL = { anual: 'Año completo', obj1: r.vistaLabel || 'Objetivo 1', obj2: r.vistaLabel || 'Objetivo 2' };
 
   const card = (label, value, color, sub, subColor) => (
-    <div style={{ flex: '1 1 130px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color: color || '#1e1b4b', marginTop: 4 }}>{value}</div>
       {sub && <div style={{ fontSize: 11, fontWeight: 700, color: subColor || '#9ca3af', marginTop: 3 }}>{sub}</div>}
     </div>
   );
   const bcard = (label, total, totalColor, parts) => (
-    <div style={{ flex: '1 1 150px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color: totalColor || '#1e1b4b', marginTop: 4 }}>{fmt$(total)}</div>
-      <div style={{ display: 'flex', gap: 14, marginTop: 5 }}>
+      <div style={{ display: 'flex', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
         {parts.filter(p => p.value > 0).map(p => (
           <div key={p.label}>
             <div style={{ fontSize: 13, fontWeight: 700, color: p.color || '#374151' }}>{fmt$(p.value)}</div>
@@ -12041,13 +12044,16 @@ function ProduccionOLE({ target, selfUserId }) {
       </div>
 
       {/* Tarjeta resumen */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 18 }}>
         {card('Facturación', fmt$(r.facturacion), null, r.pct != null ? (r.pct + '% · obj ' + fmt$(r.objetivo)) : ('obj ' + fmt$(r.objetivo)), pctColor)}
         {card('Productividad', (r.productividad ?? 0) + ' pól.', null, r.pctProd != null ? (r.pctProd + '% · obj ' + r.objetivoProd) : null, pctProdColor)}
+        {card('Prima prom.', fmt$(r.productividad > 0 ? Math.round(r.facturacion / r.productividad) : 0), null, 'facturación / pólizas', '#9ca3af')}
         {(() => {
           const exAct = r.extraActivo != null ? r.extraActivo : r.extra;
           const exPend = r.extraPendiente != null ? r.extraPendiente : 0;
-          const baseAct = Math.max((r.facturacion || 0) - (r.pendiente || 0) - (r.extra || 0), 0);
+          const caidas = r.caidas || 0;
+          // Activo PURO (sin caídas). Compat con resúmenes viejos: si no viene activoPuro, se deriva.
+          const baseAct = r.activoPuro != null ? r.activoPuro : Math.max((r.facturacion || 0) - (r.pendiente || 0) - (r.extra || 0) - caidas, 0);
           return (
             <React.Fragment>
               {bcard('Activo', baseAct + exAct, '#6366f1', [
@@ -12058,6 +12064,7 @@ function ProduccionOLE({ target, selfUserId }) {
                 { label: 'base', value: r.pendiente || 0, color: '#d97706' },
                 { label: 'extra', value: exPend, color: '#34d399' },
               ])}
+              {caidas > 0 && card('Caídas', fmt$(caidas), '#dc2626', 'cancel./lapse — ver persistencia', '#f87171')}
               {(exAct > 0 || exPend > 0) && bcard('Extra', exAct + exPend, '#16a34a', [
                 { label: 'activo', value: exAct, color: '#16a34a' },
                 { label: 'pend.', value: exPend, color: '#34d399' },
@@ -12066,7 +12073,7 @@ function ProduccionOLE({ target, selfUserId }) {
           );
         })()}
         {r.persistencia != null && (
-          <div style={{ flex: '1 1 150px', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+          <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Persistencia</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: '#1e1b4b', marginTop: 4 }}>{r.persistencia + '%'}</div>
             {r.persistActCount != null && <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', marginTop: 3 }}>{r.persistActCount} act. / {r.persistLostCount} caídas</div>}
