@@ -4015,6 +4015,21 @@
     .cal-sub-tabs { border-radius: 999px; }
     .cal-sub-tab { border-radius: 999px; }
     .cal-nav-btn { border-radius: 999px; }
+    /* Header del calendario ordenado en dos filas:
+       fila 1 = la fecha sola, en UNA línea (antes se partía en dos renglones);
+       fila 2 = selector Mes/Semana/Hoy(/Calendarios) a la izquierda y la
+       nav ‹ Hoy › a la derecha si entra — si no entra, baja a una tercera
+       fila alineada a la derecha. Aplica a los tres headers (calendario
+       mes/semana y calendario de pagos), que comparten estructura. */
+    .cal-header { flex-wrap: wrap; align-items: flex-end; row-gap: 8px; }
+    .cal-header > div:first-child {
+      flex: 1 1 auto;
+      flex-wrap: wrap;
+      gap: 8px;
+      min-width: 0;
+    }
+    .cal-header .cal-title { flex: 1 1 100%; white-space: nowrap; }
+    .cal-header .cal-nav { margin-left: auto; }
   }
 </style>
 </head>
@@ -4067,7 +4082,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.6';
+const APP_VERSION = '2026-09-08.7';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

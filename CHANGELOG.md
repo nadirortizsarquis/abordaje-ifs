@@ -1377,3 +1377,14 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
   producción (CampaniaCard: chips de incentivos vinculados + barra bicolor
   base/extra) que estaba sin commitear en el working tree. `npm run verify`
   pasó con todo junto.
+
+---
+
+# Sesión 2026-09-08 (7) — Header del calendario ordenado (mobile)
+
+- El header del calendario wrappeaba desprolijo y la fecha se partía en dos
+  renglones. Ahora: fila 1 = fecha sola en una línea; fila 2 = selector
+  Mes/Semana/Hoy(/Calendarios) a la izquierda con la nav ‹ Hoy › a la
+  derecha si entra (si no, baja a una tercera fila a la derecha). Aplica a
+  los tres headers que comparten estructura (calendario mes/semana y
+  calendario de pagos). APP_VERSION → 2026-09-08.7.
