@@ -12563,7 +12563,7 @@ function ProduccionOLE({ target, selfUserId }) {
     + ' ' + new Date(ts).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
 
   const wrap = (inner) => (
-    <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>{selector}{inner}</div>
+    <div style={{ padding: '8px 4px 40px' }}>{selector}{inner}</div>
   );
   if (rows === null) return wrap(<div style={{ padding: 40, textAlign: 'center', color: '#6b7280' }}>Cargando producción…</div>);
   if (!rows.length) return wrap(
@@ -12639,7 +12639,7 @@ function ProduccionOLE({ target, selfUserId }) {
   );
 
   return (
-    <div style={{ padding: '8px 4px 40px', maxWidth: 1000, margin: '0 auto' }}>
+    <div style={{ padding: '8px 4px 40px' }}>
       {selector}
 
       {/* Selector de vista */}
