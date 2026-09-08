@@ -4015,21 +4015,23 @@
     .cal-sub-tabs { border-radius: 999px; }
     .cal-sub-tab { border-radius: 999px; }
     .cal-nav-btn { border-radius: 999px; }
-    /* Header del calendario ordenado en dos filas:
-       fila 1 = la fecha sola, en UNA línea (antes se partía en dos renglones);
-       fila 2 = selector Mes/Semana/Hoy(/Calendarios) a la izquierda y la
-       nav ‹ Hoy › a la derecha si entra — si no entra, baja a una tercera
-       fila alineada a la derecha. Aplica a los tres headers (calendario
-       mes/semana y calendario de pagos), que comparten estructura. */
-    .cal-header { flex-wrap: wrap; align-items: flex-end; row-gap: 8px; }
-    .cal-header > div:first-child {
-      flex: 1 1 auto;
-      flex-wrap: wrap;
-      gap: 8px;
-      min-width: 0;
+    /* Header del calendario en DOS líneas exactas:
+       fila 1 = fecha a la izquierda + nav ‹ Hoy › a la derecha;
+       fila 2 = selector Mes/Semana/Hoy(/Calendarios).
+       Se usa grid + display:contents en el wrapper interno (que trae
+       display:flex inline — por eso el !important) para reacomodar título,
+       sub-tabs y nav como items directos del grid. Aplica a los tres
+       headers que comparten estructura (mes/semana y calendario de pagos). */
+    .cal-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      row-gap: 8px;
     }
-    .cal-header .cal-title { flex: 1 1 100%; white-space: nowrap; }
-    .cal-header .cal-nav { margin-left: auto; }
+    .cal-header > div:first-child { display: contents !important; }
+    .cal-header .cal-title { grid-column: 1; grid-row: 1; white-space: nowrap; }
+    .cal-header .cal-nav { grid-column: 2; grid-row: 1; }
+    .cal-header .cal-sub-tabs { grid-column: 1 / -1; grid-row: 2; justify-self: start; }
   }
 </style>
 </head>
@@ -4082,7 +4084,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.7';
+const APP_VERSION = '2026-09-08.8';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {

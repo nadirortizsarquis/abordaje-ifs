@@ -1388,3 +1388,11 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
   derecha si entra (si no, baja a una tercera fila a la derecha). Aplica a
   los tres headers que comparten estructura (calendario mes/semana y
   calendario de pagos). APP_VERSION → 2026-09-08.7.
+
+---
+
+# Sesión 2026-09-08 (8) — Header del calendario en dos líneas exactas (mobile)
+
+- Fila 1 = fecha + nav ‹ Hoy › a la derecha; fila 2 = selector
+  Mes/Semana/Hoy(/Calendarios). Grid con display:contents en el wrapper
+  interno (traía display:flex inline). APP_VERSION → 2026-09-08.8.
