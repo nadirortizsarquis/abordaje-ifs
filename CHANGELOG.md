@@ -1340,3 +1340,22 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
 - Chips del Kanban pegadas al header (margin-top 0) y carrusel más pegado a
   las chips (2px). El espacio ganado va a la altura de las columnas (calc
   186px → 172px). APP_VERSION → 2026-09-08.4.
+
+---
+
+# Sesión 2026-09-08 (5) — Mismo lenguaje mobile para Lista, Calendario y Producción
+
+- **Lista de abordaje (mobile):** la fila de controles (Filtros / Archivo /
+  count / Gestión reciente / búsqueda / Excel / PDF / + Nuevo) pasa de
+  wrappear en varios renglones a UNA fila de chips con scroll horizontal
+  (mismo patrón que las chips del Kanban). El panel de filtros desplegado
+  apila cada filtro a ancho completo. Cards de prospectos con la misma
+  sombra que las columnas del Kanban + feedback al toque (scale 0.985).
+- **Calendario (mobile):** swipe horizontal para cambiar de mes (modo mes)
+  o de día (modo hoy) — umbral 60px con dominancia horizontal para no robar
+  el scroll vertical; en modo semana NO se engancha (la grilla ya scrollea
+  horizontal). Sub-tabs Mes/Semana/Hoy y botones de nav en pastilla.
+- **Mi producción:** selector de vistas en pastillas con sombra al activo
+  (desktop también, matchea las view-tabs); tarjetas KPI y persistencia con
+  sombra suave unificada.
+- APP_VERSION → 2026-09-08.5.

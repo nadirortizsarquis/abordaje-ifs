@@ -3959,6 +3959,52 @@
       justify-content: center;
     }
   }
+
+  /* ── Restyle mobile del resto de las vistas (sep 2026) ──
+     Mismo lenguaje que el Kanban de Tareas: chips scrolleables en una fila,
+     tarjetas con sombra suave y feedback táctil. Solo <=720px. */
+  @media (max-width: 720px) {
+    /* Lista: la fila de controles (Filtros / Archivo / count / Gestión
+       reciente / búsqueda / Excel / PDF / + Nuevo) deja de wrappear en
+       varios renglones y pasa a UNA fila de chips con scroll horizontal,
+       como la barra de chips del Kanban. */
+    .filter-bar-header {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      gap: 8px;
+      padding-bottom: 6px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .filter-bar-header::-webkit-scrollbar { display: none; }
+    .filter-bar-header > * { flex: 0 0 auto; }
+    .filter-bar-toggle { border-radius: 999px; padding: 6px 13px; }
+    .filter-bar-extras { margin-left: 0; flex-wrap: nowrap; }
+    .filter-bar-extras button { border-radius: 999px; white-space: nowrap; }
+    .filter-bar-header .filter-count { white-space: nowrap; }
+    .filter-bar-header .kanban-autoorden { white-space: nowrap; }
+    /* Panel de filtros desplegado: cada filtro a ancho completo, apilados. */
+    .filter-bar { flex-direction: column; align-items: stretch; gap: 10px; }
+    .filter-bar .filter-group {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      width: 100%;
+    }
+    .filter-bar .filter-group select { width: 100%; }
+    /* Cards de prospectos: misma sombra que las columnas del Kanban +
+       feedback al toque (se hunden apenas). */
+    table.prospectos tbody tr {
+      box-shadow: 0 2px 10px rgba(30, 27, 75, 0.06);
+      transition: transform 0.1s;
+    }
+    table.prospectos tbody tr:active { transform: scale(0.985); }
+    /* Calendario: sub-tabs (Mes/Semana/Hoy) y nav en pastilla, eco de las
+       chips del Kanban. */
+    .cal-sub-tabs { border-radius: 999px; }
+    .cal-sub-tab { border-radius: 999px; }
+    .cal-nav-btn { border-radius: 999px; }
+  }
 </style>
 </head>
 <body>
@@ -4010,7 +4056,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.4';
+const APP_VERSION = '2026-09-08.5';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -12519,14 +12565,14 @@ function ProduccionOLE({ target, selfUserId }) {
   const VL = { anual: 'Año completo', obj1: r.vistaLabel || 'Objetivo 1', obj2: r.vistaLabel || 'Objetivo 2' };
 
   const card = (label, value, color, sub, subColor) => (
-    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', boxShadow: '0 2px 10px rgba(30,27,75,0.05)' }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color: color || '#1e1b4b', marginTop: 4 }}>{value}</div>
       {sub && <div style={{ fontSize: 11, fontWeight: 700, color: subColor || '#9ca3af', marginTop: 3 }}>{sub}</div>}
     </div>
   );
   const bcard = (label, total, totalColor, parts) => (
-    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+    <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', boxShadow: '0 2px 10px rgba(30,27,75,0.05)' }}>
       <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color: totalColor || '#1e1b4b', marginTop: 4 }}>{fmt$(total)}</div>
       <div style={{ display: 'flex', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
@@ -12551,7 +12597,8 @@ function ProduccionOLE({ target, selfUserId }) {
             <button key={row.vista} onClick={() => setVista(row.vista)}
               style={{ border: '1px solid', borderColor: vista === row.vista ? '#3E4095' : '#d1d5db',
                 background: vista === row.vista ? '#3E4095' : '#fff', color: vista === row.vista ? '#fff' : '#374151',
-                borderRadius: 8, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                boxShadow: vista === row.vista ? '0 2px 8px rgba(62,64,149,0.28)' : 'none' }}>
               {(row.resumen && row.resumen.vistaLabel) || VL[row.vista] || row.vista}
             </button>
           ))}
@@ -12604,7 +12651,7 @@ function ProduccionOLE({ target, selfUserId }) {
           );
         })()}
         {r.persistencia != null && (
-          <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px' }}>
+          <div style={{ minWidth: 0, background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', boxShadow: '0 2px 10px rgba(30,27,75,0.05)' }}>
             <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Persistencia</div>
             <div style={{ fontSize: 20, fontWeight: 800, color: '#1e1b4b', marginTop: 4 }}>{r.persistencia + '%'}</div>
             {r.persistActCount != null && <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', marginTop: 3 }}>{r.persistActCount} act. / {r.persistLostCount} caídas</div>}
@@ -14340,6 +14387,27 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
       singleDay={true}
     />;
   }
+  // Swipe horizontal (touch) para navegar: mes anterior/siguiente en modo
+  // mes, día anterior/siguiente en modo hoy. En modo semana NO se engancha
+  // (la grilla ya scrollea horizontal y el gesto se pisaría). Umbral 60px y
+  // dominancia horizontal clara para no robar el scroll vertical.
+  const swipeRef = useRef(null);
+  const onCalTouchStart = (e) => {
+    if (mode === 'semana') return;
+    const t = e.touches && e.touches[0];
+    if (t) swipeRef.current = { x: t.clientX, y: t.clientY };
+  };
+  const onCalTouchEnd = (e) => {
+    const s = swipeRef.current;
+    swipeRef.current = null;
+    if (!s || mode === 'semana') return;
+    const t = e.changedTouches && e.changedTouches[0];
+    if (!t) return;
+    const dx = t.clientX - s.x, dy = t.clientY - s.y;
+    if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.8) return;
+    if (dx < 0) goNext(); else goPrev();
+  };
+
   return (
     <>
       {gcalDisconnected && (
@@ -14355,7 +14423,9 @@ function CalendarioView({ prospectos, tareasState, agendados, settings, isPilot,
           )}
         </div>
       )}
-      {calendarNode}
+      <div onTouchStart={onCalTouchStart} onTouchEnd={onCalTouchEnd}>
+        {calendarNode}
+      </div>
     </>
   );
 }
