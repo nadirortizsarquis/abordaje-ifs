@@ -12320,31 +12320,58 @@ function OleChart({ chart }) {
 // Las barras van azul (base) + verde (extra). Responsive: en mobile cae debajo
 // del gráfico (flexWrap del contenedor).
 function AvanceCampaniasPanel({ rows, onOpen }) {
+  // Layout adaptable por ancho REAL del panel: ancho (>=520px) → nombre, barra y
+  // números en una sola línea (más a lo ancho que a lo alto, entran más barras);
+  // angosto (mobile / monitor chico) → números arriba en el renglón del título.
+  const ref = useRef(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    setW(el.clientWidth || 0);
+    if (typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(es => setW(es[0].contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   if (!rows.length) return null;
+  const wide = w >= 520;
+  const numeros = (row, tc) => (
+    <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+      <span style={{ fontSize: 12, fontWeight: 800, color: tc === _SEG.base ? '#6b7280' : tc }}>
+        {row.done ? '✓ ' : ''}{row.pct != null ? Math.round(row.pct * 100) + '%' : ''}
+      </span>
+      <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9ca3af' }}>{row.pct != null ? ' · ' : ''}{row.detail}</span>
+    </span>
+  );
+  const barra = (row) => (
+    <div style={{ flex: 1, height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex' }}>
+      <div style={{ width: row.bw + '%', background: _SEG.base, transition: 'width .35s ease' }} />
+      {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
+    </div>
+  );
   return (
-    <div style={{ flex: '1 1 300px', minWidth: 260, maxWidth: 480, borderLeft: '1px solid #eef0f4', paddingLeft: 24 }}>
+    <div ref={ref} style={{ flex: '1 1 300px', minWidth: 260, maxWidth: wide ? 780 : 480, borderLeft: '1px solid #eef0f4', paddingLeft: 24 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Avance por campaña</span>
         <span style={{ fontSize: 10, fontWeight: 600, color: '#c4c7d0' }}>tocá una para ver premio y reglas</span>
       </div>
       {rows.map((row, i) => {
         const tc = row.pct != null ? _tempColor(row.done ? 1 : row.pct) : (row.done ? _SEG.extraAct : _SEG.base);
-        return (
+        return wide ? (
+          <div key={i} onClick={() => onOpen && row.camp && onOpen(row.camp)} title="Ver premio y reglas de esta campaña"
+            style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, cursor: 'pointer' }}>
+            <span style={{ width: 150, fontSize: 12, fontWeight: 800, color: '#1e1b4b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 }}>{row.nombre}</span>
+            {barra(row)}
+            {numeros(row, tc)}
+          </div>
+        ) : (
           <div key={i} onClick={() => onOpen && row.camp && onOpen(row.camp)} title="Ver premio y reglas de esta campaña"
             style={{ marginBottom: 14, cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
               <span style={{ fontSize: 12, fontWeight: 800, color: '#1e1b4b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.nombre}</span>
-              <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
-                <span style={{ fontSize: 12, fontWeight: 800, color: tc === _SEG.base ? '#6b7280' : tc }}>
-                  {row.done ? '✓ ' : ''}{row.pct != null ? Math.round(row.pct * 100) + '%' : ''}
-                </span>
-                <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9ca3af' }}>{row.pct != null ? ' · ' : ''}{row.detail}</span>
-              </span>
+              {numeros(row, tc)}
             </div>
-            <div style={{ height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex', marginTop: 4 }}>
-              <div style={{ width: row.bw + '%', background: _SEG.base, transition: 'width .35s ease' }} />
-              {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
-            </div>
+            <div style={{ display: 'flex', marginTop: 4 }}>{barra(row)}</div>
           </div>
         );
       })}
