@@ -12511,12 +12511,9 @@ function CampaniaDetalleModal({ camp, flyer, flyerPags, onClose }) {
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 22, color: '#9ca3af', cursor: 'pointer', lineHeight: 1, padding: 2 }}>×</button>
         </div>
         <div style={{ padding: '14px 20px 20px', overflowY: 'auto' }}>
-          {camp.resumen && <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>{camp.resumen}</div>}
-          {camp.detalle
-            ? <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{camp.detalle}</div>
-            : <div style={{ fontSize: 13, color: '#9ca3af' }}>Todavía no hay reglas detalladas cargadas para esta campaña. Consultá las condiciones oficiales con tu líder.</div>}
+          {/* Primero la foto del PDF; la descripción va debajo. */}
           {pags.length > 0 && (
-            <div style={{ marginTop: 14 }}>
+            <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: 10.5, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>Flyer oficial{pags.length > 1 ? ' · ' + pags.length + ' páginas' : ''}</div>
               <img src={pags[0]} onClick={() => { setPag(0); setZoomImg(true); }} title="Tocá para ampliar"
                 style={{ maxWidth: '100%', maxHeight: 230, borderRadius: 8, border: '1px solid #e5e7eb', cursor: 'zoom-in', display: 'block' }} />
@@ -12526,6 +12523,10 @@ function CampaniaDetalleModal({ camp, flyer, flyerPags, onClose }) {
               </a>
             </div>
           )}
+          {camp.resumen && <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>{camp.resumen}</div>}
+          {camp.detalle
+            ? <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{camp.detalle}</div>
+            : <div style={{ fontSize: 13, color: '#9ca3af' }}>Todavía no hay reglas detalladas cargadas para esta campaña. Consultá las condiciones oficiales con tu líder.</div>}
         </div>
       </div>
       {zoomImg && pags.length > 0 && (
