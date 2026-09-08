@@ -12506,8 +12506,25 @@ function ProduccionOLE({ target, selfUserId }) {
       : sb.from('ole_reportes').select('*').eq('user_id', target.userId);
     q.then(({ data, error }) => {
       if (error) { setErr(error.message); setRows([]); return; }
-      const orden = { anual: 0, obj1: 1, obj2: 2 };
-      const sorted = (data || []).sort((a, b) => (orden[a.vista] ?? 9) - (orden[b.vista] ?? 9));
+      // Orden de las vistas: Año completo → semestres → cuatrimestres → trimestres
+      // (en orden natural 1S,2S / 1Q..3Q / 1T..4T) → objetivos del más largo/antiguo
+      // al más corto → al final los que se llaman bono/incentivo/premio.
+      const rank = (row) => {
+        const v = row.vista || '';
+        if (v === 'anual') return { g: 0, a: 0, b: '' };
+        const m = /^per_(\d)([SQT])$/.exec(v);
+        if (m) return { g: { S: 1, Q: 2, T: 3 }[m[2]], a: Number(m[1]), b: '' };
+        const res = row.resumen || {};
+        const nom = ((res.vistaLabel || v) + '').toLowerCase();
+        const esBono = /bono|incentivo|premio/.test(nom);
+        const p = res.periodo || {};
+        const dur = (p.desde && p.hasta) ? (new Date(p.hasta) - new Date(p.desde)) : 0;
+        return { g: esBono ? 5 : 4, a: -dur, b: p.desde || '' };
+      };
+      const sorted = (data || []).sort((x, y) => {
+        const ox = rank(x), oy = rank(y);
+        return ox.g - oy.g || ox.a - oy.a || (ox.b < oy.b ? -1 : ox.b > oy.b ? 1 : 0) || String(x.vista).localeCompare(String(y.vista));
+      });
       setRows(sorted);
       // Mantener la vista/rango elegido al cambiar de asesor si el nuevo también
       // la tiene; si no, caer a la primera (anual). Antes reseteaba siempre.
