@@ -1332,3 +1332,11 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
 - Barra inferior: "Mi producción" pasa a ítem directo (ícono de barras); en
   "Más" quedan solo Calendario compartido y Calendario de pagos, y el botón
   desaparece si no hay ninguna habilitada. APP_VERSION → 2026-09-08.3.
+
+---
+
+# Sesión 2026-09-08 (4) — Menos aire entre header y tablero (mobile)
+
+- Chips del Kanban pegadas al header (margin-top 0) y carrusel más pegado a
+  las chips (2px). El espacio ganado va a la altura de las columnas (calc
+  186px → 172px). APP_VERSION → 2026-09-08.4.

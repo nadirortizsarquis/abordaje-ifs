@@ -1102,12 +1102,12 @@
   @media (max-width: 720px) {
     .kanban-wrap {
       gap: 12px;
-      margin-top: 6px;
+      margin-top: 2px;
       scroll-snap-type: x mandatory;
-      /* alto: viewport - header (con safe-area) - padding main - fila
-         autoorden - chips - barra inferior. Si el cálculo queda corto en
-         algún device, el min-height garantiza una columna usable. */
-      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 186px - env(safe-area-inset-bottom, 0px));
+      /* alto: viewport - header (con safe-area) - padding main - chips -
+         toggle autoorden al pie - barra inferior. Si el cálculo queda corto
+         en algún device, el min-height garantiza una columna usable. */
+      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 172px - env(safe-area-inset-bottom, 0px));
       min-height: 300px;
       scrollbar-width: none;
     }
@@ -1141,7 +1141,7 @@
       gap: 8px;
       overflow-x: auto;
       padding: 2px 2px 6px;
-      margin-top: 8px;
+      margin-top: 0;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
     }
@@ -4010,7 +4010,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.3';
+const APP_VERSION = '2026-09-08.4';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
