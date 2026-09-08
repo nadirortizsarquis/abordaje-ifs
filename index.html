@@ -12357,10 +12357,16 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
       </div>
       {rows.map((row, i) => {
         const tc = row.pct != null ? _tempColor(row.done ? 1 : row.pct) : (row.done ? _SEG.extraAct : _SEG.base);
+        const nombreCell = (
+          <span style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: '#1e1b4b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.nombre}</div>
+            {row.fechas && <div style={{ fontSize: 9.5, fontWeight: 600, color: '#9ca3af', whiteSpace: 'nowrap' }}>{row.fechas}</div>}
+          </span>
+        );
         return wide ? (
           <div key={i} onClick={() => onOpen && row.camp && onOpen(row.camp)} title="Ver premio y reglas de esta campaña"
             style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, cursor: 'pointer' }}>
-            <span style={{ width: 150, fontSize: 12, fontWeight: 800, color: '#1e1b4b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flexShrink: 0 }}>{row.nombre}</span>
+            <span style={{ width: 190, flexShrink: 0, minWidth: 0 }}>{nombreCell}</span>
             {barra(row)}
             {numeros(row, tc)}
           </div>
@@ -12368,7 +12374,7 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
           <div key={i} onClick={() => onOpen && row.camp && onOpen(row.camp)} title="Ver premio y reglas de esta campaña"
             style={{ marginBottom: 14, cursor: 'pointer' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: '#1e1b4b', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.nombre}</span>
+              {nombreCell}
               {numeros(row, tc)}
             </div>
             <div style={{ display: 'flex', marginTop: 4 }}>{barra(row)}</div>
@@ -12636,7 +12642,8 @@ function ProduccionOLE({ target, selfUserId }) {
   }).map(c => {
     const prog = campProg(c);
     if (!prog) return null;
-    const nom = c.nombre + (c.kind === 'incentivo' && c.tipo === 'multiplicador' && c.multiplicador > 1 ? ' ×' + c.multiplicador : '');
+    const nom = (c.kind === 'objetivo' ? 'Objetivo - ' : 'Incentivo - ') + c.nombre
+      + (c.kind === 'incentivo' && c.tipo === 'multiplicador' && c.multiplicador > 1 ? ' ×' + c.multiplicador : '');
     if (prog.tipo === 'monto' && prog.meta > 0) {
       const extra = prog.extra || 0, base = Math.max((prog.actual || 0) - extra, 0);
       return { camp: c, nombre: nom, pct: (prog.actual || 0) / prog.meta, done: !!prog.calificado || (prog.actual || 0) >= prog.meta,
@@ -12656,7 +12663,14 @@ function ProduccionOLE({ target, selfUserId }) {
         bw: (prog.calificados / prog.total) * 100, ew: 0, detail: prog.calificados + '/' + prog.total + ' asesores calificados' };
     }
     return null;
-  }).filter(Boolean);
+  }).filter(Boolean).map(row => {
+    // Fechas de la campaña (van chiquitas bajo el nombre) + orden: objetivos
+    // (antiguo → reciente) → bonos → multiplicadores.
+    const c = row.camp, per = s => (s || '').split('-').reverse().join('/');
+    return { ...row,
+      fechas: (c.desde || c.hasta) ? (per(c.desde) + ' — ' + per(c.hasta)) : '',
+      _g: c.kind === 'objetivo' ? 0 : (c.tipo === 'bono' ? 1 : 2), _d: c.desde || '' };
+  }).sort((a, b) => a._g - b._g || (a._d < b._d ? -1 : a._d > b._d ? 1 : 0));
 
   const diasViejo = (Date.now() - new Date(actual.updated_at).getTime()) / 86400000;
   const stale = diasViejo > 1;
@@ -12813,11 +12827,6 @@ function ProduccionOLE({ target, selfUserId }) {
               {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
                 <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
               )}
-              {(r.incentivosAplicables || []).map((inc, i) => (
-                <div key={i} style={{ fontSize: 10.5, color: '#16a34a', fontWeight: 600, marginTop: 2 }}>
-                  Incentivo {inc.nombre}{inc.multiplicador > 1 ? ` ×${inc.multiplicador}` : ''} · {(inc.desde || '').split('-').reverse().join('/')} — {(inc.hasta || '').split('-').reverse().join('/')}
-                </div>
-              ))}
             </div>
           </div>
           {/* Gráficos a la izquierda (con referencias centradas debajo) + barras de
