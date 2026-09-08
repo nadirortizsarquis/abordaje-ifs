@@ -1359,3 +1359,21 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
   (desktop también, matchea las view-tabs); tarjetas KPI y persistencia con
   sombra suave unificada.
 - APP_VERSION → 2026-09-08.5.
+
+---
+
+# Sesión 2026-09-08 (6) — Cards más finas, sin zoom, FAB Claude fuera de verdad
+
+- Cards de la Lista (mobile): se oculta la línea "creado DD/MM" (clase
+  `.col-creado`) y baja el padding (9px) — entran más por pantalla.
+- Zoom bloqueado en mobile: `maximum-scale=1 + user-scalable=no` en el meta
+  viewport + `touch-action: pan-x pan-y` en html/body (iOS a veces ignora el
+  meta; el CSS bloquea pinch y double-tap). El scroll sigue libre y el drag
+  del Kanban (touch-action propio) no se ve afectado.
+- FAB de Claude Desktop: ahora sí oculto en el cel — el botón trae
+  display:flex inline que le ganaba al display:none del CSS; se resolvió
+  con !important. APP_VERSION → 2026-09-08.6.
+- NOTA: este commit incluye también trabajo de la sesión paralela de Mi
+  producción (CampaniaCard: chips de incentivos vinculados + barra bicolor
+  base/extra) que estaba sin commitear en el working tree. `npm run verify`
+  pasó con todo junto.

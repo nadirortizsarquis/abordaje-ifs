@@ -3820,8 +3820,9 @@
     .view-tabs { display: none; }
     .main { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
     /* El FAB de Claude Desktop no aplica en el cel (abre una app de escritorio)
-       y encima pisa la barra de navegación inferior. */
-    .claude-fab { display: none; }
+       y encima pisa la barra de navegación inferior. !important porque el
+       botón trae display:flex inline (le ganaba a esta regla). */
+    .claude-fab { display: none !important; }
     /* El check de autoorden se muda de la fila superior al pie del tablero. */
     .main-head-combined .kanban-autoorden { display: none; }
     .kanban-autoorden-bottom {
@@ -3993,12 +3994,22 @@
     }
     .filter-bar .filter-group select { width: 100%; }
     /* Cards de prospectos: misma sombra que las columnas del Kanban +
-       feedback al toque (se hunden apenas). */
+       feedback al toque (se hunden apenas). Sin la línea "creado DD/MM" y
+       con padding más apretado quedan más finitas y entran más por pantalla. */
     table.prospectos tbody tr {
       box-shadow: 0 2px 10px rgba(30, 27, 75, 0.06);
       transition: transform 0.1s;
+      padding: 9px 14px;
+      margin-bottom: 8px;
     }
     table.prospectos tbody tr:active { transform: scale(0.985); }
+    .col-creado { display: none; }
+    table.prospectos td.col-nombre { margin-bottom: 2px; }
+    /* Bloquear pinch-zoom y double-tap-zoom (complementa el maximum-scale
+       del meta viewport, que iOS a veces ignora): el zoom rompía el layout
+       de Tareas y Calendario. El pan (scroll) sigue libre; los elementos
+       con touch-action propio (drag del Kanban) no se ven afectados. */
+    html, body { touch-action: pan-x pan-y; }
     /* Calendario: sub-tabs (Mes/Semana/Hoy) y nav en pastilla, eco de las
        chips del Kanban. */
     .cal-sub-tabs { border-radius: 999px; }
@@ -4056,7 +4067,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.5';
+const APP_VERSION = '2026-09-08.6';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
