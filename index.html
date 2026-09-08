@@ -12602,6 +12602,10 @@ function ProduccionOLE({ target, selfUserId }) {
     if (q && q.min > 0) return { tipo: 'polizas', actual: q.activadas || 0, meta: q.min, cumple: !!q.cumple, extra };
     return extra > 0 ? { tipo: 'extra', extra } : null;
   };
+  // Los incentivos vinculados a un objetivo (linkObjId) no tienen card propia:
+  // van como chip dentro de la card del objetivo y su extra pinta la barra en verde.
+  const campVisibles = campanias.filter(c => !(c.kind === 'incentivo' && c.linkObjId && campanias.some(o => o.kind === 'objetivo' && o.id === c.linkObjId)));
+  const campLinkedDe = (obj) => campanias.filter(c => c.kind === 'incentivo' && c.linkObjId === obj.id);
 
   const diasViejo = (Date.now() - new Date(actual.updated_at).getTime()) / 86400000;
   const stale = diasViejo > 1;
@@ -12658,36 +12662,6 @@ function ProduccionOLE({ target, selfUserId }) {
         {stale ? ' (puede estar desactualizada)' : ''}
       </div>
 
-      {/* Campañas vigentes: glass colapsable → al abrirlo, cards de incentivos y objetivos.
-          Los incentivos vinculados a un objetivo (linkObjId) NO tienen card propia:
-          aparecen como chip en la card del objetivo y su extra pinta la barra en verde. */}
-      {campanias.length > 0 && (() => {
-        const visibles = campanias.filter(c => !(c.kind === 'incentivo' && c.linkObjId && campanias.some(o => o.kind === 'objetivo' && o.id === c.linkObjId)));
-        const linkedDe = (obj) => campanias.filter(c => c.kind === 'incentivo' && c.linkObjId === obj.id);
-        return (
-          <div style={{ marginBottom: 18 }}>
-            <div onClick={() => setCampOpen(o => !o)}
-              style={{ cursor: 'pointer', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, maxWidth: 360, userSelect: 'none' }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Progreso · objetivos e incentivos</div>
-                <div style={{ fontSize: 20, fontWeight: 800, color: '#1e1b4b', marginTop: 4 }}>{visibles.length} vigente{visibles.length === 1 ? '' : 's'}</div>
-                <div style={{ fontSize: 11, fontWeight: 700, color: '#3E4095', marginTop: 3 }}>{campOpen ? 'Ocultar' : 'Ver campañas'}</div>
-              </div>
-              <span style={{ fontSize: 16, color: '#9ca3af', flexShrink: 0 }}>{campOpen ? '▲' : '▼'}</span>
-            </div>
-            {campOpen && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 10, marginTop: 10 }}>
-                {visibles.map(c => (
-                  <CampaniaCard key={c.kind + c.id} camp={c} prog={campProg(c)} hoy={hoyISO}
-                    linked={c.kind === 'objetivo' ? linkedDe(c) : []}
-                    onDetalle={() => setCampDet(c)} onOpen={setCampDet} />
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-
       {/* Tarjeta resumen */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 18 }}>
         {card('Facturación', fmt$(r.facturacion), null, r.pct != null ? (r.pct + '% · obj ' + fmt$(r.objetivo)) : ('obj ' + fmt$(r.objetivo)), pctColor)}
@@ -12733,7 +12707,26 @@ function ProduccionOLE({ target, selfUserId }) {
             {r.periodo && (r.periodo.desde || r.periodo.hasta) && <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', marginTop: 1 }}>{(r.periodo.desde || '').split('-').reverse().join('/')} - {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>}
           </div>
         )}
+        {campanias.length > 0 && (
+          <div onClick={() => setCampOpen(o => !o)}
+            style={{ minWidth: 0, cursor: 'pointer', userSelect: 'none', background: '#fff', border: '1px solid ' + (campOpen ? '#3E4095' : '#e5e7eb'), borderRadius: 12, padding: '14px 16px', boxShadow: '0 2px 10px rgba(30,27,75,0.05)' }}>
+            <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Objetivos e incentivos</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: '#1e1b4b', marginTop: 4 }}>{campVisibles.length} vigente{campVisibles.length === 1 ? '' : 's'}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: '#3E4095', marginTop: 3 }}>{campOpen ? 'Ocultar ▲' : 'Ver progreso ▼'}</div>
+          </div>
+        )}
       </div>
+
+      {/* Cards de campañas (despliegue del glass "Objetivos e incentivos") */}
+      {campOpen && campanias.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 10, marginBottom: 18 }}>
+          {campVisibles.map(c => (
+            <CampaniaCard key={c.kind + c.id} camp={c} prog={campProg(c)} hoy={hoyISO}
+              linked={c.kind === 'objetivo' ? campLinkedDe(c) : []}
+              onDetalle={() => setCampDet(c)} onOpen={setCampDet} />
+          ))}
+        </div>
+      )}
 
       {/* Requisitos: aparece SOLO cuando el asesor alcanzó la meta de facturación */}
       {r.requisitos && r.requisitos.cumpleMonto && (
@@ -12791,13 +12784,10 @@ function ProduccionOLE({ target, selfUserId }) {
               ))}
             </div>
           </div>
+          {/* Los medidores de bono (BonoMeter) se sacaron de acá: el avance de cada
+              incentivo ahora vive en las cards del glass "Objetivos e incentivos". */}
           <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center' }}>
             <div style={{ flex: '1 1 320px', minWidth: 0 }}><OleChart chart={r.chart} pct={r.pct} /></div>
-            {Array.isArray(r.bonos) && r.bonos.length > 0 && (
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', justifyContent: 'center', borderLeft: '1px solid #eef0f4', paddingLeft: 20 }}>
-                {r.bonos.map(b => <BonoMeter key={b.incId} bono={b} />)}
-              </div>
-            )}
           </div>
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 6 }}>
             {(() => {
