@@ -1091,24 +1091,190 @@
     border-radius: 8px;
   }
 
-  /* ── Mobile: columnas sin tope vertical (lado a lado, altura natural) ──
-     Decisión 2026-05-21: en cel las columnas mantienen el layout horizontal
-     pero cada una toma su altura natural (todas las cards visibles, sin
-     scroll interno). El scroll vertical de la página se encarga del resto.
-     Aunque las alturas queden dispares, evita tener que pelearse con un
-     scroll interno por columna en touch. */
+  /* ── Mobile: Kanban carrusel — una columna por pantalla con snap ──
+     Restyle 2026-09 (reemplaza el layout "columnas 240px lado a lado" de la
+     decisión 2026-05-21, que dejaba las columnas cortadas). Cada columna
+     ocupa casi todo el ancho y la siguiente asoma al costado como pista de
+     swipe; scroll-snap centra la activa. La barra de chips (KanbanChips)
+     muestra todas las columnas con contador y salta con un tap. Con la
+     columna a ancho completo, el scroll interno del body vuelve a funcionar
+     bien en touch (el gesto vertical ya no compite con el horizontal). */
   @media (max-width: 720px) {
     .kanban-wrap {
-      height: auto;
-      overflow-y: visible;
+      gap: 12px;
+      margin-top: 6px;
+      scroll-snap-type: x mandatory;
+      /* alto: viewport - header (con safe-area) - padding main - fila
+         autoorden - chips - barra inferior. Si el cálculo queda corto en
+         algún device, el min-height garantiza una columna usable. */
+      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 186px - env(safe-area-inset-bottom, 0px));
+      min-height: 300px;
+      scrollbar-width: none;
     }
+    .kanban-wrap::-webkit-scrollbar { display: none; }
     .kanban-col {
-      max-height: none;
+      flex: 0 0 calc(100vw - 88px);
+      scroll-snap-align: center;
+      max-height: 100%;
+      border-radius: 12px;
+      box-shadow: 0 2px 10px rgba(30, 27, 75, 0.06);
     }
     .kanban-col-body {
-      overflow-y: visible;
-      flex: 1 0 auto;
+      overflow-y: auto;
+      flex: 0 1 auto;
+      -webkit-overflow-scrolling: touch;
     }
+    .kanban-add-col {
+      flex: 0 0 55vw;
+      scroll-snap-align: center;
+    }
+  }
+
+  /* ── Chips de columnas del Kanban (solo mobile) ──
+     Barra sticky sobre el carrusel: una chip por columna con contador.
+     El chip activo se sincroniza con el scroll-snap y un tap salta a la
+     columna. En desktop no se renderiza (display:none). */
+  .kanban-chips { display: none; }
+  @media (max-width: 720px) {
+    .kanban-chips {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 2px 2px 6px;
+      margin-top: 8px;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .kanban-chips::-webkit-scrollbar { display: none; }
+    .kanban-chip {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--borde);
+      background: var(--bg-card);
+      color: var(--texto-suave);
+      font-size: 0.78rem;
+      font-weight: 600;
+      font-family: inherit;
+      padding: 6px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.18s, color 0.18s, border-color 0.18s, box-shadow 0.18s;
+      white-space: nowrap;
+    }
+    .kanban-chip .n {
+      font-size: 0.68rem;
+      font-weight: 700;
+      background: rgba(124, 58, 237, 0.12);
+      color: #6d28d9;
+      border-radius: 8px;
+      padding: 1px 6px;
+      min-width: 18px;
+      text-align: center;
+    }
+    .kanban-chip.active {
+      background: #7c3aed;
+      border-color: #7c3aed;
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(124, 58, 237, 0.35);
+    }
+    .kanban-chip.active .n { background: rgba(255, 255, 255, 0.22); color: #fff; }
+  }
+
+  /* ── Menú "⋯" de la tarjeta (solo mobile) ──
+     En touch, arrastrar una card a una columna fuera de pantalla es incómodo:
+     el menú ofrece "Mover a…" + fijar + abrir en un bottom-sheet. En desktop
+     no aparece (ahí están el drag y el click derecho). */
+  .tarea-card-menu-btn { display: none; }
+  @media (max-width: 720px) {
+    .tarea-card-menu-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      width: 32px;
+      height: 26px;
+      border: none;
+      background: transparent;
+      border-radius: 7px;
+      color: var(--texto-suave);
+      font-size: 1.05rem;
+      line-height: 1;
+      letter-spacing: 1px;
+      cursor: pointer;
+      padding: 0;
+    }
+    .tarea-card-menu-btn:active { background: rgba(124, 58, 237, 0.10); color: #6d28d9; }
+  }
+  .tarea-menu-ov {
+    position: fixed;
+    inset: 0;
+    z-index: 380;
+    background: rgba(15, 23, 42, 0.4);
+    display: flex;
+    align-items: flex-end;
+  }
+  .tarea-menu-sheet {
+    width: 100%;
+    background: var(--bg-card);
+    border-radius: 16px 16px 0 0;
+    padding: 8px 12px calc(14px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -8px 30px rgba(30, 27, 75, 0.25);
+    animation: sheet-up 0.2s ease;
+    max-height: 70dvh;
+    overflow-y: auto;
+  }
+  @keyframes sheet-up {
+    from { transform: translateY(14px); opacity: 0; }
+    to   { transform: none; opacity: 1; }
+  }
+  .tarea-menu-grip {
+    width: 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--borde);
+    margin: 2px auto 8px;
+  }
+  .tarea-menu-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--azul-oscuro);
+    padding: 4px 6px 8px;
+    border-bottom: 1px solid var(--borde);
+    margin-bottom: 6px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tarea-menu-sheet button {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--texto);
+    padding: 13px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+  .tarea-menu-sheet button:active { background: rgba(0, 152, 218, 0.08); }
+  .tarea-menu-sep {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--texto-suave);
+    padding: 10px 10px 4px;
+    border-top: 1px solid var(--borde);
+    margin-top: 4px;
   }
 
   /* ── Carga rápida inline ── */
@@ -3636,6 +3802,150 @@
   .mp-scroll-x::-webkit-scrollbar-thumb:hover {
     background: linear-gradient(90deg, #2d2f7a 0%, #0080b8 100%);
   }
+
+  /* ── Barra de navegación inferior tipo app (solo mobile) ──
+     Restyle 2026-09: en pantallas chicas las .view-tabs se ocultan y la
+     navegación pasa a una barra fija abajo con ícono + etiqueta (Lista /
+     Tareas / Calendario) más un botón "Más" que abre las vistas secundarias
+     (Calendario compartido, Mi producción, Calendario de pagos) en un panel.
+     z-index 180: por debajo del panel lateral (200) y de los modales (400),
+     por encima del contenido. Este bloque va al FINAL del CSS para que el
+     padding-bottom de .main gane al de la media query de arriba. */
+  .bottom-nav { display: none; }
+  .bottom-nav-sheet-ov { display: none; }
+  @media (max-width: 720px) {
+    .view-tabs { display: none; }
+    .main { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+    .bottom-nav {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 180;
+      display: flex;
+      background: rgba(255, 255, 255, 0.96);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-top: 1px solid var(--borde);
+      box-shadow: 0 -4px 18px rgba(30, 27, 75, 0.08);
+      padding: 6px 6px calc(6px + env(safe-area-inset-bottom, 0px));
+    }
+    .bottom-nav-item {
+      flex: 1 1 0;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 2px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--texto-suave);
+      font-family: inherit;
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.2px;
+      padding: 3px 2px 2px;
+      position: relative;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .bottom-nav-item .bn-label {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    /* Píldora detrás del ícono (patrón Material 3): marca la vista activa
+       con el gradiente IFS, igual que la solapa activa de desktop. */
+    .bottom-nav-item .bn-ico {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 48px;
+      height: 27px;
+      border-radius: 999px;
+      transition: background 0.18s, color 0.18s, box-shadow 0.18s;
+    }
+    .bottom-nav-item .bn-ico svg { width: 21px; height: 21px; display: block; }
+    .bottom-nav-item.active { color: var(--azul-oscuro); font-weight: 700; }
+    .bottom-nav-item.active .bn-ico {
+      background: linear-gradient(135deg, var(--azul-oscuro), var(--azul));
+      color: #fff;
+      box-shadow: 0 2px 8px rgba(0, 152, 218, 0.3);
+    }
+    .bottom-nav-badge {
+      position: absolute;
+      top: 0;
+      left: calc(50% + 8px);
+      min-width: 16px;
+      height: 16px;
+      padding: 0 4px;
+      border-radius: 8px;
+      background: #e11d48;
+      color: #fff;
+      font-size: 10px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+    }
+    /* Panel "Más": flota sobre la barra, con las vistas secundarias. */
+    .bottom-nav-sheet-ov {
+      display: block;
+      position: fixed;
+      inset: 0;
+      z-index: 175;
+      background: rgba(15, 23, 42, 0.3);
+    }
+    .bottom-nav-sheet {
+      position: fixed;
+      left: 10px;
+      right: 10px;
+      bottom: calc(72px + env(safe-area-inset-bottom, 0px));
+      z-index: 185;
+      background: var(--bg-card);
+      border: 1px solid var(--borde);
+      border-radius: 16px;
+      box-shadow: 0 12px 40px rgba(30, 27, 75, 0.25);
+      padding: 8px;
+      animation: sheet-up 0.18s ease;
+    }
+    .bottom-nav-sheet button {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: none;
+      border: none;
+      font-family: inherit;
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--texto);
+      padding: 13px 14px;
+      border-radius: 10px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .bottom-nav-sheet button.active {
+      background: rgba(0, 152, 218, 0.08);
+      color: var(--azul-oscuro);
+    }
+    .bottom-nav-sheet .bn-sheet-badge {
+      margin-left: auto;
+      min-width: 18px;
+      height: 18px;
+      padding: 0 5px;
+      border-radius: 9px;
+      background: #e11d48;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
 </style>
 </head>
 <body>
@@ -3687,7 +3997,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-08-31';
+const APP_VERSION = '2026-09-08.2';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -7895,6 +8205,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
+        {/* En mobile las solapas se ocultan y navega la barra inferior (position:
+            fixed — da igual dónde se renderice; comparte props con ViewTabs). */}
+        <BottomNav view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -10912,6 +11225,77 @@ function ViewTabs({ view, setView, showProd, showCalPagos, showCalCompartido, ca
   );
 }
 
+// ── BOTTOM NAV (solo mobile) ──────────────────────────────────
+// Barra inferior tipo app: en pantallas chicas reemplaza a las .view-tabs
+// (que se ocultan por CSS). Lista/Tareas/Calendario siempre visibles; las
+// vistas secundarias van en el panel "Más" con el badge de invitaciones.
+const BOTTOM_NAV_ICONS = {
+  lista: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true">
+      <line x1="9" y1="6" x2="20" y2="6" /><line x1="9" y1="12" x2="20" y2="12" /><line x1="9" y1="18" x2="20" y2="18" />
+      <circle cx="4.5" cy="6" r="1.1" fill="currentColor" stroke="none" /><circle cx="4.5" cy="12" r="1.1" fill="currentColor" stroke="none" /><circle cx="4.5" cy="18" r="1.1" fill="currentColor" stroke="none" />
+    </svg>
+  ),
+  tareas: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="5.4" height="16" rx="1.2" /><rect x="9.3" y="4" width="5.4" height="10" rx="1.2" /><rect x="15.6" y="4" width="5.4" height="13" rx="1.2" />
+    </svg>
+  ),
+  calendario: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="16" rx="2" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" />
+    </svg>
+  ),
+  mas: (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="19" cy="12" r="1.9" />
+    </svg>
+  ),
+};
+
+function BottomNav({ view, setView, showProd, showCalPagos, showCalCompartido, calCompPending }) {
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const extras = [];
+  if (showCalCompartido) extras.push({ id: 'calendario_compartido', label: 'Calendario compartido', badge: calCompPending });
+  if (showProd) extras.push({ id: 'produccion', label: 'Mi producción' });
+  if (showCalPagos) extras.push({ id: 'calendario_pagos', label: 'Calendario de pagos' });
+  const extrasActive = extras.some(x => x.id === view);
+  const extrasBadge = extras.reduce((n, x) => n + (x.badge || 0), 0);
+  const go = (v) => { setSheetOpen(false); setView(v); };
+
+  const item = (id, label, icon, active, badge, onClick) => (
+    <button key={id} className={`bottom-nav-item ${active ? 'active' : ''}`} onClick={onClick} aria-label={label}>
+      <span className="bn-ico">{icon}</span>
+      <span className="bn-label">{label}</span>
+      {badge > 0 && <span className="bottom-nav-badge">{badge}</span>}
+    </button>
+  );
+
+  return (
+    <>
+      {sheetOpen && (
+        <>
+          <div className="bottom-nav-sheet-ov" onClick={() => setSheetOpen(false)} />
+          <div className="bottom-nav-sheet" role="menu">
+            {extras.map(x => (
+              <button key={x.id} className={view === x.id ? 'active' : ''} onClick={() => go(x.id)}>
+                {x.label}
+                {x.badge > 0 && <span className="bn-sheet-badge">{x.badge}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+      <nav className="bottom-nav" aria-label="Navegación principal">
+        {item('lista', 'Lista', BOTTOM_NAV_ICONS.lista, view === 'lista', 0, () => go('lista'))}
+        {item('tareas', 'Tareas', BOTTOM_NAV_ICONS.tareas, view === 'tareas', 0, () => go('tareas'))}
+        {item('calendario', 'Calendario', BOTTOM_NAV_ICONS.calendario, view === 'calendario', 0, () => go('calendario'))}
+        {extras.length > 0 && item('mas', 'Más', BOTTOM_NAV_ICONS.mas, extrasActive, extrasBadge, () => setSheetOpen(o => !o))}
+      </nav>
+    </>
+  );
+}
+
 // ── CALENDARIO COMPARTIDO ────────────────────────────────────────────────────
 // Wrapper de la edge function shared-calendar (ocupados anonimizados).
 async function sharedCal(op, payload = {}) {
@@ -12242,12 +12626,24 @@ function calpagoAddMonths(date, n) {
   d.setDate(Math.min(day, last));
   return d;
 }
-function calpagoDerivePagos(rd, meses, yStart, yEnd) {
+function calpagoDerivePagos(rd, meses, yStart, yEnd, ini, fin) {
+  // Ocurrencias del ancla `rd` cada `meses`, dentro del año visible [yStart,
+  // yEnd] y acotadas (opcional) a la vigencia del plan [ini, fin): sin cuotas
+  // antes de la emisión ni desde el vencimiento del plan (a la madurez ya no
+  // se paga). El primer paso se CALCULA por diferencia de meses en vez de
+  // usar una ventana fija de ±N pasos — la ventana vieja hacía desaparecer
+  // los pagos manuales mensuales al navegar a años lejanos (con OLE no se
+  // notaba porque el reporte refresca fRenovacion en cada publicación).
   const out = [];
-  const span = Math.ceil(12 / meses) + 2;
-  for (let k = -span; k <= span; k++) {
+  const lo = (ini && ini > yStart) ? ini : yStart;
+  if (lo > yEnd) return out;
+  const diffM = (lo.getFullYear() - rd.getFullYear()) * 12 + (lo.getMonth() - rd.getMonth());
+  let k = Math.floor(diffM / meses) - 1;
+  for (let guard = 0; guard < 400; guard++, k++) {
     const occ = calpagoAddMonths(rd, k * meses);
-    if (occ >= yStart && occ <= yEnd) out.push(occ);
+    if (occ > yEnd) break;
+    if (fin && occ >= fin) break;
+    if (occ >= lo) out.push(occ);
   }
   return out;
 }
@@ -12533,6 +12929,7 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
         prima: m.prima, estado: '', tipo: '', frecuencia: m.frecuencia, fRenovacion: fRen,
         _asesorId: m.user_id, _compania: m.compania || 'investors-trust', _origen: 'manual',
         _manualId: m.id, _paga: m.paga || null, _obs: m.observaciones || '', _asesorTxt: m.asesor || '',
+        _emision: m.fecha_emision || null, _duracion: m.duracion_anios || null,
       });
     });
     return out;
@@ -12568,7 +12965,20 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
       // está viendo (no al año literal del reporte). "Solo renovación" = una vez
       // al año (aniversario); "cada pago" = las cuotas según frecuencia.
       const stepM = !eachPay ? 12 : (freq ? CALPAGO_FREQ_MESES[freq] : 12);
-      calpagoDerivePagos(rd, stepM, yStart, yEnd).forEach(d => evs.push(mk(d)));
+      // Pagos manuales con fecha de emisión: la emisión ancla las cuotas (más
+      // preciso que el vencimiento cargado) y, si hay duración, acota la
+      // proyección a la vigencia del plan [emisión, emisión + duración años).
+      let anchor = rd, ini = null, fin = null;
+      if (p._origen === 'manual' && p._emision) {
+        const [ey, em, edd] = String(p._emision).split('-').map(Number);
+        const emisionD = (ey && em && edd) ? new Date(ey, em - 1, edd) : null;
+        if (emisionD && !isNaN(emisionD)) {
+          anchor = emisionD;
+          ini = emisionD;
+          if (p._duracion) fin = calpagoAddMonths(emisionD, p._duracion * 12);
+        }
+      }
+      calpagoDerivePagos(anchor, stepM, yStart, yEnd, ini, fin).forEach(d => evs.push(mk(d)));
     });
     return { eventos: evs, sinFecha: sf };
   }, [detalle, pagoMap, eachPay, year, nombreDe]);
@@ -12961,6 +13371,8 @@ function PagoManualModal({ registro, fechaInit, selfId, defaultAsesor, onClose, 
   const [frecuencia, setFrecuencia] = useState(ed.frecuencia || 'anual');
   const [prima, setPrima] = useState(ed.prima != null ? String(ed.prima) : '');
   const [vencimiento, setVencimiento] = useState(ed.vencimiento || (fechaInit ? dateToYMD(fechaInit) : ''));
+  const [emision, setEmision] = useState(ed.fecha_emision || '');
+  const [duracion, setDuracion] = useState(ed.duracion_anios != null ? String(ed.duracion_anios) : '');
   const [poliza, setPoliza] = useState(ed.poliza || '');
   const [paga, setPaga] = useState(ed.paga || '');
   const [obs, setObs] = useState(ed.observaciones || '');
@@ -12973,15 +13385,33 @@ function PagoManualModal({ registro, fechaInit, selfId, defaultAsesor, onClose, 
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
 
+  // Al cargar la emisión, si el vencimiento está vacío lo sugerimos: la
+  // próxima cuota según la frecuencia (aniversario de la emisión >= hoy).
+  const onEmisionChange = (v) => {
+    setEmision(v);
+    if (vencimiento || !v) return;
+    const [y, m, d] = v.split('-').map(Number);
+    if (!y || !m || !d) return;
+    let occ = new Date(y, m - 1, d);
+    const step = CALPAGO_FREQ_MESES[frecuencia] || 12;
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    for (let i = 0; occ < hoy && i < 400; i++) occ = calpagoAddMonths(occ, step);
+    setVencimiento(dateToYMD(occ));
+  };
+
   const guardar = async () => {
     if (busy) return;
     if (!cliente.trim()) { setError('Poné el nombre del cliente.'); return; }
     if (!vencimiento) { setError('Poné la fecha de vencimiento.'); return; }
+    if (duracion && !emision) { setError('Para acotar por duración del plan hace falta la fecha de emisión.'); return; }
+    if (emision && vencimiento && emision > vencimiento) { setError('La emisión no puede ser posterior al vencimiento.'); return; }
     setBusy(true); setError(null);
     const payload = {
       compania, cliente: cliente.trim(), asesor: asesor.trim(),
       frecuencia, prima: prima.toString().trim() === '' ? null : Number(prima),
       vencimiento, poliza: poliza.trim() || null,
+      fecha_emision: emision || null,
+      duracion_anios: duracion ? Number(duracion) : null,
       paga: paga || null, observaciones: obs.trim(),
     };
     try {
@@ -13044,7 +13474,25 @@ function PagoManualModal({ registro, fechaInit, selfId, defaultAsesor, onClose, 
 
         <div style={{ display: 'flex', gap: 12 }}>
           <div style={{ flex: 1 }}>
-            <label style={lbl}>Vencimiento *</label>
+            <label style={lbl}>Fecha de emisión</label>
+            <input type="date" value={emision} onChange={e => onEmisionChange(e.target.value)} style={inp} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>Duración del plan</label>
+            <select value={duracion} onChange={e => setDuracion(e.target.value)} style={inp}>
+              <option value="">Sin límite</option>
+              {[5, 10, 15, 20, 25, 30].map(n => <option key={n} value={n}>{n} años</option>)}
+            </select>
+          </div>
+        </div>
+        <div style={{ fontSize: 11.5, color: '#6b7280', marginTop: 5 }}>
+          Con emisión + duración, las cuotas se generan solo dentro de la vigencia del plan
+          (ej. S&P 500 Index de IT: 10, 15 o 20 años). La emisión ancla las fechas de cada cuota.
+        </div>
+
+        <div style={{ display: 'flex', gap: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={lbl}>Vencimiento (próxima cuota) *</label>
             <input type="date" value={vencimiento} onChange={e => setVencimiento(e.target.value)} style={inp} />
           </div>
           <div style={{ flex: 1 }}>
@@ -16784,18 +17232,33 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
 function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
-  const cols = [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999));
+  // useMemo: `cols` baja hasta TareaCard (menú "Mover a…" en mobile); con
+  // identidad estable el React.memo de las cards sigue siendo efectivo.
+  const cols = useMemo(
+    () => [...tareasState.columnas].sort((a, b) => (a.orden ?? 999) - (b.orden ?? 999)),
+    [tareasState.columnas]
+  );
+  const wrapRef = useRef(null);
+  const porCol = cols.map(col => ({
+    col,
+    items: ordenarTareasKanban(
+      tareasState.items.filter(t => t.columnaId === col.id),
+      autoOrden
+    ),
+  }));
   return (
-    <div className="kanban-wrap">
-      {cols.map(col => {
-        const items = ordenarTareasKanban(
-          tareasState.items.filter(t => t.columnaId === col.id),
-          autoOrden
-        );
-        return (
+    <>
+      <KanbanChips
+        cols={cols}
+        counts={porCol.map(pc => pc.items.length)}
+        wrapRef={wrapRef}
+      />
+      <div className="kanban-wrap" ref={wrapRef}>
+        {porCol.map(({ col, items }) => (
           <TareaColumna
             key={col.id}
             columna={col}
+            columnas={cols}
             tareas={items}
             tipoPorProspecto={tipoPorProspecto}
             readOnly={readOnly}
@@ -16809,16 +17272,82 @@ function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onAddT
             onEditarTarea={onEditarTarea}
             onSetCompania={onSetCompania}
           />
-        );
-      })}
-      {!readOnly && (
-        <button className="kanban-add-col" onClick={onAddColumna}>+ Nueva columna</button>
-      )}
+        ))}
+        {!readOnly && (
+          <button className="kanban-add-col" onClick={onAddColumna}>+ Nueva columna</button>
+        )}
+      </div>
+    </>
+  );
+}
+
+// Chips de columnas (solo mobile por CSS): navegación del carrusel del Kanban.
+// El chip activo se sincroniza con el scroll-snap del wrap; un tap centra la
+// columna. En desktop el bar está display:none (el listener corre igual pero
+// es inocuo y barato).
+function KanbanChips({ cols, counts, wrapRef }) {
+  const [activeId, setActiveId] = useState(cols[0]?.id || null);
+  const barRef = useRef(null);
+
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    let raf = null;
+    const sync = () => {
+      raf = null;
+      const center = wrap.scrollLeft + wrap.clientWidth / 2;
+      let best = null, bestDist = Infinity;
+      wrap.querySelectorAll('.kanban-col[data-col-id]').forEach(el => {
+        const mid = el.offsetLeft + el.offsetWidth / 2;
+        const d = Math.abs(mid - center);
+        if (d < bestDist) { bestDist = d; best = el.dataset.colId; }
+      });
+      if (best) setActiveId(best);
+    };
+    const onScroll = () => { if (!raf && typeof requestAnimationFrame === 'function') raf = requestAnimationFrame(sync); };
+    wrap.addEventListener('scroll', onScroll, { passive: true });
+    sync();
+    return () => {
+      wrap.removeEventListener('scroll', onScroll);
+      if (raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(raf);
+    };
+  }, [wrapRef, cols.length]);
+
+  // El chip activo se auto-centra en su propia barra (que también scrollea).
+  useEffect(() => {
+    const bar = barRef.current;
+    if (!bar || !activeId) return;
+    const chip = bar.querySelector(`[data-chip-id="${activeId}"]`);
+    if (chip && chip.scrollIntoView) chip.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  }, [activeId]);
+
+  const jump = (id) => {
+    setActiveId(id);
+    const wrap = wrapRef.current;
+    const col = wrap && wrap.querySelector(`.kanban-col[data-col-id="${id}"]`);
+    if (col && col.scrollIntoView) col.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+  };
+
+  return (
+    <div className="kanban-chips" ref={barRef} role="tablist" aria-label="Columnas del tablero">
+      {cols.map((c, i) => (
+        <button
+          key={c.id}
+          data-chip-id={c.id}
+          className={`kanban-chip ${activeId === c.id ? 'active' : ''}`}
+          role="tab"
+          aria-selected={activeId === c.id}
+          onClick={() => jump(c.id)}
+        >
+          {c.titulo}
+          <span className="n">{counts[i]}</span>
+        </button>
+      ))}
     </div>
   );
 }
 
-function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, onRename, onDelete, onAddTarea, onDropTarea, onTogglePin, onMoveColumna, onEditarTarea, onSetCompania }) {
+function TareaColumna({ columna, columnas, tareas, tipoPorProspecto, readOnly, autoOrden, onRename, onDelete, onAddTarea, onDropTarea, onTogglePin, onMoveColumna, onEditarTarea, onSetCompania }) {
   const [tituloEdit, setTituloEdit] = useState(columna.titulo);
   const [agregando, setAgregando] = useState(false);
   const [nuevoTitulo, setNuevoTitulo] = useState('');
@@ -17007,7 +17536,7 @@ function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, 
         {tareas.length === 0 ? (
           <div className="kanban-col-empty">Sin tareas</div>
         ) : (
-          tareas.map(t => <TareaCard key={t.id} tarea={t} tipoGestion={t.prospectoId ? (tipoPorProspecto?.[t.prospectoId] || null) : null} readOnly={readOnly} autoOrden={autoOrden} onEditarTarea={onEditarTarea} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
+          tareas.map(t => <TareaCard key={t.id} tarea={t} columnas={columnas} tipoGestion={t.prospectoId ? (tipoPorProspecto?.[t.prospectoId] || null) : null} readOnly={readOnly} autoOrden={autoOrden} onEditarTarea={onEditarTarea} onDropTarea={onDropTarea} onTogglePin={onTogglePin} onSetCompania={onSetCompania} />)
         )}
       </div>
       {!readOnly && (agregando ? (
@@ -17030,10 +17559,13 @@ function TareaColumna({ columna, tareas, tipoPorProspecto, readOnly, autoOrden, 
 // React.memo: en el Kanban, cuando App re-renderiza por algo ajeno a la tarjeta, las
 // que no cambiaron no se re-renderean. Efectivo porque los handlers (onEditarTarea=
 // setTareaEditando, onDropTarea/onTogglePin/onSetCompania en useCallback) son estables.
-const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, autoOrden, onEditarTarea, onDropTarea, onTogglePin, onSetCompania }) {
+const TareaCard = React.memo(function TareaCard({ tarea, columnas, tipoGestion, readOnly, autoOrden, onEditarTarea, onDropTarea, onTogglePin, onSetCompania }) {
   // Popover de compañías (solo desktop, via click derecho onContextMenu).
   // En mobile no se habilita por ahora — el long-press está reservado para drag.
   const [companiaPicker, setCompaniaPicker] = useState(null); // {x, y} o null
+  // Menú "⋯" (solo mobile por CSS): Abrir / Fijar / Mover a otra columna sin
+  // pelearse con el drag por long-press hacia columnas fuera de pantalla.
+  const [menuOpen, setMenuOpen] = useState(false);
   const onContextMenu = (e) => {
     if (readOnly || !onSetCompania) return;
     e.preventDefault();
@@ -17113,10 +17645,11 @@ const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, 
     // Si el popover de compañía está abierto, ignorar todos los pointer
     // events de la card — sino, un click en el popover puede burbujear y
     // disparar onClick→abrir TareaModal.
-    if (companiaPicker) return;
+    if (companiaPicker || menuOpen) return;
     if (readOnly) return;
-    // El botón de fijar maneja su propio click; no debe iniciar drag ni abrir el editor.
-    if (e.target.closest && e.target.closest('.tarea-pin-btn')) return;
+    // El botón de fijar y el menú "⋯" manejan su propio click; no deben
+    // iniciar drag ni abrir el editor.
+    if (e.target.closest && (e.target.closest('.tarea-pin-btn') || e.target.closest('.tarea-card-menu-btn'))) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (dragRef.current.active || pendingTouchRef.current) return;
 
@@ -17202,9 +17735,9 @@ const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, 
   };
 
   const finishDrag = (e, commit) => {
-    // Guard: si el popover de compañía está abierto, no ejecutar click de
-    // la card (evita abrir TareaModal cuando el user solo eligió compañía).
-    if (companiaPicker) return;
+    // Guard: si el popover de compañía o el menú "⋯" están abiertos, no
+    // ejecutar click de la card (evita abrir TareaModal por burbujeo).
+    if (companiaPicker || menuOpen) return;
     const ds = dragRef.current;
     if (!ds.active) return;
     if (ds.dragging) {
@@ -17307,6 +17840,26 @@ const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, 
           creada {dateToDDMMYY(new Date(tarea.createdAt))}
         </div>
       )}
+      {!readOnly && (
+        <button
+          type="button"
+          className="tarea-card-menu-btn"
+          aria-label="Acciones de la tarea"
+          onPointerDown={(e) => e.stopPropagation()}
+          onPointerUp={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); setMenuOpen(true); }}
+        >⋯</button>
+      )}
+      {menuOpen && (
+        <TareaCardMenu
+          tarea={tarea}
+          columnas={columnas || []}
+          onClose={() => setMenuOpen(false)}
+          onAbrir={() => onEditarTarea(tarea)}
+          onTogglePin={onTogglePin ? () => onTogglePin(tarea.id) : null}
+          onMover={(colId) => onDropTarea(tarea.id, colId, null)}
+        />
+      )}
       {companiaPicker && (
         <CompaniaPicker
           x={companiaPicker.x}
@@ -17319,6 +17872,37 @@ const TareaCard = React.memo(function TareaCard({ tarea, tipoGestion, readOnly, 
     </div>
   );
 });
+
+// Bottom-sheet de acciones de la tarjeta (menú "⋯", solo mobile). Portal a
+// document.body por el mismo motivo que CompaniaPicker: la card puede tener
+// transforms del drag/long-press que romperían un position:fixed anidado.
+function TareaCardMenu({ tarea, columnas, onClose, onAbrir, onTogglePin, onMover }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const otras = columnas.filter(c => c.id !== tarea.columnaId);
+  return ReactDOM.createPortal(
+    <div className="tarea-menu-ov" onClick={onClose}>
+      <div className="tarea-menu-sheet" role="menu" onClick={(e) => e.stopPropagation()}>
+        <div className="tarea-menu-grip" />
+        <div className="tarea-menu-title">{tarea.titulo || '(sin título)'}</div>
+        <button onClick={() => { onClose(); onAbrir(); }}>Abrir tarea</button>
+        {onTogglePin && (
+          <button onClick={() => { onClose(); onTogglePin(); }}>
+            {tarea.fijadaAt ? 'Desfijar' : 'Fijar arriba'}
+          </button>
+        )}
+        {otras.length > 0 && <div className="tarea-menu-sep">Mover a</div>}
+        {otras.map(c => (
+          <button key={c.id} onClick={() => { onClose(); onMover(c.id); }}>{c.titulo}</button>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+}
 
 // Badge con el logo de la compañía en la esquina sup. derecha de la card.
 // Para "patrimonial" no hay logo: renderizamos texto con tipografía IFS.

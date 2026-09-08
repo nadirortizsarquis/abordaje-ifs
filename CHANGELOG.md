@@ -1261,3 +1261,61 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
   día (o si el recordatorio sigue pendiente) ya la daba el dismiss con
   caducidad diaria — sin cambios ahí. Cambio de 1 línea en onClickItem.
 - APP_VERSION → 2026-06-23.
+
+---
+
+# Sesión 2026-09-08 — Restyle mobile: Kanban carrusel + barra de navegación inferior
+
+- **Kanban Tareas en cel = carrusel con chips.** Reemplaza el layout
+  "columnas de 240px lado a lado" (decisión 2026-05-21) que dejaba las
+  columnas cortadas. Ahora cada columna ocupa casi todo el ancho
+  (`calc(100vw - 88px)`) con la siguiente asomando, `scroll-snap` centra la
+  activa, y las columnas recuperan el scroll interno (con la columna a ancho
+  completo el gesto vertical ya no compite con el horizontal). Nuevo
+  componente `KanbanChips`: barra de chips (nombre + contador por columna)
+  sobre el carrusel, sincronizada con el scroll (rAF) y con salto por tap.
+- **Menú "⋯" en la tarjeta (solo mobile).** Botón abajo a la derecha de cada
+  card → bottom-sheet (`TareaCardMenu`, portal) con Abrir / Fijar / "Mover
+  a…" con la lista de columnas. Resuelve mover tarjetas a columnas fuera de
+  pantalla sin pelear con el drag por long-press (que sigue funcionando).
+  Para pasarle las columnas a la card, `cols` en TareasView pasó a `useMemo`
+  (identidad estable → el `React.memo` de TareaCard sigue efectivo).
+- **Solapas → barra inferior tipo app (solo mobile).** Las `.view-tabs`
+  desbordaban con hasta 6 solapas y había que scrollear a ciegas. En ≤720px
+  se ocultan y navega `BottomNav`: barra fija abajo con ícono + etiqueta
+  (Lista / Tareas / Calendario) y botón "Más" que abre las vistas
+  secundarias (Calendario compartido, Mi producción, Calendario de pagos)
+  en un panel flotante. El badge de invitaciones pendientes va sobre "Más"
+  y junto al ítem. Píldora con gradiente IFS marca la vista activa.
+  z-index 180 (bajo panel lateral 200 y modales 400). `.main` gana
+  `padding-bottom` para que el contenido no quede tapado. Desktop intacto.
+- Verificado con `npm run verify` (check + smoke + 44 tests OK).
+  Backup: `index.backup-pre-kanban-mobile.html`. APP_VERSION → 2026-09-08.
+
+---
+
+# Sesión 2026-09-08 (2) — Calendario de pagos: emisión + duración en pagos manuales
+
+- **Problema:** los pagos manuales (Investors Trust, etc.) se proyectaban
+  como aniversario del vencimiento SIN conocer la vigencia del plan: cuotas
+  infinitas hacia atrás y adelante. Y un bug real: `calpagoDerivePagos`
+  usaba una ventana fija de ±N pasos alrededor del ancla, así que un pago
+  mensual manual DESAPARECÍA al navegar a años lejanos (con OLE no se nota
+  porque el reporte refresca fRenovacion en cada publicación).
+- **Migración `20260908130000`:** `abordaje_pago_manual` suma
+  `fecha_emision date` + `duracion_anios int` (nullables, check 1-50).
+  Aplicada en producción.
+- **Modal Nuevo pago:** campos "Fecha de emisión" y "Duración del plan"
+  (Sin límite / 5 / 10 / 15 / 20 / 25 / 30 años — cubre IT: S&P 500 y MSCI
+  10/15/20, Evolution 5-25). Al cargar la emisión con vencimiento vacío se
+  sugiere la próxima cuota según frecuencia. Validaciones: duración requiere
+  emisión; emisión no puede ser posterior al vencimiento. El label de
+  vencimiento ahora dice "Vencimiento (próxima cuota)".
+- **Proyección:** con emisión, ésta ancla las cuotas (día exacto) y, con
+  duración, acota a [emisión, emisión + duración años) — a la madurez ya no
+  hay cuota. `calpagoDerivePagos(rd, meses, yStart, yEnd, ini?, fin?)`
+  reescrita: calcula el primer paso por diferencia de meses (adiós ventana
+  fija) manteniendo compatibilidad con las llamadas OLE existentes.
+- Registros manuales viejos (sin emisión/duración): comportamiento igual
+  que antes, anclados al vencimiento sin límite.
+- `npm run verify` OK. APP_VERSION → 2026-09-08.2.
