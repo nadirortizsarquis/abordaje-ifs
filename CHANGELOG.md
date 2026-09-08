@@ -1319,3 +1319,16 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
 - Registros manuales viejos (sin emisión/duración): comportamiento igual
   que antes, anclados al vencimiento sin límite.
 - `npm run verify` OK. APP_VERSION → 2026-09-08.2.
+
+---
+
+# Sesión 2026-09-08 (3) — Ajustes mobile post-review de Nadir
+
+- Check "Autoordenar por vencimiento" al pie del tablero en el cel (copia
+  `.kanban-autoorden-bottom`; la de la fila superior se oculta en <=720px).
+  Desktop sin cambios.
+- FAB "Abrir Claude Desktop" oculto en mobile (abre una app de escritorio y
+  pisaba la barra inferior).
+- Barra inferior: "Mi producción" pasa a ítem directo (ícono de barras); en
+  "Más" quedan solo Calendario compartido y Calendario de pagos, y el botón
+  desaparece si no hay ninguna habilitada. APP_VERSION → 2026-09-08.3.

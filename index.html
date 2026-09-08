@@ -3813,9 +3813,22 @@
      padding-bottom de .main gane al de la media query de arriba. */
   .bottom-nav { display: none; }
   .bottom-nav-sheet-ov { display: none; }
+  /* Toggle de autoorden al pie del tablero (solo mobile): en cel el check
+     vive DEBAJO del carrusel, no en la fila de arriba. */
+  .kanban-autoorden-bottom { display: none; }
   @media (max-width: 720px) {
     .view-tabs { display: none; }
     .main { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
+    /* El FAB de Claude Desktop no aplica en el cel (abre una app de escritorio)
+       y encima pisa la barra de navegación inferior. */
+    .claude-fab { display: none; }
+    /* El check de autoorden se muda de la fila superior al pie del tablero. */
+    .main-head-combined .kanban-autoorden { display: none; }
+    .kanban-autoorden-bottom {
+      display: flex;
+      justify-content: center;
+      padding: 8px 0 2px;
+    }
     .bottom-nav {
       position: fixed;
       left: 0;
@@ -3997,7 +4010,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.2';
+const APP_VERSION = '2026-09-08.3';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
@@ -8400,6 +8413,17 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onSetCompania={handleSetCompania}
         />
       )}
+      {view === 'tareas' && (
+        /* Copia mobile del toggle de autoorden, al pie del tablero (la de la
+           fila superior se oculta en <=720px; en desktop esta no se ve). */
+        <div className="kanban-autoorden-bottom">
+          <label className="kanban-autoorden"
+            title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
+            <input type="checkbox" checked={autoOrdenTareas} onChange={toggleAutoOrdenTareas} />
+            <span>Autoordenar por vencimiento</span>
+          </label>
+        </div>
+      )}
 
       {view === 'calendario' && (
         <>
@@ -11246,6 +11270,11 @@ const BOTTOM_NAV_ICONS = {
       <rect x="3" y="5" width="18" height="16" rx="2" /><line x1="3" y1="10" x2="21" y2="10" /><line x1="8" y1="3" x2="8" y2="7" /><line x1="16" y1="3" x2="16" y2="7" />
     </svg>
   ),
+  produccion: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <line x1="4" y1="20" x2="20" y2="20" /><rect x="5.5" y="12" width="3.6" height="8" rx="0.8" /><rect x="10.2" y="7" width="3.6" height="13" rx="0.8" /><rect x="14.9" y="10" width="3.6" height="10" rx="0.8" />
+    </svg>
+  ),
   mas: (
     <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <circle cx="5" cy="12" r="1.9" /><circle cx="12" cy="12" r="1.9" /><circle cx="19" cy="12" r="1.9" />
@@ -11255,9 +11284,10 @@ const BOTTOM_NAV_ICONS = {
 
 function BottomNav({ view, setView, showProd, showCalPagos, showCalCompartido, calCompPending }) {
   const [sheetOpen, setSheetOpen] = useState(false);
+  // Mi producción va como ítem directo de la barra; en "Más" quedan solo las
+  // vistas secundarias restantes (si no hay ninguna, el botón no aparece).
   const extras = [];
   if (showCalCompartido) extras.push({ id: 'calendario_compartido', label: 'Calendario compartido', badge: calCompPending });
-  if (showProd) extras.push({ id: 'produccion', label: 'Mi producción' });
   if (showCalPagos) extras.push({ id: 'calendario_pagos', label: 'Calendario de pagos' });
   const extrasActive = extras.some(x => x.id === view);
   const extrasBadge = extras.reduce((n, x) => n + (x.badge || 0), 0);
@@ -11290,6 +11320,7 @@ function BottomNav({ view, setView, showProd, showCalPagos, showCalCompartido, c
         {item('lista', 'Lista', BOTTOM_NAV_ICONS.lista, view === 'lista', 0, () => go('lista'))}
         {item('tareas', 'Tareas', BOTTOM_NAV_ICONS.tareas, view === 'tareas', 0, () => go('tareas'))}
         {item('calendario', 'Calendario', BOTTOM_NAV_ICONS.calendario, view === 'calendario', 0, () => go('calendario'))}
+        {showProd && item('produccion', 'Producción', BOTTOM_NAV_ICONS.produccion, view === 'produccion', 0, () => go('produccion'))}
         {extras.length > 0 && item('mas', 'Más', BOTTOM_NAV_ICONS.mas, extrasActive, extrasBadge, () => setSheetOpen(o => !o))}
       </nav>
     </>
@@ -19509,6 +19540,7 @@ function ClaudeDesktopFAB() {
   return (
     <>
       <button
+        className="claude-fab"
         onClick={openClaude}
         onMouseEnter={() => setTooltipOpen(true)}
         onMouseLeave={() => setTooltipOpen(false)}
