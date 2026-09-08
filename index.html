@@ -12334,6 +12334,84 @@ function BonoMeter({ bono }) {
   );
 }
 
+// ── CAMPAÑAS OLE (incentivos + objetivos vigentes) ────────────
+// Cards resumidas arriba de Mi producción: nombre, fechas, qué lograr y premio,
+// con el avance personal y un modal "Detalle" con las reglas oficiales.
+// Fuente: bloque `campanias` que publica el Tablero OLE dentro de cada resumen.
+function CampaniaDetalleModal({ camp, onClose }) {
+  useEffect(() => {
+    const h = e => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+  const per = s => (s || '').split('-').reverse().join('/');
+  const inc = camp.kind === 'incentivo';
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(30,27,75,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 14, maxWidth: 600, width: '100%', maxHeight: '82vh', display: 'flex', flexDirection: 'column', boxShadow: '0 18px 50px rgba(0,0,0,0.3)' }}>
+        <div style={{ padding: '16px 20px 12px', borderBottom: '1px solid #eef0f4', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: inc ? '#16a34a' : '#3E4095', background: inc ? '#dcfce7' : '#e0e7ff', borderRadius: 5, padding: '2px 7px' }}>{camp.kind}</span>
+            <div style={{ fontSize: 17, fontWeight: 800, color: '#1e1b4b', marginTop: 6 }}>{camp.nombre}</div>
+            {(camp.desde || camp.hasta) && <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, marginTop: 2 }}>{per(camp.desde)} — {per(camp.hasta)}</div>}
+            {camp.premio && <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 4 }}>Premio: {fmtPremio(camp.premio)}</div>}
+          </div>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 22, color: '#9ca3af', cursor: 'pointer', lineHeight: 1, padding: 2 }}>×</button>
+        </div>
+        <div style={{ padding: '14px 20px 20px', overflowY: 'auto' }}>
+          {camp.resumen && <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>{camp.resumen}</div>}
+          {camp.detalle
+            ? <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{camp.detalle}</div>
+            : <div style={{ fontSize: 13, color: '#9ca3af' }}>Todavía no hay reglas detalladas cargadas para esta campaña. Consultá las condiciones oficiales con tu líder.</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CampaniaCard({ camp, prog, hoy, onDetalle }) {
+  const per = s => (s || '').split('-').reverse().join('/');
+  const inc = camp.kind === 'incentivo';
+  const porComenzar = camp.desde && camp.desde > hoy;
+  const min = camp.minPolizas > 0 ? ` · mín ${camp.minPolizas} pól.` : '';
+  const lograr = camp.kind === 'objetivo'
+    ? ((prog && prog.meta > 0 ? 'Meta ' + fmt$(prog.meta) : 'Meta personal del período') + min + (camp.persistenciaMin > 0 ? ` · persist. ${camp.persistenciaMin}%` : ''))
+    : camp.tipo === 'bono'
+      ? 'Facturá ' + fmt$(camp.umbral) + min
+      : 'Tu facturación cuenta ×' + camp.multiplicador + min;
+  const premio = camp.premio ? fmtPremio(camp.premio) : (camp.tipo === 'multiplicador' && camp.multiplicador > 1 ? 'Facturación ×' + camp.multiplicador : null);
+  // Barra de avance según lo que haya para medir (si no hay datos, la card queda informativa)
+  let barPct = null, barLabel = null, done = false;
+  if (prog) {
+    if (prog.tipo === 'monto' && prog.meta > 0) { barPct = Math.min((prog.actual / prog.meta) * 100, 100); barLabel = fmt$(prog.actual) + ' / ' + fmt$(prog.meta); done = !!prog.calificado || prog.actual >= prog.meta; }
+    else if (prog.tipo === 'polizas' && prog.meta > 0) { barPct = Math.min((prog.actual / prog.meta) * 100, 100); barLabel = `${prog.actual}/${prog.meta} pólizas` + (prog.extra > 0 ? ' · extra ' + fmt$(prog.extra) : ''); done = !!prog.cumple; }
+    else if (prog.tipo === 'extra' && prog.extra > 0) { barLabel = 'Extra generado: ' + fmt$(prog.extra); done = true; }
+    else if (prog.tipo === 'equipo' && prog.total > 0) { barPct = (prog.calificados / prog.total) * 100; barLabel = `${prog.calificados}/${prog.total} asesores calificados`; done = prog.calificados === prog.total; }
+  }
+  return (
+    <div style={{ minWidth: 0, background: '#fff', border: '1px solid ' + (inc ? '#bbf7d0' : '#c7d2fe'), borderLeft: '4px solid ' + (inc ? '#16a34a' : '#3E4095'), borderRadius: 12, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: inc ? '#16a34a' : '#3E4095', background: inc ? '#dcfce7' : '#e0e7ff', borderRadius: 5, padding: '2px 7px' }}>{camp.kind}</span>
+        {(camp.desde || camp.hasta) && <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{per(camp.desde)} — {per(camp.hasta)}</span>}
+        {porComenzar && <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fef3c7', borderRadius: 5, padding: '1px 6px' }}>por comenzar</span>}
+      </div>
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#1e1b4b' }}>{camp.nombre}</div>
+      {camp.resumen && <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.45 }}>{camp.resumen}</div>}
+      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#374151' }}>{lograr}</div>
+      {premio && <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>Premio: {premio}</div>}
+      {barPct != null && (
+        <div style={{ height: 7, background: '#f3f4f6', borderRadius: 5, overflow: 'hidden', marginTop: 2 }}>
+          <div style={{ width: barPct + '%', height: '100%', background: done ? '#16a34a' : '#6366f1', transition: 'width .35s ease' }} />
+        </div>
+      )}
+      {barLabel && <div style={{ fontSize: 11, fontWeight: 700, color: done ? '#16a34a' : '#6b7280' }}>{done ? '✓ ' : ''}{barLabel}</div>}
+      <div style={{ marginTop: 'auto', paddingTop: 4 }}>
+        <button onClick={onDetalle} style={{ border: '1px solid #d1d5db', background: '#fff', color: '#374151', borderRadius: 7, padding: '4px 12px', fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>Detalle</button>
+      </div>
+    </div>
+  );
+}
+
 // ── MI PRODUCCIÓN (OLE) ───────────────────────────────────────
 // Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
 // muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
@@ -12343,6 +12421,7 @@ function ProduccionOLE({ target, selfUserId }) {
   const [vista, setVista] = useState(null);
   const [url, setUrl]     = useState(null);
   const [err, setErr]     = useState(null);
+  const [campDet, setCampDet] = useState(null);
 
   const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
   const nombre = target.nombre;
@@ -12404,6 +12483,34 @@ function ProduccionOLE({ target, selfUserId }) {
   );
 
   const r = actual.resumen || {};
+
+  // ── Campañas vigentes (bloque `campanias` del Tablero) + avance personal ──
+  const _hd = new Date();
+  const hoyISO = _hd.getFullYear() + '-' + String(_hd.getMonth() + 1).padStart(2, '0') + '-' + String(_hd.getDate()).padStart(2, '0');
+  const campanias = (r.campanias || []).filter(c => !c.hasta || c.hasta >= hoyISO);
+  // El avance sale de lo YA publicado: objetivos → su propia vista (fila obj1/obj2);
+  // bonos → r.bonos; multiplicadores → mínimos (incMinReqs) y extra (chart.extraByInc).
+  const campProg = (c) => {
+    if (c.kind === 'objetivo') {
+      const rr = rows.find(x => x.vista === c.id);
+      const res = rr && rr.resumen;
+      if (!res || !(res.objetivo > 0)) return null;
+      return { tipo: 'monto', actual: res.facturacion || 0, meta: res.objetivo,
+        calificado: !!(res.requisitos && res.requisitos.calificado) };
+    }
+    if (c.tipo === 'bono') {
+      const b = (r.bonos || []).find(x => x.incId === c.id);
+      if (b && b.isTeam) return b.totalAsesores > 0 ? { tipo: 'equipo', calificados: b.calificadosCount || 0, total: b.totalAsesores } : null;
+      if (b && b.umbral > 0) return { tipo: 'monto', actual: b.facturado || 0, meta: b.umbral, calificado: !!b.calificado };
+      return null;
+    }
+    const q = (r.incMinReqs || []).find(x => x.incId === c.id);
+    const ex = ((r.chart && r.chart.extraByInc) || []).find(x => x.incId === c.id);
+    const extra = ex ? (ex.activo || 0) + (ex.pend || 0) : 0;
+    if (q && q.min > 0) return { tipo: 'polizas', actual: q.activadas || 0, meta: q.min, cumple: !!q.cumple, extra };
+    return extra > 0 ? { tipo: 'extra', extra } : null;
+  };
+
   const diasViejo = (Date.now() - new Date(actual.updated_at).getTime()) / 86400000;
   const stale = diasViejo > 1;
   const pctC = (p) => p == null ? '#6366f1' : p >= 100 ? '#16a34a' : p >= 75 ? '#d97706' : '#dc2626';
@@ -12457,6 +12564,15 @@ function ProduccionOLE({ target, selfUserId }) {
         {stale ? '⚠ ' : ''}Producción actualizada <strong>{hace(actual.updated_at)}</strong> — {fechaLarga(actual.updated_at)}
         {stale ? ' (puede estar desactualizada)' : ''}
       </div>
+
+      {/* Campañas vigentes: incentivos y objetivos con premio + detalle */}
+      {campanias.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 10, marginBottom: 18 }}>
+          {campanias.map(c => (
+            <CampaniaCard key={c.kind + c.id} camp={c} prog={campProg(c)} hoy={hoyISO} onDetalle={() => setCampDet(c)} />
+          ))}
+        </div>
+      )}
 
       {/* Tarjeta resumen */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 18 }}>
@@ -12627,6 +12743,8 @@ function ProduccionOLE({ target, selfUserId }) {
           <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>Sin pólizas en este período.</div>
         )}
       </div>
+
+      {campDet && <CampaniaDetalleModal camp={campDet} onClose={() => setCampDet(null)} />}
     </div>
   );
 }
