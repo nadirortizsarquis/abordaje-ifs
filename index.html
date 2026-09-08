@@ -12524,9 +12524,7 @@ function CampaniaDetalleModal({ camp, flyer, flyerPags, onClose }) {
             </div>
           )}
           {camp.resumen && <div style={{ fontSize: 13, color: '#374151', fontWeight: 600, marginBottom: 12, lineHeight: 1.5 }}>{camp.resumen}</div>}
-          {camp.detalle
-            ? <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{camp.detalle}</div>
-            : <div style={{ fontSize: 13, color: '#9ca3af' }}>Todavía no hay reglas detalladas cargadas para esta campaña. Consultá las condiciones oficiales con tu líder.</div>}
+          {camp.detalle && <div style={{ fontSize: 13, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{camp.detalle}</div>}
         </div>
       </div>
       {zoomImg && pags.length > 0 && (
