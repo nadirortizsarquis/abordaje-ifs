@@ -12350,11 +12350,15 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
       {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
     </div>
   );
+  const inicioFin = (row) => row.tiempo && (
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, fontWeight: 600, color: '#9ca3af', marginTop: 2 }}>
+      <span>inicio</span><span>fin</span>
+    </div>
+  );
   return (
-    <div ref={ref} style={{ flex: '1 1 300px', minWidth: 260, maxWidth: 780, borderLeft: '1px solid #eef0f4', paddingLeft: 24 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Avance por campaña</span>
-        <span style={{ fontSize: 10, fontWeight: 600, color: '#c4c7d0' }}>tocá una para ver premio y reglas</span>
+    <div ref={ref} style={{ flex: '1 1 300px', minWidth: 260, borderLeft: '1px solid #eef0f4', paddingLeft: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>Avance por campaña</div>
       </div>
       {rows.map((row, i) => {
         const tc = row.pct != null ? _tempColor(row.done ? 1 : row.pct) : (row.done ? _SEG.extraAct : _SEG.base);
@@ -12368,7 +12372,10 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
           <div key={i} onClick={() => onOpen && row.camp && onOpen(row.camp)} title="Ver premio y reglas de esta campaña"
             style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, cursor: 'pointer' }}>
             <span style={{ width: 190, flexShrink: 0, minWidth: 0 }}>{nombreCell}</span>
-            {barra(row)}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex' }}>{barra(row)}</div>
+              {inicioFin(row)}
+            </div>
             {numeros(row, tc)}
           </div>
         ) : (
@@ -12379,6 +12386,7 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
               {numeros(row, tc)}
             </div>
             <div style={{ display: 'flex', marginTop: 4 }}>{barra(row)}</div>
+            {inicioFin(row)}
           </div>
         );
       })}
@@ -12934,18 +12942,16 @@ function ProduccionOLE({ target, selfUserId }) {
       {/* Gráfico Objetivo vs Real */}
       {r.chart && (
         <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '16px 18px', marginBottom: 18 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 18, flexWrap: 'wrap', gap: 6 }}>
-            <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>Avance vs objetivos</div>
-            <div style={{ textAlign: 'right' }}>
-              {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
-                <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
-              )}
-            </div>
-          </div>
-          {/* Gráficos a la izquierda (con referencias centradas debajo) + barras de
-              avance por campaña a la derecha; en mobile el panel cae debajo (wrap). */}
+          {/* Dos secciones: gráficos (título + período reportado arriba) y avance por
+              campaña (título nivelado); en mobile el panel cae debajo (wrap). */}
           <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
             <div style={{ flex: '0 1 680px', minWidth: 300 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+                <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>Avance vs objetivos</div>
+                {r.periodo && (r.periodo.desde || r.periodo.hasta) && (
+                  <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textAlign: 'right' }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
+                )}
+              </div>
               <OleChart chart={r.chart} pct={r.pct} />
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 10, maxWidth: 680 }}>
                 {(() => {
