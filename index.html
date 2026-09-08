@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>IFS - Abordaje</title>
 <!-- PWA: permite "Agregar a inicio" en iOS/Android. En modo standalone el
      localStorage es persistente y la sesión de Supabase dura meses sin
@@ -9174,7 +9174,7 @@ const FilaProspecto = React.memo(function FilaProspecto({ prospecto, onSelect, s
         <ActorStar item={prospecto} />
         {prospecto.nombre || <em style={{color:'var(--texto-suave)',fontWeight:400}}>(sin nombre)</em>}
         {prospecto.createdAt && (
-          <div style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', fontWeight: 400, marginTop: 2 }}>
+          <div className="col-creado" style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', fontWeight: 400, marginTop: 2 }}>
             creado {dateToDDMMYY(new Date(prospecto.createdAt))}
           </div>
         )}
@@ -12415,7 +12415,7 @@ function CampaniaDetalleModal({ camp, onClose }) {
   );
 }
 
-function CampaniaCard({ camp, prog, hoy, onDetalle }) {
+function CampaniaCard({ camp, prog, hoy, linked = [], onDetalle, onOpen }) {
   const per = s => (s || '').split('-').reverse().join('/');
   const inc = camp.kind === 'incentivo';
   const porComenzar = camp.desde && camp.desde > hoy;
@@ -12426,10 +12426,19 @@ function CampaniaCard({ camp, prog, hoy, onDetalle }) {
       ? 'Facturá ' + fmt$(camp.umbral) + min
       : 'Tu facturación cuenta ×' + camp.multiplicador + min;
   const premio = camp.premio ? fmtPremio(camp.premio) : (camp.tipo === 'multiplicador' && camp.multiplicador > 1 ? 'Facturación ×' + camp.multiplicador : null);
-  // Barra de avance según lo que haya para medir (si no hay datos, la card queda informativa)
-  let barPct = null, barLabel = null, done = false;
+  // Barra de avance según lo que haya para medir (si no hay datos, la card queda informativa).
+  // En objetivos con extra de incentivos la barra es de dos colores: base (indigo) + extra (verde),
+  // igual que el gráfico Avance vs objetivo.
+  let barPct = null, barExtraPct = null, barLabel = null, done = false;
   if (prog) {
-    if (prog.tipo === 'monto' && prog.meta > 0) { barPct = Math.min((prog.actual / prog.meta) * 100, 100); barLabel = fmt$(prog.actual) + ' / ' + fmt$(prog.meta); done = !!prog.calificado || prog.actual >= prog.meta; }
+    if (prog.tipo === 'monto' && prog.meta > 0) {
+      const extra = prog.extra || 0;
+      const base = Math.max((prog.actual || 0) - extra, 0);
+      barPct = Math.min((base / prog.meta) * 100, 100);
+      if (extra > 0) barExtraPct = Math.min((extra / prog.meta) * 100, 100 - barPct);
+      barLabel = fmt$(prog.actual) + ' / ' + fmt$(prog.meta) + (extra > 0 ? ' · extra ' + fmt$(extra) : '');
+      done = !!prog.calificado || prog.actual >= prog.meta;
+    }
     else if (prog.tipo === 'polizas' && prog.meta > 0) { barPct = Math.min((prog.actual / prog.meta) * 100, 100); barLabel = `${prog.actual}/${prog.meta} pólizas` + (prog.extra > 0 ? ' · extra ' + fmt$(prog.extra) : ''); done = !!prog.cumple; }
     else if (prog.tipo === 'extra' && prog.extra > 0) { barLabel = 'Extra generado: ' + fmt$(prog.extra); done = true; }
     else if (prog.tipo === 'equipo' && prog.total > 0) { barPct = (prog.calificados / prog.total) * 100; barLabel = `${prog.calificados}/${prog.total} asesores calificados`; done = prog.calificados === prog.total; }
@@ -12440,14 +12449,21 @@ function CampaniaCard({ camp, prog, hoy, onDetalle }) {
         <span style={{ fontSize: 9.5, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: inc ? '#16a34a' : '#3E4095', background: inc ? '#dcfce7' : '#e0e7ff', borderRadius: 5, padding: '2px 7px' }}>{camp.kind}</span>
         {(camp.desde || camp.hasta) && <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600 }}>{per(camp.desde)} — {per(camp.hasta)}</span>}
         {porComenzar && <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fef3c7', borderRadius: 5, padding: '1px 6px' }}>por comenzar</span>}
+        {linked.map(l => (
+          <span key={l.id} onClick={() => onOpen && onOpen(l)} title="Ver detalle del incentivo"
+            style={{ fontSize: 10, fontWeight: 800, color: '#16a34a', background: '#dcfce7', borderRadius: 5, padding: '1px 7px', cursor: 'pointer' }}>
+            {l.nombre}{l.multiplicador > 1 ? ` ×${l.multiplicador}` : ''}
+          </span>
+        ))}
       </div>
       <div style={{ fontSize: 15, fontWeight: 800, color: '#1e1b4b' }}>{camp.nombre}</div>
       {camp.resumen && <div style={{ fontSize: 12, color: '#6b7280', lineHeight: 1.45 }}>{camp.resumen}</div>}
       <div style={{ fontSize: 12.5, fontWeight: 700, color: '#374151' }}>{lograr}</div>
       {premio && <div style={{ fontSize: 12.5, fontWeight: 800, color: '#16a34a' }}>Premio: {premio}</div>}
       {barPct != null && (
-        <div style={{ height: 7, background: '#f3f4f6', borderRadius: 5, overflow: 'hidden', marginTop: 2 }}>
+        <div style={{ height: 7, background: '#f3f4f6', borderRadius: 5, overflow: 'hidden', marginTop: 2, display: 'flex' }}>
           <div style={{ width: barPct + '%', height: '100%', background: done ? '#16a34a' : '#6366f1', transition: 'width .35s ease' }} />
+          {barExtraPct > 0 && <div style={{ width: barExtraPct + '%', height: '100%', background: done ? '#15803d' : '#16a34a', transition: 'width .35s ease' }} />}
         </div>
       )}
       {barLabel && <div style={{ fontSize: 11, fontWeight: 700, color: done ? '#16a34a' : '#6b7280' }}>{done ? '✓ ' : ''}{barLabel}</div>}
@@ -12468,6 +12484,7 @@ function ProduccionOLE({ target, selfUserId }) {
   const [url, setUrl]     = useState(null);
   const [err, setErr]     = useState(null);
   const [campDet, setCampDet] = useState(null);
+  const [campOpen, setCampOpen] = useState(false);
 
   const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
   const nombre = target.nombre;
@@ -12541,7 +12558,10 @@ function ProduccionOLE({ target, selfUserId }) {
       const rr = rows.find(x => x.vista === c.id);
       const res = rr && rr.resumen;
       if (!res || !(res.objetivo > 0)) return null;
+      // `facturacion` ya incluye el extra de incentivos (igual que el gráfico);
+      // se pasa `extra` aparte para pintar la barra en dos colores.
       return { tipo: 'monto', actual: res.facturacion || 0, meta: res.objetivo,
+        extra: res.extra || 0,
         calificado: !!(res.requisitos && res.requisitos.calificado) };
     }
     if (c.tipo === 'bono') {
@@ -12612,14 +12632,35 @@ function ProduccionOLE({ target, selfUserId }) {
         {stale ? ' (puede estar desactualizada)' : ''}
       </div>
 
-      {/* Campañas vigentes: incentivos y objetivos con premio + detalle */}
-      {campanias.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 10, marginBottom: 18 }}>
-          {campanias.map(c => (
-            <CampaniaCard key={c.kind + c.id} camp={c} prog={campProg(c)} hoy={hoyISO} onDetalle={() => setCampDet(c)} />
-          ))}
-        </div>
-      )}
+      {/* Campañas vigentes: glass colapsable → al abrirlo, cards de incentivos y objetivos.
+          Los incentivos vinculados a un objetivo (linkObjId) NO tienen card propia:
+          aparecen como chip en la card del objetivo y su extra pinta la barra en verde. */}
+      {campanias.length > 0 && (() => {
+        const visibles = campanias.filter(c => !(c.kind === 'incentivo' && c.linkObjId && campanias.some(o => o.kind === 'objetivo' && o.id === c.linkObjId)));
+        const linkedDe = (obj) => campanias.filter(c => c.kind === 'incentivo' && c.linkObjId === obj.id);
+        return (
+          <div style={{ marginBottom: 18 }}>
+            <div onClick={() => setCampOpen(o => !o)}
+              style={{ cursor: 'pointer', background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, maxWidth: 360, userSelect: 'none' }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Progreso · objetivos e incentivos</div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: '#1e1b4b', marginTop: 4 }}>{visibles.length} vigente{visibles.length === 1 ? '' : 's'}</div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#3E4095', marginTop: 3 }}>{campOpen ? 'Ocultar' : 'Ver campañas'}</div>
+              </div>
+              <span style={{ fontSize: 16, color: '#9ca3af', flexShrink: 0 }}>{campOpen ? '▲' : '▼'}</span>
+            </div>
+            {campOpen && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', gap: 10, marginTop: 10 }}>
+                {visibles.map(c => (
+                  <CampaniaCard key={c.kind + c.id} camp={c} prog={campProg(c)} hoy={hoyISO}
+                    linked={c.kind === 'objetivo' ? linkedDe(c) : []}
+                    onDetalle={() => setCampDet(c)} onOpen={setCampDet} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Tarjeta resumen */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginBottom: 18 }}>
