@@ -1396,3 +1396,11 @@ se dejan en App. Pendiente solo `useGcalSync` para sesión dedicada (ver STATE.m
 - Fila 1 = fecha + nav ‹ Hoy › a la derecha; fila 2 = selector
   Mes/Semana/Hoy(/Calendarios). Grid con display:contents en el wrapper
   interno (traía display:flex inline). APP_VERSION → 2026-09-08.8.
+
+---
+
+# Sesión 2026-09-08 (9) — Padding superior del contenido a la mitad (mobile)
+
+- `.main` en mobile: padding-top 20px → 10px (todas las solapas arrancan
+  más pegadas al header). El Kanban gana esos 10px de altura de columna
+  (calc 172px → 162px). APP_VERSION → 2026-09-08.9.

@@ -1107,7 +1107,7 @@
       /* alto: viewport - header (con safe-area) - padding main - chips -
          toggle autoorden al pie - barra inferior. Si el cálculo queda corto
          en algún device, el min-height garantiza una columna usable. */
-      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 172px - env(safe-area-inset-bottom, 0px));
+      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 162px - env(safe-area-inset-bottom, 0px));
       min-height: 300px;
       scrollbar-width: none;
     }
@@ -3646,7 +3646,7 @@
     .header-admin-badge { font-size: 0.64rem; padding: 2px 6px; }
     .bell-btn { width: 36px; height: 36px; }
 
-    .main { padding: 20px 16px; }
+    .main { padding: 10px 16px; }
     /* En mobile la línea del footer rompe el padding de .main (16px) para
        llegar de punta a punta del tablero; el texto sigue centrado. */
     .app-footer-line { margin-left: -16px; margin-right: -16px; border-radius: 0; }
@@ -4084,7 +4084,7 @@
 <script>
 // Versión visible de la app (footer del login). Bumpear en cada deploy:
 // permite saber qué versión está viendo un user cuando reporta un problema.
-const APP_VERSION = '2026-09-08.8';
+const APP_VERSION = '2026-09-08.9';
 const SUPABASE_URL = 'https://hxjpnekzncqepbhpdkfv.supabase.co';
 const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_PE4TlV6PydSNLaEJshPqwg_G-_q5aCq';
 const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
