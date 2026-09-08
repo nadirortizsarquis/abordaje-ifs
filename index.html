@@ -12344,8 +12344,9 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
     </span>
   );
   const barra = (row) => (
-    <div style={{ flex: 1, height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex' }}>
-      <div style={{ width: row.bw + '%', background: _SEG.base, transition: 'width .35s ease' }} />
+    <div style={{ flex: 1, height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex' }}
+      title={row.tiempo ? 'La barra muestra el tiempo transcurrido de la ventana del incentivo' : undefined}>
+      <div style={{ width: row.bw + '%', background: row.tiempo ? '#5CC6D0' : _SEG.base, transition: 'width .35s ease' }} />
       {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
     </div>
   );
@@ -12705,7 +12706,7 @@ function ProduccionOLE({ target, selfUserId }) {
     const ex = ((r.chart && r.chart.extraByInc) || []).find(x => x.incId === c.id);
     const extra = ex ? (ex.activo || 0) + (ex.pend || 0) : 0;
     if (q && q.min > 0) return { tipo: 'polizas', actual: q.activadas || 0, meta: q.min, cumple: !!q.cumple, extra };
-    return extra > 0 ? { tipo: 'extra', extra } : null;
+    return { tipo: 'extra', extra };
   };
   // Filas del panel "Avance por campaña" (al lado del gráfico): campañas cuya
   // ventana se solapa con el período de la vista actual, con el avance ya calculado.
@@ -12730,8 +12731,21 @@ function ProduccionOLE({ target, selfUserId }) {
         bw: Math.min((prog.actual || 0) / prog.meta, 1) * 100, ew: 0,
         detail: (prog.actual || 0) + '/' + prog.meta + ' pól.' + (prog.extra > 0 ? ' · extra ' + fmt$(prog.extra) : '') };
     }
-    if (prog.tipo === 'extra' && prog.extra > 0) {
-      return { camp: c, nombre: nom, pct: null, done: true, bw: 0, ew: 100, detail: 'extra ' + fmt$(prog.extra) };
+    if (prog.tipo === 'extra') {
+      // Sin mínimo no hay meta: la barra (teal) muestra el TIEMPO transcurrido de la
+      // ventana del incentivo; el dato es el extra generado + días restantes.
+      let tiempo = null, tiempoLbl = '';
+      const t0 = c.desde ? new Date(c.desde + 'T00:00:00') : null;
+      const t1 = c.hasta ? new Date(c.hasta + 'T23:59:59') : null;
+      if (t0 && t1 && t1 > t0) {
+        const hoy = new Date();
+        tiempo = Math.min(Math.max((hoy - t0) / (t1 - t0), 0), 1);
+        const dias = Math.ceil((t1 - hoy) / 86400000);
+        const perF = s => (s || '').split('-').reverse().join('/');
+        tiempoLbl = hoy < t0 ? 'empieza ' + perF(c.desde) : (dias > 0 ? 'quedan ' + dias + ' día' + (dias === 1 ? '' : 's') : 'finalizado');
+      }
+      return { camp: c, nombre: nom, pct: null, done: false, bw: tiempo != null ? tiempo * 100 : 0, ew: 0, tiempo: true,
+        detail: 'extra ' + fmt$(prog.extra || 0) + (tiempoLbl ? ' · ' + tiempoLbl : '') };
     }
     if (prog.tipo === 'equipo' && prog.total > 0) {
       return { camp: c, nombre: nom, pct: prog.calificados / prog.total, done: prog.calificados === prog.total,
