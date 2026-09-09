@@ -3653,6 +3653,9 @@
     .app-footer { display: none; }
     /* Sin rebote del scroll del documento más allá del contenido. */
     html, body { overscroll-behavior-y: none; }
+    /* Vista Tareas: el kanban scrollea por adentro (columnas) — el documento queda
+       BLOQUEADO de arriba a abajo (la clase la pone App según la vista activa). */
+    body.tareas-lock { overflow: hidden; height: 100dvh; }
     /* En mobile, la tabla de prospectos se convierte en lista de cards
        verticales: cada fila ocupa el ancho completo, sin scroll horizontal,
        y los datos se apilan dentro de la card. Esto reemplaza el approach
@@ -7275,6 +7278,13 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   });
   useEffect(() => {
     try { localStorage.setItem('abordaje_view', view); } catch {}
+  }, [view]);
+  // En Tareas el kanban tiene su propio scroll interno: se bloquea el scroll del
+  // documento (solo aplica en mobile vía CSS body.tareas-lock) para que la vista
+  // quede fija de arriba a abajo.
+  useEffect(() => {
+    document.body.classList.toggle('tareas-lock', view === 'tareas');
+    return () => document.body.classList.remove('tareas-lock');
   }, [view]);
   // Contador de invitaciones pendientes de "Calendario compartido" (badge en la solapa).
   const [calCompPending, setCalCompPending] = useState(0);
