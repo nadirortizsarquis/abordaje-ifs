@@ -662,6 +662,13 @@
     user-select: none;
   }
   .kanban-autoorden input { cursor: pointer; accent-color: #7c3aed; margin: 0; }
+  /* Toggle deslizante (verde prendido / gris apagado) — mismo lenguaje que el Tablero. */
+  .tgl { display: inline-block; width: 34px; height: 19px; border-radius: 19px; background: #d1d5db; position: relative; transition: background .18s; flex-shrink: 0; vertical-align: middle; }
+  .tgl.on { background: #16a34a; }
+  .tgl-dot { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left .18s; }
+  .tgl.on .tgl-dot { left: 17px; }
+  /* Tile "Autoordenar" al final del carrusel del kanban — SOLO mobile. */
+  .kanban-autoorden-col { display: none; }
   .kanban-col {
     flex: 0 0 240px;
     background: var(--bg-card);
@@ -1107,7 +1114,9 @@
       /* alto: viewport - header (con safe-area) - padding main - chips -
          toggle autoorden al pie - barra inferior. Si el cálculo queda corto
          en algún device, el min-height garantiza una columna usable. */
-      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 162px - env(safe-area-inset-bottom, 0px));
+      /* Sin la fila inferior de autoorden (ahora es un tile del carrusel) y con el
+         margen superior recortado, el descuento baja de 162px a 122px. */
+      height: calc(100dvh - var(--header-h) - max(env(safe-area-inset-top, 0px), 32px) - 122px - env(safe-area-inset-bottom, 0px));
       min-height: 300px;
       scrollbar-width: none;
     }
@@ -1127,6 +1136,27 @@
     .kanban-add-col {
       flex: 0 0 55vw;
       scroll-snap-align: center;
+    }
+    /* Tile de autoorden: una "columna" más al final del carrusel, con el toggle verde. */
+    .kanban-autoorden-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      flex: 0 0 55vw;
+      scroll-snap-align: center;
+      align-self: stretch;
+      min-height: 160px;
+      border: 2px dashed var(--borde);
+      border-radius: 12px;
+      padding: 18px 16px;
+      color: var(--texto-suave);
+      font-size: 0.82rem;
+      font-weight: 600;
+      text-align: center;
+      cursor: pointer;
+      user-select: none;
     }
   }
 
@@ -3819,9 +3849,6 @@
      padding-bottom de .main gane al de la media query de arriba. */
   .bottom-nav { display: none; }
   .bottom-nav-sheet-ov { display: none; }
-  /* Toggle de autoorden al pie del tablero (solo mobile): en cel el check
-     vive DEBAJO del carrusel, no en la fila de arriba. */
-  .kanban-autoorden-bottom { display: none; }
   @media (max-width: 720px) {
     .view-tabs { display: none; }
     .main { padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px)); }
@@ -3829,13 +3856,12 @@
        y encima pisa la barra de navegación inferior. !important porque el
        botón trae display:flex inline (le ganaba a esta regla). */
     .claude-fab { display: none !important; }
-    /* El check de autoorden se muda de la fila superior al pie del tablero. */
+    /* El check de autoorden se muda de la fila superior al carrusel (tile final). */
     .main-head-combined .kanban-autoorden { display: none; }
-    .kanban-autoorden-bottom {
-      display: flex;
-      justify-content: center;
-      padding: 8px 0 2px;
-    }
+    /* Vista Tareas: menos aire entre el header y los chips de columnas —
+       el tablero sube y aprovecha la pantalla completa. */
+    body.tareas-lock .main { padding-top: 2px; }
+    body.tareas-lock .kanban-chips { padding-top: 0; }
     .bottom-nav {
       position: fixed;
       left: 0;
@@ -8489,6 +8515,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           tipoPorProspecto={tipoPorProspecto}
           readOnly={readOnly}
           autoOrden={autoOrdenTareas}
+          onToggleAutoOrden={toggleAutoOrdenTareas}
           onAddTarea={handleAddTarea}
           onDropTarea={handleDropTarea}
           onTogglePin={handleTogglePin}
@@ -8500,18 +8527,6 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onSetCompania={handleSetCompania}
         />
       )}
-      {view === 'tareas' && (
-        /* Copia mobile del toggle de autoorden, al pie del tablero (la de la
-           fila superior se oculta en <=720px; en desktop esta no se ve). */
-        <div className="kanban-autoorden-bottom">
-          <label className="kanban-autoorden"
-            title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
-            <input type="checkbox" checked={autoOrdenTareas} onChange={toggleAutoOrdenTareas} />
-            <span>Autoordenar por vencimiento</span>
-          </label>
-        </div>
-      )}
-
       {view === 'calendario' && (
         <>
           {/* El Calendario NO se filtra: los filtros son exclusivos de la Lista
@@ -17635,7 +17650,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
 }
 
 // ── KANBAN: VISTA TAREAS ──────────────────────────────────────
-function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
+function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onToggleAutoOrden, onAddTarea, onDropTarea, onTogglePin, onEditarTarea, onAddColumna, onRenameColumna, onDeleteColumna, onMoveColumna, onSetCompania }) {
   // useMemo: `cols` baja hasta TareaCard (menú "Mover a…" en mobile); con
   // identidad estable el React.memo de las cards sigue siendo efectivo.
   const cols = useMemo(
@@ -17679,6 +17694,15 @@ function TareasView({ tareasState, tipoPorProspecto, readOnly, autoOrden, onAddT
         ))}
         {!readOnly && (
           <button className="kanban-add-col" onClick={onAddColumna}>+ Nueva columna</button>
+        )}
+        {/* Tile de autoorden (solo mobile por CSS): una opción más al final del
+            carrusel, con toggle verde — reemplaza la fila que había al pie. */}
+        {onToggleAutoOrden && (
+          <div className="kanban-autoorden-col" onClick={onToggleAutoOrden} role="switch" aria-checked={!!autoOrden}
+            title="Ordena cada columna por fecha de vencimiento: lo más próximo a vencer o vencido hace más tiempo, arriba. Las tarjetas fijadas quedan siempre arriba.">
+            <span className={'tgl' + (autoOrden ? ' on' : '')}><span className="tgl-dot" /></span>
+            <span>Autoordenar por vencimiento</span>
+          </div>
         )}
       </div>
     </>
