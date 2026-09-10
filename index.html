@@ -7308,9 +7308,31 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // En Tareas el kanban tiene su propio scroll interno: se bloquea el scroll del
   // documento (solo aplica en mobile vía CSS body.tareas-lock) para que la vista
   // quede fija de arriba a abajo.
+  // Fix teclado (iOS/Android): al abrir el teclado con un campo del modal (ej. la
+  // bitácora), el navegador desplaza el documento AUNQUE tenga overflow hidden; al
+  // cerrar el teclado ese scroll fantasma queda pegado y deja el hueco del teclado
+  // con las columnas corridas. Se devuelve el scroll a 0 al perder foco el campo y
+  // cuando el viewport visual recupera su altura.
   useEffect(() => {
     document.body.classList.toggle('tareas-lock', view === 'tareas');
-    return () => document.body.classList.remove('tareas-lock');
+    if (view !== 'tareas') return () => document.body.classList.remove('tareas-lock');
+    const esMobile = () => window.innerWidth <= 720;
+    const volver = () => {
+      if (!esMobile()) return;
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+    const onFocusOut = () => setTimeout(volver, 80);
+    const vv = window.visualViewport;
+    const onVV = () => { if (vv && vv.height > window.innerHeight * 0.8) volver(); };
+    document.addEventListener('focusout', onFocusOut);
+    if (vv) vv.addEventListener('resize', onVV);
+    return () => {
+      document.body.classList.remove('tareas-lock');
+      document.removeEventListener('focusout', onFocusOut);
+      if (vv) vv.removeEventListener('resize', onVV);
+    };
   }, [view]);
   // Contador de invitaciones pendientes de "Calendario compartido" (badge en la solapa).
   const [calCompPending, setCalCompPending] = useState(0);
