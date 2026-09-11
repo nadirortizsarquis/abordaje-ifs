@@ -12393,18 +12393,41 @@ function AvanceCampaniasPanel({ rows, onOpen }) {
       <span style={{ fontSize: 10.5, fontWeight: 600, color: '#9ca3af' }}>{row.pct != null ? ' · ' : ''}{row.detail}</span>
     </span>
   );
-  const barra = (row) => (
-    <div style={{ flex: 1, height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex' }}
-      title={row.tiempo ? 'La barra muestra el tiempo transcurrido de la ventana del incentivo' : undefined}>
-      <div style={{ width: row.bw + '%', background: row.tiempo ? '#5CC6D0' : _SEG.base, transition: 'width .35s ease' }} />
-      {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
-    </div>
-  );
-  const inicioFin = (row) => row.tiempo && (
+  const barra = (row) => {
+    // Bono multi-escala: barra dividida en tramos (verde al cumplir el umbral, gris si no).
+    if (Array.isArray(row.escalas) && row.escalas.length) {
+      return (
+        <div style={{ flex: 1, height: 14, display: 'flex', gap: 3 }}>
+          {row.escalas.map((s, k) => (
+            <div key={k} title={fmtPremio(s.premio)} style={{ flex: 1, background: s.cumple ? _SEG.extraAct : '#e5e7eb', borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'background .35s ease' }}>
+              {s.cumple && <span style={{ fontSize: 9, fontWeight: 900, color: '#fff' }}>✓</span>}
+            </div>
+          ))}
+        </div>
+      );
+    }
+    return (
+      <div style={{ flex: 1, height: 14, background: '#f3f4f6', borderRadius: 7, overflow: 'hidden', display: 'flex' }}
+        title={row.tiempo ? 'La barra muestra el tiempo transcurrido de la ventana del incentivo' : undefined}>
+        <div style={{ width: row.bw + '%', background: row.tiempo ? '#5CC6D0' : _SEG.base, transition: 'width .35s ease' }} />
+        {row.ew > 0 && <div style={{ width: row.ew + '%', background: _SEG.extraAct }} />}
+      </div>
+    );
+  };
+  const inicioFin = (row) => row.tiempo ? (
     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9.5, fontWeight: 600, color: '#9ca3af', marginTop: 2 }}>
       <span>inicio</span><span>fin</span>
     </div>
-  );
+  ) : (Array.isArray(row.escalas) && row.escalas.length ? (
+    <div style={{ display: 'flex', gap: 3, marginTop: 2 }}>
+      {row.escalas.map((s, k) => (
+        <div key={k} style={{ flex: 1, textAlign: 'center', fontSize: 8.5, fontWeight: 700, lineHeight: 1.15, color: s.cumple ? _SEG.extraAct : '#9ca3af' }}>
+          <div>{fmt$(s.umbral)}</div>
+          {s.premio ? <div style={{ color: '#6366f1' }}>{fmtPremio(s.premio)}</div> : null}
+        </div>
+      ))}
+    </div>
+  ) : null);
   return (
     <div ref={ref} style={{ flex: '1 1 300px', minWidth: 260, borderLeft: '1px solid #eef0f4', paddingLeft: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
@@ -12498,7 +12521,15 @@ function CampaniaDetalleModal({ camp, flyer, flyerPags, flyerPaths, onClose }) {
             <span style={{ fontSize: 10, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', color: inc ? '#16a34a' : '#3E4095', background: inc ? '#dcfce7' : '#e0e7ff', borderRadius: 5, padding: '2px 7px' }}>{camp.kind}</span>
             <div style={{ fontSize: 17, fontWeight: 800, color: '#1e1b4b', marginTop: 6 }}>{camp.nombre}</div>
             {(camp.desde || camp.hasta) && <div style={{ fontSize: 12, color: '#6b7280', fontWeight: 600, marginTop: 2 }}>{per(camp.desde)} — {per(camp.hasta)}</div>}
-            {camp.premio && <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 4 }}>Premio: {fmtPremio(camp.premio)}</div>}
+            {Array.isArray(camp.escalas) && camp.escalas.length > 1 ? (
+              <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                {camp.escalas.map((s, k) => (
+                  <div key={k} style={{ fontSize: 12.5, fontWeight: 700, color: '#16a34a' }}>
+                    <span style={{ color: '#6b7280' }}>Desde {fmtPremio(s.umbral)}:</span> {fmtPremio(s.premio)}
+                  </div>
+                ))}
+              </div>
+            ) : (camp.premio && <div style={{ fontSize: 13, fontWeight: 800, color: '#16a34a', marginTop: 4 }}>Premio: {fmtPremio(camp.premio)}</div>)}
           </div>
           <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 22, color: '#9ca3af', cursor: 'pointer', lineHeight: 1, padding: 2 }}>×</button>
         </div>
@@ -12695,6 +12726,8 @@ function ProduccionOLE({ target, selfUserId }) {
     if (c.tipo === 'bono') {
       const b = (r.bonos || []).find(x => x.incId === c.id);
       if (b && b.isTeam) return b.totalAsesores > 0 ? { tipo: 'equipo', calificados: b.calificadosCount || 0, total: b.totalAsesores } : null;
+      // Bono multi-escala: barra dividida en tramos (cada tramo verde al superar su umbral).
+      if (b && Array.isArray(b.escalasEval) && b.escalasEval.length > 1) return { tipo: 'escalas', actual: b.facturado || 0, escalas: b.escalasEval };
       if (b && b.umbral > 0) return { tipo: 'monto', actual: b.facturado || 0, meta: b.umbral, calificado: !!b.calificado };
       return null;
     }
@@ -12746,6 +12779,11 @@ function ProduccionOLE({ target, selfUserId }) {
     if (prog.tipo === 'equipo' && prog.total > 0) {
       return { camp: c, nombre: nom, pct: prog.calificados / prog.total, done: prog.calificados === prog.total,
         bw: (prog.calificados / prog.total) * 100, ew: 0, detail: prog.calificados + '/' + prog.total + ' asesores calificados' };
+    }
+    if (prog.tipo === 'escalas' && Array.isArray(prog.escalas) && prog.escalas.length) {
+      const esc = prog.escalas, reached = esc.filter(s => s.cumple).length;
+      return { camp: c, nombre: nom, pct: null, done: reached === esc.length, escalas: esc, bw: 0, ew: 0,
+        detail: fmt$(prog.actual) + ' · ' + reached + '/' + esc.length + ' escalas' };
     }
     return null;
   }).filter(Boolean).map(row => {
