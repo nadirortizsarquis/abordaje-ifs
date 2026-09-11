@@ -12978,7 +12978,7 @@ function ProduccionOLE({ target, selfUserId }) {
                   <div style={{ fontSize: 11, color: '#9ca3af', fontWeight: 600, textAlign: 'right' }}>{r.vistaLabel} · {(r.periodo.desde || '').split('-').reverse().join('/')} — {(r.periodo.hasta || '').split('-').reverse().join('/')}</div>
                 )}
               </div>
-              <OleChart chart={r.chart} pct={r.pct} />
+              <OleChart chart={r.chart} />
               <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', justifyContent: 'center', fontSize: 11, color: '#6b7280', marginTop: 10, maxWidth: 680 }}>
                 {(() => {
                   const byInc = (r.chart && r.chart.extraByInc) || [];
