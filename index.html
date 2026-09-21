@@ -7042,12 +7042,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Calendario de pagos: estado + derivados, extraídos a useCalPagoUI (refactor #32).
   const { calPagoSel, setCalPagoSel, calPagoNuevoSignal, setCalPagoNuevoSignal, calPagoQ, setCalPagoQ,
     calRoster, calPagoEffIds, calPagoNombreDe, calPagoSelfCanon } = useCalPagoUI(prodAgentes, isAdminProd, agente, user);
-  useEffect(() => {
-    if (!agente) return;
-    setProdTarget(viewAs
-      ? { type: 'user', userId: viewAs.id, nombre: viewAs.display_name || viewAs.email }
-      : { type: 'user', userId: agente.id, nombre: agente.display_name || user?.email });
-  }, [agente?.id, viewAs?.id]);
+  // El efecto que setea prodTarget vive más abajo (necesita principalProfile,
+  // que se declara después) — así el asistente autorizado apunta a su principal.
   useEffect(() => {
     if (!isAdminProd) return;
     sb.from('profiles').select('id, display_name, email, advisor_name_ole').is('assistant_of_id', null)
@@ -7065,11 +7061,25 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (!isAssistant) { setPrincipalProfile(null); return; }
     let cancelled = false;
     sb.from('profiles')
-      .select('id, email, display_name, gcal_enabled, shares_calendar_with_assistant')
+      .select('id, email, display_name, advisor_name_ole, gcal_enabled, shares_calendar_with_assistant, permitir_asistente_ver_produccion, ole_ver_produccion')
       .eq('id', agente.assistant_of_id).maybeSingle()
       .then(({ data }) => { if (!cancelled) setPrincipalProfile(data || null); });
     return () => { cancelled = true; };
   }, [isAssistant, agente?.assistant_of_id, principalReloadKey]);
+
+  // ¿El asistente está autorizado por su principal a ver la producción de éste?
+  // (consentimiento opt-in del principal, enforced también en RLS). Cuando es así,
+  // "Mi producción" del asistente muestra la del principal, como si fuese el agente.
+  const assistantCanSeeProd = isAssistant && !!principalProfile?.permitir_asistente_ver_produccion;
+  useEffect(() => {
+    if (!agente) return;
+    if (viewAs) { setProdTarget({ type: 'user', userId: viewAs.id, nombre: viewAs.display_name || viewAs.email }); return; }
+    if (assistantCanSeeProd && principalProfile) {
+      setProdTarget({ type: 'user', userId: principalProfile.id, nombre: principalProfile.display_name || principalProfile.advisor_name_ole || principalProfile.email });
+      return;
+    }
+    setProdTarget({ type: 'user', userId: agente.id, nombre: agente.display_name || user?.email });
+  }, [agente?.id, viewAs?.id, assistantCanSeeProd, principalProfile?.id]);
 
   // Cache de actor_id → { display_name, email } para mostrar nombres en el
   // tooltip de la estrella. Carga lazy: solo fetch los profiles que aparecen
@@ -7157,6 +7167,21 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       : 'Tu asistente ya no ve tu Google Calendar');
   };
 
+  // El principal autoriza (o no) que su asistente vea SU producción ("Mi
+  // producción"). Se persiste en profiles.permitir_asistente_ver_produccion; la
+  // RLS de ole_reportes lo chequea cuando un asistente lee la fila del principal.
+  const handleTogglePermitirAsistenteVerProd = async (enabled) => {
+    if (!agente?.id) return;
+    const { error } = await sb.from('profiles')
+      .update({ permitir_asistente_ver_produccion: enabled })
+      .eq('id', agente.id);
+    if (error) throw error;
+    setAgente(a => a ? { ...a, permitir_asistente_ver_produccion: enabled } : a);
+    showToast(enabled
+      ? 'Tu asistente ahora puede ver tu producción'
+      : 'Tu asistente ya no ve tu producción');
+  };
+
   // Detecta el retorno del flujo OAuth (querystring) y refresca el agente.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -7164,7 +7189,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,compartir_calendario').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,compartir_calendario').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -8352,10 +8377,10 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           Las acciones (Excel, PDF, + Nuevo prospecto) bajan al renglón del
           FilterBar para ahorrar una línea. */}
       <div className="main-head-combined" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-        <ViewTabs view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
+        <ViewTabs view={view} setView={setView} showProd={(!isAssistant && agente?.ole_ver_produccion !== false) || assistantCanSeeProd} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
         {/* En mobile las solapas se ocultan y navega la barra inferior (position:
             fixed — da igual dónde se renderice; comparte props con ViewTabs). */}
-        <BottomNav view={view} setView={setView} showProd={!isAssistant && agente?.ole_ver_produccion !== false} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
+        <BottomNav view={view} setView={setView} showProd={(!isAssistant && agente?.ole_ver_produccion !== false) || assistantCanSeeProd} showCalPagos={!isAssistant && agente?.ole_ver_calendario_pagos === true} showCalCompartido={!isAssistant && agente?.compartir_calendario === true} calCompPending={calCompPending} />
         {view === 'produccion' && isAdminProd && prodTarget && (
           <span style={{ fontSize: 13, fontWeight: 600, color: '#6b7280' }}>Producción de</span>
         )}
@@ -8401,8 +8426,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         )}
       </div>
 
-      {view === 'produccion' && !isAssistant && agente?.ole_ver_produccion !== false && prodTarget && (
-        <ProduccionOLE target={prodTarget} selfUserId={agente?.id || user?.id} />
+      {view === 'produccion' && ((!isAssistant && agente?.ole_ver_produccion !== false) || assistantCanSeeProd) && prodTarget && (
+        <ProduccionOLE target={prodTarget} selfUserId={assistantCanSeeProd && principalProfile ? principalProfile.id : (agente?.id || user?.id)} />
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
@@ -8662,6 +8687,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onLinkOAuth={handleLinkOAuth}
           onUnlinkOAuth={handleUnlinkOAuth}
           onToggleShareCalWithAssistant={handleToggleShareCalWithAssistant}
+          onTogglePermitirAsistenteVerProd={handleTogglePermitirAsistenteVerProd}
         />
       )}
 
@@ -15592,7 +15618,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
 // ── PROFILES API (compartido entre apps IFS) ──────────────────
 async function loadAllProfiles() {
   const { data, error } = await sb.from('profiles')
-    .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, ole_ver_calendario_pagos, assistant_of_id, shares_calendar_with_assistant, created_at')
+    .select('id, email, display_name, role, advisor_name_ole, ole_ver_produccion, ole_ver_calendario_pagos, assistant_of_id, shares_calendar_with_assistant, permitir_asistente_ver_produccion, created_at')
     // Ocultar el usuario de ejemplo (demo) salvo que esté activado.
     .or('is_demo.eq.false,demo_active.eq.true')
     .order('role', { ascending: false })
@@ -15728,7 +15754,7 @@ function AdminTh({ children, right }) {
 // Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
 const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
-function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
+function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd }) {
   const enabled = !!agente?.gcal_enabled;
   const workspace = isWorkspaceUser(agente);
   const canLink = canLinkGoogleCalendar(agente);
@@ -15751,6 +15777,8 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
   }, [agente?.id]);
   const hasAssistant = assistants.length > 0;
   const shareEnabled = !!agente?.shares_calendar_with_assistant;
+  const [prodShareBusy, setProdShareBusy] = useState(false);
+  const prodShareEnabled = !!agente?.permitir_asistente_ver_produccion;
 
   const toggleWorkspace = async () => {
     if (busy) return;
@@ -15782,6 +15810,14 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
     try { await onToggleShareCalWithAssistant(next); }
     catch (e) { setErr(e?.message || String(e)); }
     finally { setShareBusy(false); }
+  };
+  const toggleProdShare = async () => {
+    if (prodShareBusy || !onTogglePermitirAsistenteVerProd) return;
+    const next = !prodShareEnabled;
+    setErr(null); setProdShareBusy(true);
+    try { await onTogglePermitirAsistenteVerProd(next); }
+    catch (e) { setErr(e?.message || String(e)); }
+    finally { setProdShareBusy(false); }
   };
 
   return (
@@ -15903,6 +15939,35 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
                     editar y borrar eventos en tu nombre.
                   </>
                 )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasAssistant && (
+        <div style={{
+          marginTop: 14, padding: '12px 14px',
+          background: '#fafafa', border: '1px solid #e5e7eb',
+          borderRadius: 10,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+            <div
+              className={`toggle-switch ${prodShareEnabled ? 'on' : ''}`}
+              onClick={toggleProdShare}
+              role="switch"
+              aria-checked={prodShareEnabled}
+              aria-disabled={prodShareBusy}
+              style={prodShareBusy ? { opacity: 0.5, pointerEvents: 'none', flexShrink: 0 } : { flexShrink: 0 }}
+            />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#1e1b4b' }}>
+                Mostrar mi producción a mi asistente
+              </div>
+              <div style={{ fontSize: 11, color: '#6b7280', marginTop: 4, lineHeight: 1.5 }}>
+                {prodShareEnabled
+                  ? <>Tu asistente ve la solapa <strong>Mi producción</strong> con tus mismos números, como si fuese tu vista.</>
+                  : <>Por defecto tu asistente no ve tu producción. Si activás esta opción, va a ver la solapa <strong>Mi producción</strong> con tus datos (los mismos que ves vos).</>}
               </div>
             </div>
           </div>
@@ -16271,7 +16336,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
   const [profiles, setProfiles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
-  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '', ole_ver_produccion: true, ole_ver_calendario_pagos: false });
+  const [draft, setDraft] = useState({ display_name: '', advisor_name_ole: '', role: 'agent', assistant_of_id: '', ole_ver_produccion: true, ole_ver_calendario_pagos: false, permitir_asistente_ver_produccion: false });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -16300,6 +16365,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
       assistant_of_id: p.assistant_of_id || '',
       ole_ver_produccion: p.ole_ver_produccion !== false,
       ole_ver_calendario_pagos: p.ole_ver_calendario_pagos === true,
+      permitir_asistente_ver_produccion: p.permitir_asistente_ver_produccion === true,
     });
     setError(null);
   };
@@ -16316,6 +16382,7 @@ function UsuariosSection({ currentUser, onViewAs }) {
         assistant_of_id: draft.assistant_of_id || null,
         ole_ver_produccion: draft.ole_ver_produccion,
         ole_ver_calendario_pagos: draft.ole_ver_calendario_pagos,
+        permitir_asistente_ver_produccion: draft.permitir_asistente_ver_produccion,
       });
       setProfiles(ps => ps.map(p => p.id === id ? { ...p, ...draft, assistant_of_id: draft.assistant_of_id || null } : p));
       setEditingId(null);
@@ -16545,6 +16612,12 @@ function UsuariosSection({ currentUser, onViewAs }) {
                             <input type="checkbox" checked={draft.ole_ver_calendario_pagos}
                               onChange={e => setDraft(d => ({ ...d, ole_ver_calendario_pagos: e.target.checked }))} />
                             Mostrar calendario de pagos
+                          </label>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', cursor: 'pointer' }}
+                            title="Si el asesor tiene asistente, la habilita a ver la producción del asesor en Mi producción">
+                            <input type="checkbox" checked={draft.permitir_asistente_ver_produccion}
+                              onChange={e => setDraft(d => ({ ...d, permitir_asistente_ver_produccion: e.target.checked }))} />
+                            Asistente ve su producción
                           </label>
                         </div>
                       ) : (
@@ -17556,7 +17629,7 @@ function ErroresSection() {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -17688,6 +17761,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onLinkOAuth={onLinkOAuth}
             onUnlinkOAuth={onUnlinkOAuth}
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
+            onTogglePermitirAsistenteVerProd={onTogglePermitirAsistenteVerProd}
           />
           {!esAdmin && currentUser?.id && (
             <CalendarioCompartidoGeneralSection userId={currentUser.id} />
@@ -20120,7 +20194,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) {
