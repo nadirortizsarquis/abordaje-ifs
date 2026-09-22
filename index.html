@@ -13000,21 +13000,62 @@ function ProduccionOLE({ target, selfUserId }) {
       : { padding: '8px 4px 40px' }}>
       {selector}
 
-      {/* ── Modo proyección: toggle + badge (a la derecha, cluster propio) ── */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
-        {proyOn && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0098DA', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(0,152,218,.32)' }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />PROYECCIÓN
+      {/* Fila: selector de vistas (izq) + toggle Modo proyección (der) en la misma
+          línea para ahorrar pantalla. Selector mobile: 3 desplegables. */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+      {rows.length > 1 && (() => {
+        const labelDe = (row) => (row.resumen && row.resumen.vistaLabel) || VL[row.vista] || row.vista;
+        if (esMobileOLE) {
+          const grupoDe = (row) => {
+            const v = row.vista || '';
+            if (v === 'anual' || /^per_/.test(v)) return 'per';
+            return /bono|incentivo|premio/.test(labelDe(row).toLowerCase()) ? 'inc' : 'obj';
+          };
+          return (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[['per', 'Período', '#0098DA'], ['obj', 'Objetivos', '#3E4095'], ['inc', 'Incentivos', '#16a34a']].map(([g, lab, col]) => {
+                const items = rows.filter(x => grupoDe(x) === g);
+                if (!items.length) return null;
+                const cur = items.find(x => x.vista === vista);
+                return <_CascadaSel key={g} text={cur ? labelDe(cur) : lab} color={col} active={!!cur}
+                  items={items.map(x => ({ key: x.vista, label: labelDe(x) }))}
+                  current={vista} onPick={setVista} />;
+              })}
+            </div>
+          );
+        }
+        return (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {rows.map(row => (
+              <button key={row.vista} onClick={() => setVista(row.vista)}
+                style={{ border: '1px solid', borderColor: vista === row.vista ? '#3E4095' : '#d1d5db',
+                  background: vista === row.vista ? '#3E4095' : '#fff', color: vista === row.vista ? '#fff' : '#374151',
+                  borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                  boxShadow: vista === row.vista ? '0 2px 8px rgba(62,64,149,0.28)' : 'none' }}>
+                {labelDe(row)}
+              </button>
+            ))}
           </div>
-        )}
-        <div onClick={() => setProy(p => !p)} title="Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Local, no se publica."
-          style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: proy ? '#e8f6fd' : '#fff', border: '1.5px solid ' + (proy ? '#0098DA' : '#e5e7eb'), borderRadius: 12, padding: '8px 13px' }}>
-          <div style={{ width: 46, height: 26, borderRadius: 26, background: proy ? '#0098DA' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
-            <div style={{ position: 'absolute', top: 3, left: proy ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transition: 'left .2s' }} />
-          </div>
-          <div>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: proy ? '#0b6fa0' : '#374151' }}>Modo proyección</div>
-            <div style={{ fontSize: 10.5, fontWeight: 600, color: '#9ca3af' }}>{proy ? 'sumando ventas a la vista' : 'datos reales'}</div>
+        );
+      })()}
+        </div>
+        {/* Modo proyección: toggle + badge (a la derecha de las vistas) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {proyOn && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0098DA', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(0,152,218,.32)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />PROYECCIÓN
+            </div>
+          )}
+          <div onClick={() => setProy(p => !p)} title="Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Local, no se publica."
+            style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: proy ? '#e8f6fd' : '#fff', border: '1.5px solid ' + (proy ? '#0098DA' : '#e5e7eb'), borderRadius: 12, padding: '7px 12px' }}>
+            <div style={{ width: 44, height: 25, borderRadius: 25, background: proy ? '#0098DA' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+              <div style={{ position: 'absolute', top: 3, left: proy ? 22 : 3, width: 19, height: 19, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transition: 'left .2s' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: proy ? '#0b6fa0' : '#374151', whiteSpace: 'nowrap' }}>Modo proyección</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', whiteSpace: 'nowrap' }}>{proy ? 'sumando ventas a la vista' : 'datos reales'}</div>
+            </div>
           </div>
         </div>
       </div>
@@ -13078,43 +13119,6 @@ function ProduccionOLE({ target, selfUserId }) {
           )}
         </div>
       )}
-
-      {/* Selector de vista — mobile: 3 desplegables (Período / Objetivos / Incentivos) */}
-      {rows.length > 1 && (() => {
-        const labelDe = (row) => (row.resumen && row.resumen.vistaLabel) || VL[row.vista] || row.vista;
-        if (esMobileOLE) {
-          const grupoDe = (row) => {
-            const v = row.vista || '';
-            if (v === 'anual' || /^per_/.test(v)) return 'per';
-            return /bono|incentivo|premio/.test(labelDe(row).toLowerCase()) ? 'inc' : 'obj';
-          };
-          return (
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-              {[['per', 'Período', '#0098DA'], ['obj', 'Objetivos', '#3E4095'], ['inc', 'Incentivos', '#16a34a']].map(([g, lab, col]) => {
-                const items = rows.filter(x => grupoDe(x) === g);
-                if (!items.length) return null;
-                const cur = items.find(x => x.vista === vista);
-                return <_CascadaSel key={g} text={cur ? labelDe(cur) : lab} color={col} active={!!cur}
-                  items={items.map(x => ({ key: x.vista, label: labelDe(x) }))}
-                  current={vista} onPick={setVista} />;
-              })}
-            </div>
-          );
-        }
-        return (
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            {rows.map(row => (
-              <button key={row.vista} onClick={() => setVista(row.vista)}
-                style={{ border: '1px solid', borderColor: vista === row.vista ? '#3E4095' : '#d1d5db',
-                  background: vista === row.vista ? '#3E4095' : '#fff', color: vista === row.vista ? '#fff' : '#374151',
-                  borderRadius: 999, padding: '6px 14px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-                  boxShadow: vista === row.vista ? '0 2px 8px rgba(62,64,149,0.28)' : 'none' }}>
-                {labelDe(row)}
-              </button>
-            ))}
-          </div>
-        );
-      })()}
 
       {/* Frescura — SIEMPRE en un renglón (si no entra, se corta con …) */}
       <div style={{ fontSize: 13, fontWeight: stale ? 600 : 400, color: stale ? '#991b1b' : '#6b7280', background: stale ? '#fef2f2' : 'transparent',
