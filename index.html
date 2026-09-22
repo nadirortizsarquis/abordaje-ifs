@@ -8427,7 +8427,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       </div>
 
       {view === 'produccion' && ((!isAssistant && agente?.ole_ver_produccion !== false) || assistantCanSeeProd) && prodTarget && (
-        <ProduccionOLE target={prodTarget} selfUserId={assistantCanSeeProd && principalProfile ? principalProfile.id : (agente?.id || user?.id)} esAdmin={isAdminProd} esAsistente={isAssistant} />
+        <ProduccionOLE target={prodTarget} selfUserId={assistantCanSeeProd && principalProfile ? principalProfile.id : (agente?.id || user?.id)} esAsistente={isAssistant} />
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
@@ -12746,7 +12746,7 @@ function _proyResumen(res, clientesOn) {
   return out;
 }
 
-function ProduccionOLE({ target, selfUserId, esAdmin, esAsistente }) {
+function ProduccionOLE({ target, selfUserId, esAsistente }) {
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
   const [url, setUrl]     = useState(null);
