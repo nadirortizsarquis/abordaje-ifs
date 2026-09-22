@@ -12646,6 +12646,106 @@ function _CascadaSel({ text, color, active, items, current, onPick }) {
 // Lee ole_reportes del usuario efectivo (RLS: solo lo propio o admin) y
 // muestra vista interactiva (KPIs + gráfico + detalle) + descarga PDF.
 // Asistentes NO acceden (la solapa ni se muestra para ellos).
+
+// ── MODO PROYECCIÓN (helpers puros) ───────────────────────────
+// El asesor carga ventas que está por cerrar y la vista recalcula TODO sumándolas,
+// para ver "cómo queda parado si cierra su pipeline". Es local (localStorage), no se
+// publica ni afecta ningún número real. `_proyResumen` es una función pura testeable
+// (harness): proyecta un `resumen` publicado inyectando los clientes prendidos.
+function _proyHoyISO() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+function _proyId() { return 'c' + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); }
+function _proyInWin(iso, desde, hasta) { return (!desde || iso >= desde) && (!hasta || iso <= hasta); }
+// Proyecta un resumen de Mi producción sumando `clientesOn` (ventas por cerrar).
+// - Base/productividad: clientes cuya fecha efectiva cae en el período de ESTA vista
+//   (así una vista de objetivo acotado no se infla con ventas fuera de su ventana).
+// - Extra: por cada incentivo multiplicador (campanias) cuya ventana contiene la fecha,
+//   suma prima*(mult-1), con el gate del mínimo de negocios (incMinReqs). Si el mínimo
+//   NO se cumplía y la proyección lo destraba, se suma sólo el extra de las ventas
+//   proyectadas (no reconstruye el extra retroactivo de la base — under-count deliberado
+//   para no sobreestimar). Persistencia = baseline (diferida a v1).
+function _proyResumen(res, clientesOn) {
+  if (!res || !Array.isArray(clientesOn) || !clientesOn.length) return res;
+  const per = res.periodo || {};
+  const enVista = clientesOn.filter(c => _proyInWin(c.fecha, per.desde, per.hasta));
+  const addBase = enVista.reduce((s, c) => s + (Number(c.prima) || 0), 0);
+  const addCount = enVista.length;
+
+  // Ventanas de incentivos multiplicador (id === incId de incMinReqs / chart.extraByInc).
+  const incs = (res.campanias || []).filter(c => c.kind === 'incentivo' && c.tipo === 'multiplicador');
+  const minById = {}; (res.incMinReqs || []).forEach(q => { minById[q.incId] = q; });
+  const extraAddById = {};
+  incs.forEach(m => {
+    const enInc = clientesOn.filter(c => _proyInWin(c.fecha, m.desde, m.hasta));
+    const q = minById[m.id];
+    const projActiv = ((q && q.activadas) || 0) + enInc.length;
+    const cumple = (q && q.min > 0) ? projActiv >= q.min : true;
+    const mult = Number(m.multiplicador) || 1;
+    extraAddById[m.id] = cumple ? enInc.reduce((s, c) => s + (Number(c.prima) || 0) * (mult - 1), 0) : 0;
+  });
+  const addExtra = Object.keys(extraAddById).reduce((s, k) => s + extraAddById[k], 0);
+
+  const out = { ...res };
+  const caidas = res.caidas || 0;
+  const baseActReal = res.activoPuro != null ? res.activoPuro
+    : Math.max((res.facturacion || 0) - (res.pendiente || 0) - (res.extra || 0) - caidas, 0);
+  out.facturacion = (res.facturacion || 0) + addBase + addExtra;
+  out.activoPuro = baseActReal + addBase;
+  out.extra = (res.extra || 0) + addExtra;
+  out.extraActivo = (res.extraActivo != null ? res.extraActivo : (res.extra || 0)) + addExtra;
+  out.productividad = (res.productividad || 0) + addCount;
+  out.pct = res.objetivo > 0 ? Math.round(out.facturacion / res.objetivo * 100) : res.pct;
+  out.pctProd = res.objetivoProd > 0 ? Math.round(out.productividad / res.objetivoProd * 100) : res.pctProd;
+
+  if (res.chart) {
+    const ch = { ...res.chart };
+    ch.base = (res.chart.base || 0) + addBase;
+    ch.extraActivo = (res.chart.extraActivo != null ? res.chart.extraActivo : (res.chart.extra || 0)) + addExtra;
+    if (res.chart.extra != null) ch.extra = (res.chart.extra || 0) + addExtra;
+    const segs = (res.chart.extraByInc || []).map(s => ({ ...s }));
+    const byId = {}; segs.forEach(s => { byId[s.incId] = s; });
+    incs.forEach(m => {
+      const add = extraAddById[m.id] || 0; if (add <= 0) return;
+      if (byId[m.id]) byId[m.id].activo = (byId[m.id].activo || 0) + add;
+      else { const ns = { incId: m.id, name: m.nombre, activo: add, pend: 0 }; segs.push(ns); byId[m.id] = ns; }
+    });
+    ch.extraByInc = segs;
+    out.chart = ch;
+  }
+
+  if (Array.isArray(res.incMinReqs)) out.incMinReqs = res.incMinReqs.map(q => {
+    const m = incs.find(x => x.id === q.incId); if (!m) return q;
+    const add = clientesOn.filter(c => _proyInWin(c.fecha, m.desde, m.hasta)).length;
+    if (!add) return q;
+    const activadas = (q.activadas || 0) + add;
+    return { ...q, activadas, cumple: q.min > 0 ? activadas >= q.min : true };
+  });
+
+  if (Array.isArray(res.bonos)) out.bonos = res.bonos.map(b => {
+    const c = (res.campanias || []).find(x => x.id === b.incId);
+    const add = c ? clientesOn.filter(cl => _proyInWin(cl.fecha, c.desde, c.hasta)).reduce((s, cl) => s + (Number(cl.prima) || 0), 0) : 0;
+    if (add <= 0) return b;
+    const facturado = (b.facturado || 0) + add;
+    const nb = { ...b, facturado };
+    if (b.umbral > 0) nb.calificado = facturado >= b.umbral;
+    if (Array.isArray(b.escalasEval)) nb.escalasEval = b.escalasEval.map(s => ({ ...s, cumple: facturado >= s.umbral }));
+    return nb;
+  });
+
+  if (res.requisitos) {
+    const rq = { ...res.requisitos };
+    rq.nActivas = (res.requisitos.nActivas || 0) + addCount;
+    if (res.objetivo > 0) rq.cumpleMonto = out.facturacion >= res.objetivo;
+    if (rq.minPolizas > 0) rq.cumplePol = rq.nActivas >= rq.minPolizas;
+    rq.calificado = !!rq.cumpleMonto && (!(rq.minPolizas > 0) || rq.cumplePol) && (!(rq.persistenciaMinPct > 0) || rq.cumplePersist);
+    out.requisitos = rq;
+  }
+
+  return out;
+}
+
 function ProduccionOLE({ target, selfUserId }) {
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
@@ -12654,6 +12754,27 @@ function ProduccionOLE({ target, selfUserId }) {
   const [campDet, setCampDet] = useState(null);   // campaña abierta en el modal de detalle
   const [showCaidas, setShowCaidas] = useState(false);  // toggle "Mostrar caídas" del detalle
   const esMobileOLE = _useIsMobileOLE();
+
+  // ── Modo proyección (local, opt-in) ──
+  const proyKey = 'ifs_proy_' + (target.type === 'equipo' ? 'equipo' : target.userId);
+  const [proy, setProy] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
+  const [clientes, setClientes] = useState([]);
+  const [draft, setDraft] = useState({ nombre: '', prima: '', fecha: _proyHoyISO() });
+  useEffect(() => {   // cargar ventas guardadas al cambiar de target (no auto-prende)
+    try { const raw = localStorage.getItem(proyKey); setClientes(raw ? JSON.parse(raw) : []); }
+    catch (e) { setClientes([]); }
+  }, [proyKey]);
+  const _persistCli = (cs) => { try { localStorage.setItem(proyKey, JSON.stringify(cs)); } catch (e) {} };
+  const addCli = () => {
+    const prima = parseFloat(String(draft.prima).replace(/[^\d.]/g, '')) || 0;
+    if (!draft.nombre.trim() || prima <= 0) return;
+    setClientes(cs => { const next = [...cs, { id: _proyId(), nombre: draft.nombre.trim(), prima, fecha: draft.fecha || _proyHoyISO(), on: true }]; _persistCli(next); return next; });
+    setDraft({ nombre: '', prima: '', fecha: _proyHoyISO() });
+  };
+  const toggleCli = id => setClientes(cs => { const next = cs.map(c => c.id === id ? { ...c, on: !c.on } : c); _persistCli(next); return next; });
+  const delCli = id => setClientes(cs => { const next = cs.filter(c => c.id !== id); _persistCli(next); return next; });
+  const setFechaCli = (id, v) => setClientes(cs => { const next = cs.map(c => c.id === id ? { ...c, fecha: v } : c); _persistCli(next); return next; });
 
   const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
   const nombre = target.nombre;
@@ -12734,14 +12855,24 @@ function ProduccionOLE({ target, selfUserId }) {
     </div>
   );
 
-  const r = actual.resumen || {};
+  const rReal = actual.resumen || {};
+  const clientesOn = proy ? clientes.filter(c => c.on) : [];
+  const proyOn = proy && clientesOn.length > 0;
+  const r = proyOn ? _proyResumen(rReal, clientesOn) : rReal;
+  const rowsProj = proyOn
+    ? rows.map(row => (row && row.resumen) ? { ...row, resumen: _proyResumen(row.resumen, clientesOn) } : row)
+    : rows;
+  const proyDelta = proyOn ? (r.facturacion || 0) - (rReal.facturacion || 0) : 0;
+  // Incentivos multiplicador vigentes (para taggear ventas que caen en su ventana).
+  const proyIncs = (rReal.campanias || []).filter(c => c.kind === 'incentivo' && c.tipo === 'multiplicador' && c.desde && c.hasta);
+  const proyIncDe = (fecha) => proyIncs.find(m => _proyInWin(fecha, m.desde, m.hasta));
 
   // ── Campañas vigentes (bloque `campanias` del Tablero) + avance personal ──
   // El avance sale de lo YA publicado: objetivos → su propia vista (fila obj1/obj2);
   // bonos → r.bonos; multiplicadores → mínimos (incMinReqs) y extra (chart.extraByInc).
   const campProg = (c) => {
     if (c.kind === 'objetivo') {
-      const rr = rows.find(x => x.vista === c.id);
+      const rr = rowsProj.find(x => x.vista === c.id);
       const res = rr && rr.resumen;
       // Vista del objetivo NO publicada para este asesor: en vez de que la campaña
       // desaparezca del panel sin explicación, la mostramos como "sin datos".
@@ -12862,8 +12993,91 @@ function ProduccionOLE({ target, selfUserId }) {
   );
 
   return (
-    <div style={{ padding: '8px 4px 40px' }}>
+    <div style={proyOn
+      ? { padding: '14px 14px 40px', borderRadius: 16, transition: 'background .3s',
+          background: 'repeating-linear-gradient(135deg, rgba(0,152,218,.045) 0 14px, rgba(0,152,218,0) 14px 28px), linear-gradient(180deg,#f2fbff,#e9f6fe)',
+          boxShadow: '0 0 0 2px #0098DA inset, 0 12px 40px rgba(0,152,218,.12)' }
+      : { padding: '8px 4px 40px' }}>
       {selector}
+
+      {/* ── Modo proyección: toggle + badge (a la derecha, cluster propio) ── */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        {proyOn && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0098DA', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(0,152,218,.32)' }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />PROYECCIÓN
+          </div>
+        )}
+        <div onClick={() => setProy(p => !p)} title="Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Local, no se publica."
+          style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: proy ? '#e8f6fd' : '#fff', border: '1.5px solid ' + (proy ? '#0098DA' : '#e5e7eb'), borderRadius: 12, padding: '8px 13px' }}>
+          <div style={{ width: 46, height: 26, borderRadius: 26, background: proy ? '#0098DA' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+            <div style={{ position: 'absolute', top: 3, left: proy ? 23 : 3, width: 20, height: 20, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transition: 'left .2s' }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 13.5, fontWeight: 700, color: proy ? '#0b6fa0' : '#374151' }}>Modo proyección</div>
+            <div style={{ fontSize: 10.5, fontWeight: 600, color: '#9ca3af' }}>{proy ? 'sumando ventas a la vista' : 'datos reales'}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Panel de carga colapsable — minimizado queda una línea, así la vista de
+          abajo queda idéntica a la real para comparar. */}
+      {proy && (
+        <div style={{ border: '1.5px solid #0098DA', background: '#e8f6fd', borderRadius: 14, marginBottom: 18, overflow: 'hidden' }}>
+          <div onClick={() => setPanelOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', cursor: 'pointer', userSelect: 'none' }}>
+            <span style={{ fontSize: 13.5, fontWeight: 800, color: '#0b6fa0' }}>Ventas por cerrar</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#5b7f95' }}>· {clientesOn.length} activa{clientesOn.length === 1 ? '' : 's'}{clientes.length !== clientesOn.length ? (' de ' + clientes.length) : ''}</span>
+            {proyDelta > 0 && <span style={{ fontSize: 12.5, fontWeight: 800, color: '#0b6fa0', marginLeft: 'auto' }}>+ {fmt$(proyDelta)} proyectado</span>}
+            <span style={{ marginLeft: proyDelta > 0 ? 12 : 'auto', color: '#0b6fa0', fontSize: 13, transform: panelOpen ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }}>▾</span>
+          </div>
+          {panelOpen && (
+            <div style={{ padding: '0 16px 16px' }}>
+              <p style={{ fontSize: 12, color: '#5b7f95', margin: '0 0 14px' }}>Cargá las ventas que estás por cerrar. La fecha efectiva arranca en hoy (editable). Prendé o apagá cada una para especular. Nada de esto se publica.</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: '#5b7f95', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Cliente</label>
+                  <input value={draft.nombre} placeholder="Nombre…" onChange={e => setDraft(d => ({ ...d, nombre: e.target.value }))} onKeyDown={e => e.key === 'Enter' && addCli()}
+                    style={{ border: '1px solid #bfe3f5', borderRadius: 8, padding: '8px 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: '#fff' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 120px' }}>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: '#5b7f95', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Prima anual</label>
+                  <input value={draft.prima} placeholder="0" inputMode="decimal" onChange={e => setDraft(d => ({ ...d, prima: e.target.value }))} onKeyDown={e => e.key === 'Enter' && addCli()}
+                    style={{ border: '1px solid #bfe3f5', borderRadius: 8, padding: '8px 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: '#fff' }} />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '1 1 150px' }}>
+                  <label style={{ fontSize: 10.5, fontWeight: 700, color: '#5b7f95', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Fecha efectiva</label>
+                  <input type="date" value={draft.fecha} onChange={e => setDraft(d => ({ ...d, fecha: e.target.value }))}
+                    style={{ border: '1px solid #bfe3f5', borderRadius: 8, padding: '8px 10px', fontSize: 13, outline: 'none', fontFamily: 'inherit', background: '#fff' }} />
+                </div>
+                <button onClick={addCli} disabled={!draft.nombre.trim() || !(parseFloat(draft.prima) > 0)}
+                  style={{ background: '#0098DA', color: '#fff', border: 'none', borderRadius: 9, padding: '9px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit', opacity: (!draft.nombre.trim() || !(parseFloat(draft.prima) > 0)) ? 0.4 : 1 }}>Agregar</button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {clientes.length === 0 && <div style={{ fontSize: 12.5, color: '#7ba0b6', textAlign: 'center', padding: 14 }}>Todavía no cargaste ventas. Sumá la primera arriba.</div>}
+                {clientes.map(c => {
+                  const inc = proyIncDe(c.fecha);
+                  return (
+                    <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 12, background: '#fff', border: '1px solid #d7ecfa', borderRadius: 10, padding: '9px 12px', opacity: c.on ? 1 : 0.45 }}>
+                      <div onClick={() => toggleCli(c.id)} style={{ width: 38, height: 22, borderRadius: 22, background: c.on ? '#0098DA' : '#d1d5db', position: 'relative', cursor: 'pointer', flexShrink: 0, transition: 'background .2s' }}>
+                        <div style={{ position: 'absolute', top: 3, left: c.on ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+                      </div>
+                      <div style={{ fontWeight: 700, fontSize: 13, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nombre}</div>
+                      {inc && <span style={{ fontSize: 9.5, fontWeight: 800, color: '#16a34a', background: '#dcfce7', borderRadius: 5, padding: '2px 6px', whiteSpace: 'nowrap' }}>×{inc.multiplicador} extra</span>}
+                      <div style={{ fontWeight: 800, fontSize: 13, color: '#3E4095' }}>{fmt$(c.prima)}</div>
+                      <input type="date" value={c.fecha} onChange={e => setFechaCli(c.id, e.target.value)} style={{ border: '1px solid #d7ecfa', borderRadius: 6, padding: '3px 6px', fontFamily: 'inherit', fontSize: 11.5, color: '#5b7f95' }} />
+                      <div onClick={() => delCli(c.id)} title="Quitar" style={{ cursor: 'pointer', color: '#a9cfe6', fontWeight: 800, fontSize: 16, padding: '0 4px' }}>×</div>
+                    </div>
+                  );
+                })}
+              </div>
+              {proyIncs.length > 0 && (
+                <div style={{ fontSize: 11.5, color: '#5b7f95', marginTop: 12, background: '#fff', borderRadius: 8, padding: '8px 10px', border: '1px solid #d7ecfa' }}>
+                  Las ventas con fecha dentro de la ventana de un incentivo multiplicador generan el extra automáticamente. Si el incentivo pide un mínimo de negocios, el extra recién cuenta cuando la proyección lo alcanza.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Selector de vista — mobile: 3 desplegables (Período / Objetivos / Incentivos) */}
       {rows.length > 1 && (() => {
