@@ -312,6 +312,55 @@ test('pickColumnaAbordar: abordar gana aunque tenga orden mayor', () => {
   assert.equal(g('pickColumnaAbordar')(cols).slug, 'abordar');
 });
 
+// ── _proyResumen: proyección de Mi producción (Modo proyección, PM #70) ──────
+const _baseRes = () => ({
+  periodo: { desde: '2026-01-01', hasta: '2026-12-31' },
+  objetivo: 120000, objetivoProd: 20,
+  facturacion: 78000, activoPuro: 78000, extra: 0, extraActivo: 0, pendiente: 9000, caidas: 0,
+  productividad: 14, pct: 65, pctProd: 70,
+  chart: { objetivo: 120000, base: 78000, pendiente: 9000, extraActivo: 0, extraByInc: [] },
+  campanias: [{ id: 'inc1', kind: 'incentivo', tipo: 'multiplicador', multiplicador: 2, desde: '2026-09-01', hasta: '2026-12-31', nombre: 'Multi Q4' }],
+  incMinReqs: [{ incId: 'inc1', nombre: 'Multi Q4', min: 2, activadas: 0, cumple: false }],
+  requisitos: { cumpleMonto: false, minPolizas: 10, nActivas: 14, cumplePol: true, calificado: false },
+});
+test('_proyResumen: sin clientes devuelve el mismo objeto', () => {
+  const r = _baseRes(); assert.equal(g('_proyResumen')(r, []), r);
+});
+test('_proyResumen: base suma a facturacion/activo/productividad y no muta el input', () => {
+  const r = _baseRes();
+  const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-03-10', on: true }]);
+  assert.equal(p.facturacion, 83000);   // +5000 base, sin extra (fuera de ventana del inc)
+  assert.equal(p.activoPuro, 83000);
+  assert.equal(p.productividad, 15);
+  assert.equal(r.facturacion, 78000);   // input intacto
+});
+test('_proyResumen: extra multiplicador con gate de mínimo de negocios', () => {
+  const r = _baseRes();
+  const p1 = g('_proyResumen')(r, [{ prima: 4000, fecha: '2026-10-01', on: true }]);
+  assert.equal(p1.extra, 0);            // 1 venta: min=2 no se cumple -> sin extra
+  assert.equal(p1.facturacion, 82000);
+  assert.equal(p1.incMinReqs[0].cumple, false);
+  const p2 = g('_proyResumen')(r, [{ prima: 4000, fecha: '2026-10-01', on: true }, { prima: 6000, fecha: '2026-11-01', on: true }]);
+  assert.equal(p2.incMinReqs[0].cumple, true);
+  assert.equal(p2.extra, 10000);        // extra = (4000+6000)*(2-1)
+  assert.equal(p2.facturacion, 78000 + 10000 + 10000);   // base 10000 + extra 10000
+  assert.equal(p2.chart.extraByInc[0].incId, 'inc1');
+  assert.equal(p2.chart.extraByInc[0].activo, 10000);
+});
+test('_proyResumen: recomputa requisitos.cumpleMonto y pct', () => {
+  const r = _baseRes();
+  const p = g('_proyResumen')(r, [{ prima: 50000, fecha: '2026-05-01', on: true }]);
+  assert.equal(p.facturacion, 128000);
+  assert.equal(p.pct, Math.round(128000 / 120000 * 100));
+  assert.equal(p.requisitos.cumpleMonto, true);
+  assert.equal(p.requisitos.nActivas, 15);
+});
+test('_proyResumen: cliente fuera del período de la vista no suma base', () => {
+  const r = _baseRes();
+  const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2025-12-01', on: true }]);
+  assert.equal(p.facturacion, 78000);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
