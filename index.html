@@ -12652,6 +12652,7 @@ function ProduccionOLE({ target, selfUserId }) {
   const [url, setUrl]     = useState(null);
   const [err, setErr]     = useState(null);
   const [campDet, setCampDet] = useState(null);   // campaña abierta en el modal de detalle
+  const [showCaidas, setShowCaidas] = useState(false);  // toggle "Mostrar caídas" del detalle
   const esMobileOLE = _useIsMobileOLE();
 
   const esAjeno = target.type === 'equipo' || target.userId !== selfUserId;
@@ -13042,9 +13043,18 @@ function ProduccionOLE({ target, selfUserId }) {
           <div style={{ fontSize: 16, fontWeight: 800, color: '#1e1b4b' }}>
             Detalle de pólizas {Array.isArray(r.detalle) && <span style={{ fontWeight: 500, color: '#9ca3af' }}>· {r.detalle.length}</span>}
           </div>
-          {url && <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: '#3E4095', textDecoration: 'none', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 12px' }}>Descargar PDF ↗</a>}
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+            {Array.isArray(r.detalleCaidas) && r.detalleCaidas.length > 0 && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: '#374151', cursor: 'pointer', userSelect: 'none' }}
+                title="Mostrar al fondo las pólizas caídas del período (lapsed/canceladas)">
+                <div className={`toggle-switch ${showCaidas ? 'on' : ''}`} onClick={() => setShowCaidas(v => !v)} role="switch" aria-checked={showCaidas} style={{ flexShrink: 0 }} />
+                Mostrar caídas ({r.detalleCaidas.length})
+              </label>
+            )}
+            {url && <a href={url} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 600, color: '#3E4095', textDecoration: 'none', border: '1px solid #c7d2fe', borderRadius: 8, padding: '5px 12px' }}>Descargar PDF ↗</a>}
+          </div>
         </div>
-        {Array.isArray(r.detalle) && r.detalle.length > 0 ? (
+        {((Array.isArray(r.detalle) && r.detalle.length > 0) || (showCaidas && Array.isArray(r.detalleCaidas) && r.detalleCaidas.length > 0)) ? (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
@@ -13055,7 +13065,7 @@ function ProduccionOLE({ target, selfUserId }) {
                 </tr>
               </thead>
               <tbody>
-                {r.detalle.map((p, i) => (
+                {(r.detalle || []).map((p, i) => (
                   <tr key={i} style={{ borderBottom: '1px solid #f3f4f6', background: p.pend ? '#fffdf5' : (i % 2 === 0 ? '#fff' : '#fafafa') }}>
                     <td style={{ padding: '7px 8px', color: '#374151', whiteSpace: 'nowrap' }}>
                       {p.asegurado}
@@ -13066,6 +13076,19 @@ function ProduccionOLE({ target, selfUserId }) {
                     <td style={{ padding: '7px 8px', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.plan}</td>
                     <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: '#1e1b4b', whiteSpace: 'nowrap' }}>{fmt$(p.prima)}</td>
                     <td style={{ padding: '7px 8px', textAlign: 'right', color: '#6b7280', whiteSpace: 'nowrap' }}>{p.fEfectivo}</td>
+                  </tr>
+                ))}
+                {showCaidas && Array.isArray(r.detalleCaidas) && r.detalleCaidas.length > 0 && (
+                  <tr><td colSpan={6} style={{ padding: '10px 8px 4px', fontSize: 10.5, fontWeight: 700, color: '#b91c1c', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Caídas del período · {r.detalleCaidas.length}</td></tr>
+                )}
+                {showCaidas && (r.detalleCaidas || []).map((p, i) => (
+                  <tr key={'caida' + i} style={{ borderBottom: '1px solid #f3f4f6', background: '#fef2f2' }}>
+                    <td style={{ padding: '7px 8px', color: '#9ca3af', whiteSpace: 'nowrap', textDecoration: 'line-through' }}>{p.asegurado}</td>
+                    <td style={{ padding: '7px 8px', color: '#b91c1c', whiteSpace: 'nowrap' }}>{p.estado}</td>
+                    <td style={{ padding: '7px 8px', color: '#9ca3af', whiteSpace: 'nowrap' }}>{p.tipo}</td>
+                    <td style={{ padding: '7px 8px', color: '#9ca3af', whiteSpace: 'nowrap' }}>{p.plan}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600, color: '#9ca3af', whiteSpace: 'nowrap', textDecoration: 'line-through' }}>{fmt$(p.prima)}</td>
+                    <td style={{ padding: '7px 8px', textAlign: 'right', color: '#9ca3af', whiteSpace: 'nowrap' }}>{p.fEfectivo}</td>
                   </tr>
                 ))}
               </tbody>
