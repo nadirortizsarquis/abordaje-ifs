@@ -12739,8 +12739,31 @@ function _proyResumen(res, clientesOn) {
     rq.nActivas = (res.requisitos.nActivas || 0) + addCount;
     if (res.objetivo > 0) rq.cumpleMonto = out.facturacion >= res.objetivo;
     if (rq.minPolizas > 0) rq.cumplePol = rq.nActivas >= rq.minPolizas;
+    // La persistencia del REQUISITO (calificación de bonos) queda REAL a propósito:
+    // no se califica una campaña asumiendo retención futura de pólizas nuevas.
     rq.calificado = !!rq.cumpleMonto && (!(rq.minPolizas > 0) || rq.cumplePol) && (!(rq.persistenciaMinPct > 0) || rq.cumplePersist);
     out.requisitos = rq;
+  }
+
+  // Persistencia proyectada (KPIs): una póliza emitida se asume vigente desde que
+  // está efectiva → suma a las activas y licúa el denominador (la persistencia
+  // sube). Si más adelante cae, es incierto y no se modela. Se recomputa el % de
+  // los conteos; para la del período se autodetecta si el denominador publicado
+  // incluye los pendientes (así el valor base no salta).
+  if (addCount > 0) {
+    if (res.persistActCount != null && res.persistLostCount != null) {
+      const a = res.persistActCount + addCount, denom = res.persistActCount + res.persistLostCount + addCount;
+      out.persistActCount = a;
+      out.persistencia = denom > 0 ? Math.round(a / denom * 100) : res.persistencia;
+    }
+    if (res.persistPeriodoAct != null && res.persistPeriodoLost != null) {
+      const ppAct = res.persistPeriodoAct, ppLost = res.persistPeriodoLost, ppPend = res.persistPeriodoPend || 0;
+      const dA = ppAct + ppLost, dB = ppAct + ppLost + ppPend, pp = res.persistPeriodo || 0;
+      const useB = dB > 0 && Math.abs(Math.round(ppAct / dB * 100) - pp) < Math.abs(Math.round((dA > 0 ? ppAct / dA : 0) * 100) - pp);
+      const base = useB ? dB : dA;
+      out.persistPeriodoAct = ppAct + addCount;
+      out.persistPeriodo = (base + addCount) > 0 ? Math.round((ppAct + addCount) / (base + addCount) * 100) : res.persistPeriodo;
+    }
   }
 
   return out;

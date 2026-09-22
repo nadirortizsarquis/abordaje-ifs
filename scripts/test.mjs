@@ -360,6 +360,27 @@ test('_proyResumen: cliente fuera del período de la vista no suma base', () => 
   const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2025-12-01', on: true }]);
   assert.equal(p.facturacion, 78000);
 });
+test('_proyResumen: persistencia general licua el denominador (sube)', () => {
+  const r = { ...(_baseRes()), persistActCount: 90, persistLostCount: 10, persistencia: 90 };
+  const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-05-01', on: true }, { prima: 3000, fecha: '2026-06-01', on: true }]);
+  assert.equal(p.persistActCount, 92);              // 90 + 2 activas nuevas
+  assert.equal(p.persistencia, Math.round(92 / 102 * 100));  // 92/(92+10) -> 90%
+});
+test('_proyResumen: persistencia del período autodetecta denominador con pendientes', () => {
+  // base publicada 80% = 8 / (8 + 1 + 1) -> el denom incluye el pend
+  const r = { ...(_baseRes()), persistPeriodoAct: 8, persistPeriodoLost: 1, persistPeriodoPend: 1, persistPeriodo: 80 };
+  const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-05-01', on: true }]);
+  assert.equal(p.persistPeriodoAct, 9);
+  assert.equal(p.persistPeriodo, Math.round(9 / 11 * 100));   // (8+1)/(10+1) -> 82%
+});
+test('_proyResumen: requisitos.cumplePersist NO se proyecta (calificación real)', () => {
+  const r = { ...(_baseRes()), persistActCount: 90, persistLostCount: 10, persistencia: 90,
+    requisitos: { cumpleMonto: false, minPolizas: 10, nActivas: 14, cumplePol: true, persistenciaMinPct: 95, cumplePersist: false, calificado: false } };
+  const p = g('_proyResumen')(r, [{ prima: 60000, fecha: '2026-05-01', on: true }]);
+  assert.equal(p.requisitos.cumpleMonto, true);     // monto proyectado alcanza
+  assert.equal(p.requisitos.cumplePersist, false);  // persistencia del requisito sigue real
+  assert.equal(p.requisitos.calificado, false);     // no califica por persistencia
+});
 
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
