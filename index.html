@@ -8427,7 +8427,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       </div>
 
       {view === 'produccion' && ((!isAssistant && agente?.ole_ver_produccion !== false) || assistantCanSeeProd) && prodTarget && (
-        <ProduccionOLE target={prodTarget} selfUserId={assistantCanSeeProd && principalProfile ? principalProfile.id : (agente?.id || user?.id)} />
+        <ProduccionOLE target={prodTarget} selfUserId={assistantCanSeeProd && principalProfile ? principalProfile.id : (agente?.id || user?.id)} esAdmin={isAdminProd} esAsistente={isAssistant} />
       )}
 
       {view === 'calendario_pagos' && !isAssistant && agente?.ole_ver_calendario_pagos === true && (
@@ -12746,7 +12746,7 @@ function _proyResumen(res, clientesOn) {
   return out;
 }
 
-function ProduccionOLE({ target, selfUserId }) {
+function ProduccionOLE({ target, selfUserId, esAdmin, esAsistente }) {
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
   const [url, setUrl]     = useState(null);
@@ -12755,17 +12755,28 @@ function ProduccionOLE({ target, selfUserId }) {
   const [showCaidas, setShowCaidas] = useState(false);  // toggle "Mostrar caídas" del detalle
   const esMobileOLE = _useIsMobileOLE();
 
-  // ── Modo proyección (local, opt-in) ──
-  const proyKey = 'ifs_proy_' + (target.type === 'equipo' ? 'equipo' : target.userId);
+  // ── Modo proyección (persistido en Supabase: ole_proyeccion) ──
+  // Visible solo por asesor individual (no en Equipo) y no para asistentes.
+  // El dueño (el propio asesor) guarda su lista; el admin puede especular ENCIMA
+  // en su pantalla (scratch) sin pisar lo que cargó el agente.
+  const puedeProyectar = target.type === 'user' && !esAsistente;
+  const proyEsPropio = puedeProyectar && target.userId === selfUserId;
   const [proy, setProy] = useState(false);
   const [panelOpen, setPanelOpen] = useState(true);
   const [clientes, setClientes] = useState([]);
   const [draft, setDraft] = useState({ nombre: '', prima: '', fecha: _proyHoyISO() });
-  useEffect(() => {   // cargar ventas guardadas al cambiar de target (no auto-prende)
-    try { const raw = localStorage.getItem(proyKey); setClientes(raw ? JSON.parse(raw) : []); }
-    catch (e) { setClientes([]); }
-  }, [proyKey]);
-  const _persistCli = (cs) => { try { localStorage.setItem(proyKey, JSON.stringify(cs)); } catch (e) {} };
+  useEffect(() => {   // cargar la proyección del target desde Supabase (no auto-prende)
+    setProy(false); setClientes([]);
+    if (!puedeProyectar) return;
+    let vivo = true;
+    sb.from('ole_proyeccion').select('clientes').eq('user_id', target.userId).maybeSingle()
+      .then(({ data }) => { if (vivo) setClientes((data && Array.isArray(data.clientes)) ? data.clientes : []); });
+    return () => { vivo = false; };
+  }, [target.userId, target.type, puedeProyectar]);
+  const _persistCli = (cs) => {
+    if (!proyEsPropio) return;   // admin especulando sobre un agente: no se guarda
+    sb.from('ole_proyeccion').upsert({ user_id: selfUserId, clientes: cs, updated_at: new Date().toISOString() }, { onConflict: 'user_id' }).then(() => {}, () => {});
+  };
   const addCli = () => {
     const prima = parseFloat(String(draft.prima).replace(/[^\d.]/g, '')) || 0;
     if (!draft.nombre.trim() || prima <= 0) return;
@@ -12857,7 +12868,7 @@ function ProduccionOLE({ target, selfUserId }) {
 
   const rReal = actual.resumen || {};
   const clientesOn = proy ? clientes.filter(c => c.on) : [];
-  const proyOn = proy && clientesOn.length > 0;
+  const proyOn = puedeProyectar && proy && clientesOn.length > 0;
   const r = proyOn ? _proyResumen(rReal, clientesOn) : rReal;
   const rowsProj = proyOn
     ? rows.map(row => (row && row.resumen) ? { ...row, resumen: _proyResumen(row.resumen, clientesOn) } : row)
@@ -13040,14 +13051,15 @@ function ProduccionOLE({ target, selfUserId }) {
         );
       })()}
         </div>
-        {/* Modo proyección: toggle + badge (a la derecha de las vistas) */}
+        {/* Modo proyección: toggle + badge (a la derecha de las vistas) — solo por asesor individual, no asistentes */}
+        {puedeProyectar && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           {proyOn && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0098DA', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(0,152,218,.32)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />PROYECCIÓN
             </div>
           )}
-          <div onClick={() => setProy(p => !p)} title="Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Local, no se publica."
+          <div onClick={() => setProy(p => !p)} title={proyEsPropio ? 'Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Se guarda en tu cuenta.' : 'Mirá lo que cargó el asesor y especulá encima (no se guarda).'}
             style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: proy ? '#e8f6fd' : '#fff', border: '1.5px solid ' + (proy ? '#0098DA' : '#e5e7eb'), borderRadius: 12, padding: '7px 12px' }}>
             <div style={{ width: 44, height: 25, borderRadius: 25, background: proy ? '#0098DA' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
               <div style={{ position: 'absolute', top: 3, left: proy ? 22 : 3, width: 19, height: 19, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transition: 'left .2s' }} />
@@ -13058,11 +13070,12 @@ function ProduccionOLE({ target, selfUserId }) {
             </div>
           </div>
         </div>
+        )}
       </div>
 
       {/* Panel de carga colapsable — minimizado queda una línea, así la vista de
           abajo queda idéntica a la real para comparar. */}
-      {proy && (
+      {proy && puedeProyectar && (
         <div style={{ border: '1.5px solid #0098DA', background: '#e8f6fd', borderRadius: 14, marginBottom: 18, overflow: 'hidden' }}>
           <div onClick={() => setPanelOpen(o => !o)} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '11px 16px', cursor: 'pointer', userSelect: 'none' }}>
             <span style={{ fontSize: 13.5, fontWeight: 800, color: '#0b6fa0' }}>Ventas por cerrar</span>
@@ -13072,7 +13085,12 @@ function ProduccionOLE({ target, selfUserId }) {
           </div>
           {panelOpen && (
             <div style={{ padding: '0 16px 16px' }}>
-              <p style={{ fontSize: 12, color: '#5b7f95', margin: '0 0 14px' }}>Cargá las ventas que estás por cerrar. La fecha efectiva arranca en hoy (editable). Prendé o apagá cada una para especular. Nada de esto se publica.</p>
+              {!proyEsPropio && (
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: '#9a3412', background: '#ffedd5', border: '1px solid #fed7aa', borderRadius: 8, padding: '8px 10px', margin: '0 0 12px' }}>
+                  Vista de admin: estás viendo lo que cargó {nombre}. Podés prender/apagar o sumar ventas para especular; tus cambios NO se guardan en su cuenta.
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: '#5b7f95', margin: '0 0 14px' }}>{proyEsPropio ? 'Cargá las ventas que estás por cerrar. La fecha efectiva arranca en hoy (editable). Prendé o apagá cada una para especular. Se guarda en tu cuenta.' : 'Ventas cargadas por el asesor. La fecha efectiva es editable; prendé o apagá cada una para probar escenarios.'}</p>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 14 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4, flex: '2 1 180px' }}>
                   <label style={{ fontSize: 10.5, fontWeight: 700, color: '#5b7f95', textTransform: 'uppercase', letterSpacing: '0.03em' }}>Cliente</label>
