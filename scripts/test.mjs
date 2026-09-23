@@ -360,18 +360,25 @@ test('_proyResumen: cliente fuera del período de la vista no suma base', () => 
   const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2025-12-01', on: true }]);
   assert.equal(p.facturacion, 78000);
 });
-test('_proyResumen: persistencia general licua el denominador (sube)', () => {
+test('_proyResumen: persistencia general anclada al % publicado (sube, sin salto)', () => {
+  // El % publicado (90) NO se reproduce con act/(act+lost)=90/100=90 aca, pero el
+  // ancla usa la tasa publicada sobre el libro mostrado: (0.9*100 + 2)/(100+2).
   const r = { ...(_baseRes()), persistActCount: 90, persistLostCount: 10, persistencia: 90 };
   const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-05-01', on: true }, { prima: 3000, fecha: '2026-06-01', on: true }]);
-  assert.equal(p.persistActCount, 92);              // 90 + 2 activas nuevas
-  assert.equal(p.persistencia, Math.round(92 / 102 * 100));  // 92/(92+10) -> 90%
+  assert.equal(p.persistActCount, 92);              // conteo mostrado: 90 + 2 nuevas
+  assert.equal(p.persistencia, 90.2);               // (0.9*100+2)/102 -> 90.196 -> 90.2
 });
-test('_proyResumen: persistencia del período autodetecta denominador con pendientes', () => {
-  // base publicada 80% = 8 / (8 + 1 + 1) -> el denom incluye el pend
+test('_proyResumen: persistencia del período anclada (sube)', () => {
   const r = { ...(_baseRes()), persistPeriodoAct: 8, persistPeriodoLost: 1, persistPeriodoPend: 1, persistPeriodo: 80 };
   const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-05-01', on: true }]);
   assert.equal(p.persistPeriodoAct, 9);
-  assert.equal(p.persistPeriodo, Math.round(9 / 11 * 100));   // (8+1)/(10+1) -> 82%
+  assert.equal(p.persistPeriodo, 82);               // (0.8*9+1)/(9+1)=8.2/10 -> 82
+});
+test('_proyResumen: persistencia NO salta con add=0 (misma que la real)', () => {
+  // caso Emiliano real: 90.5% con 39 act / 5 caidas (39/44=88.6 != 90.5)
+  const r = { ...(_baseRes()), persistActCount: 39, persistLostCount: 5, persistencia: 90.5 };
+  const p = g('_proyResumen')(r, [{ prima: 5000, fecha: '2026-09-15', on: true }]);
+  assert.equal(p.persistencia, 90.7);               // (0.905*44+1)/45 -> 90.71 -> 90.7 (SUBE, no baja)
 });
 test('_proyResumen: requisitos.cumplePersist NO se proyecta (calificación real)', () => {
   const r = { ...(_baseRes()), persistActCount: 90, persistLostCount: 10, persistencia: 90,

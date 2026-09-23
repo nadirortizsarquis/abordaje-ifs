@@ -12745,25 +12745,24 @@ function _proyResumen(res, clientesOn) {
     out.requisitos = rq;
   }
 
-  // Persistencia proyectada (KPIs): una póliza emitida se asume vigente desde que
-  // está efectiva → suma a las activas y licúa el denominador (la persistencia
-  // sube). Si más adelante cae, es incierto y no se modela. Se recomputa el % de
-  // los conteos; para la del período se autodetecta si el denominador publicado
-  // incluye los pendientes (así el valor base no salta).
+  // Persistencia proyectada: una póliza emitida se asume vigente → licúa el
+  // denominador y la persistencia sube (si después cae, es incierto y no se
+  // modela). OJO: el motor del Tablero calcula el % sobre una base que NO viaja
+  // en el reporte (los conteos act/caídas mostrados NO reproducen el %). Por eso
+  // NO se recomputa desde los conteos (daría un valor distinto al real y hasta
+  // podría bajar). Se ANCLA al % publicado: sobre el libro mostrado (act+caídas)
+  // se toma la tasa real publicada y se suman las pólizas nuevas como activas a
+  // numerador y denominador. En add=0 da EXACTO el valor real (sin salto).
   if (addCount > 0) {
-    if (res.persistActCount != null && res.persistLostCount != null) {
-      const a = res.persistActCount + addCount, denom = res.persistActCount + res.persistLostCount + addCount;
-      out.persistActCount = a;
-      out.persistencia = denom > 0 ? Math.round(a / denom * 100) : res.persistencia;
-    }
-    if (res.persistPeriodoAct != null && res.persistPeriodoLost != null) {
-      const ppAct = res.persistPeriodoAct, ppLost = res.persistPeriodoLost, ppPend = res.persistPeriodoPend || 0;
-      const dA = ppAct + ppLost, dB = ppAct + ppLost + ppPend, pp = res.persistPeriodo || 0;
-      const useB = dB > 0 && Math.abs(Math.round(ppAct / dB * 100) - pp) < Math.abs(Math.round((dA > 0 ? ppAct / dA : 0) * 100) - pp);
-      const base = useB ? dB : dA;
-      out.persistPeriodoAct = ppAct + addCount;
-      out.persistPeriodo = (base + addCount) > 0 ? Math.round((ppAct + addCount) / (base + addCount) * 100) : res.persistPeriodo;
-    }
+    const dilui = (pct, act, lost) => {
+      const denomBase = (act || 0) + (lost || 0);
+      if (!(denomBase > 0) || pct == null) return null;
+      return Math.round(((pct / 100) * denomBase + addCount) / (denomBase + addCount) * 1000) / 10;
+    };
+    const pg = dilui(res.persistencia, res.persistActCount, res.persistLostCount);
+    if (pg != null) { out.persistencia = pg; out.persistActCount = (res.persistActCount || 0) + addCount; }
+    const pp = dilui(res.persistPeriodo, res.persistPeriodoAct, res.persistPeriodoLost);
+    if (pp != null) { out.persistPeriodo = pp; out.persistPeriodoAct = (res.persistPeriodoAct || 0) + addCount; }
   }
 
   return out;
