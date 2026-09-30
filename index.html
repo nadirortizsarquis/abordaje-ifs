@@ -12677,10 +12677,12 @@ function _proyResumen(res, clientesOn) {
   const incs = (res.campanias || []).filter(c => c.kind === 'incentivo' && c.tipo === 'multiplicador');
   const minById = {}; (res.incMinReqs || []).forEach(q => { minById[q.incId] = q; });
   const extraAddById = {};
+  // Una venta está excluida de un incentivo si tiene el flag por-incentivo
+  // (noExtraIncs[id]) o el flag viejo global (noExtra, compat). Excluida = ni suma
+  // extra ni cuenta para el mínimo de negocios de ESE incentivo.
+  const _sinExtra = (c, incId) => !!c.noExtra || !!(c.noExtraIncs && c.noExtraIncs[incId]);
   incs.forEach(m => {
-    // Las ventas marcadas noExtra NO participan del incentivo: ni suman extra ni
-    // cuentan para su mínimo de negocios (el usuario las excluyó línea por línea).
-    const enInc = clientesOn.filter(c => !c.noExtra && _proyInWin(c.fecha, m.desde, m.hasta));
+    const enInc = clientesOn.filter(c => !_sinExtra(c, m.id) && _proyInWin(c.fecha, m.desde, m.hasta));
     const q = minById[m.id];
     const projActiv = ((q && q.activadas) || 0) + enInc.length;
     const cumple = (q && q.min > 0) ? projActiv >= q.min : true;
@@ -12719,7 +12721,7 @@ function _proyResumen(res, clientesOn) {
 
   if (Array.isArray(res.incMinReqs)) out.incMinReqs = res.incMinReqs.map(q => {
     const m = incs.find(x => x.id === q.incId); if (!m) return q;
-    const add = clientesOn.filter(c => !c.noExtra && _proyInWin(c.fecha, m.desde, m.hasta)).length;
+    const add = clientesOn.filter(c => !_sinExtra(c, m.id) && _proyInWin(c.fecha, m.desde, m.hasta)).length;
     if (!add) return q;
     const activadas = (q.activadas || 0) + add;
     return { ...q, activadas, cumple: q.min > 0 ? activadas >= q.min : true };
@@ -12847,7 +12849,16 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
     setDraft({ nombre: '', prima: '', fecha: _proyHoyISO() });
   };
   const toggleCli = id => setClientes(cs => { const next = cs.map(c => c.id === id ? { ...c, on: !c.on } : c); _persistCli(next); return next; });
-  const toggleExtraCli = id => setClientes(cs => { const next = cs.map(c => c.id === id ? { ...c, noExtra: !c.noExtra } : c); _persistCli(next); return next; });
+  // Apaga/prende el extra de UNA venta para UN incentivo puntual (por vista). El
+  // estado vive en c.noExtraIncs[incId]; al interactuar se limpia el flag viejo
+  // global (c.noExtra) migrando a por-incentivo.
+  const toggleExtraCli = (id, incId) => setClientes(cs => { const next = cs.map(c => {
+    if (c.id !== id) return c;
+    const off = !!c.noExtra || !!(c.noExtraIncs && c.noExtraIncs[incId]);
+    const m = { ...(c.noExtraIncs || {}) };
+    if (off) delete m[incId]; else m[incId] = true;
+    return { ...c, noExtraIncs: m, noExtra: false };
+  }); _persistCli(next); return next; });
   const delCli = id => setClientes(cs => { const next = cs.filter(c => c.id !== id); _persistCli(next); return next; });
   const setFechaCli = (id, v) => setClientes(cs => { const next = cs.map(c => c.id === id ? { ...c, fecha: v } : c); _persistCli(next); return next; });
 
@@ -13215,11 +13226,19 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
                         <div style={{ position: 'absolute', top: 3, left: c.on ? 19 : 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
                       </div>
                       <div style={{ fontWeight: 700, fontSize: 13, flex: 1, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.nombre}</div>
-                      {inc && <span onClick={() => toggleExtraCli(c.id)}
-                        title={c.noExtra ? 'Extra excluido de esta venta. Click para volver a contarlo.' : ('Genera extra ×' + inc.multiplicador + '. Click para NO contar el extra de esta venta.')}
-                        style={{ cursor: 'pointer', fontSize: 9.5, fontWeight: 800, whiteSpace: 'nowrap', borderRadius: 5, padding: '2px 6px',
-                          color: c.noExtra ? '#94a3b8' : '#16a34a', background: c.noExtra ? '#f1f5f9' : '#dcfce7',
-                          textDecoration: c.noExtra ? 'line-through' : 'none', border: '1px ' + (c.noExtra ? 'dashed #cbd5e1' : 'solid transparent') }}>×{inc.multiplicador} extra</span>}
+                      {inc && (() => {
+                        const off = !!c.noExtra || !!(c.noExtraIncs && c.noExtraIncs[inc.id]);
+                        return (
+                          <div onClick={() => toggleExtraCli(c.id, inc.id)}
+                            title={off ? ('Extra de «' + (inc.nombre || 'incentivo') + '» excluido en esta venta. Prendé para que cuente.') : ('Genera extra ×' + inc.multiplicador + ' por «' + (inc.nombre || 'incentivo') + '». Apagá para que NO cuente en esta venta.')}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+                            <div style={{ width: 30, height: 17, borderRadius: 17, background: off ? '#d1d5db' : '#16a34a', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+                              <div style={{ position: 'absolute', top: 2.5, left: off ? 2.5 : 15.5, width: 12, height: 12, borderRadius: '50%', background: '#fff', transition: 'left .2s' }} />
+                            </div>
+                            <span style={{ fontSize: 9.5, fontWeight: 800, color: off ? '#94a3b8' : '#16a34a', textDecoration: off ? 'line-through' : 'none' }}>×{inc.multiplicador} extra</span>
+                          </div>
+                        );
+                      })()}
                       <div style={{ fontWeight: 800, fontSize: 13, color: '#3E4095' }}>{fmt$(c.prima)}</div>
                       <input type="date" value={c.fecha} onChange={e => setFechaCli(c.id, e.target.value)} style={{ border: '1px solid #d7ecfa', borderRadius: 6, padding: '3px 6px', fontFamily: 'inherit', fontSize: 11.5, color: '#5b7f95' }} />
                       <div onClick={() => delCli(c.id)} title="Quitar" style={{ cursor: 'pointer', color: '#a9cfe6', fontWeight: 800, fontSize: 16, padding: '0 4px' }}>×</div>
@@ -13229,7 +13248,7 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
               </div>
               {proyIncs.length > 0 && (
                 <div style={{ fontSize: 11.5, color: '#5b7f95', marginTop: 12, background: '#fff', borderRadius: 8, padding: '8px 10px', border: '1px solid #d7ecfa' }}>
-                  Las ventas con fecha dentro de la ventana de un incentivo multiplicador generan el extra automáticamente. Si el incentivo pide un mínimo de negocios, el extra recién cuenta cuando la proyección lo alcanza. Tocá el chip «×N extra» de una venta para que ESA no cuente el extra (por ejemplo si no aplica al incentivo).
+                  Las ventas con fecha dentro de la ventana de un incentivo multiplicador generan el extra automáticamente. Si el incentivo pide un mínimo de negocios, el extra recién cuenta cuando la proyección lo alcanza. Apagá el toggle «×N extra» de una venta para que ESA no cuente el extra de este incentivo (es por incentivo: si la misma venta aplica a otra campaña en otra vista, ahí lo prendés aparte).
                 </div>
               )}
             </div>
