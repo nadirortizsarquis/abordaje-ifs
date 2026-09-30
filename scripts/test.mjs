@@ -347,6 +347,27 @@ test('_proyResumen: extra multiplicador con gate de mínimo de negocios', () => 
   assert.equal(p2.chart.extraByInc[0].incId, 'inc1');
   assert.equal(p2.chart.extraByInc[0].activo, 10000);
 });
+test('_proyResumen: venta noExtra suma base pero NO genera extra ni cuenta para el mínimo', () => {
+  const r = _baseRes();
+  // 2 ventas en la ventana del inc (min=2). Una marcada noExtra -> solo 1 cuenta
+  // para el mínimo -> no se cumple -> sin extra. La base suma ambas igual.
+  const p = g('_proyResumen')(r, [
+    { prima: 4000, fecha: '2026-10-01', on: true },
+    { prima: 6000, fecha: '2026-11-01', on: true, noExtra: true },
+  ]);
+  assert.equal(p.extra, 0);                 // min no alcanzado (noExtra no cuenta)
+  assert.equal(p.incMinReqs[0].activadas, 1);
+  assert.equal(p.facturacion, 78000 + 10000);   // base suma las dos ventas
+  // Con la noExtra apagada del incentivo pero SIN gate: si min ya se cumple, la
+  // noExtra no aporta su extra.
+  const p2 = g('_proyResumen')(r, [
+    { prima: 4000, fecha: '2026-10-01', on: true },
+    { prima: 5000, fecha: '2026-10-15', on: true },
+    { prima: 6000, fecha: '2026-11-01', on: true, noExtra: true },
+  ]);
+  assert.equal(p2.incMinReqs[0].cumple, true);   // 2 cuentan -> min=2 OK
+  assert.equal(p2.extra, 9000);             // (4000+5000)*(2-1); la de 6000 excluida
+});
 test('_proyResumen: recomputa requisitos.cumpleMonto y pct', () => {
   const r = _baseRes();
   const p = g('_proyResumen')(r, [{ prima: 50000, fecha: '2026-05-01', on: true }]);
