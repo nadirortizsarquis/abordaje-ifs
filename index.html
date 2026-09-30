@@ -12768,6 +12768,44 @@ function _proyResumen(res, clientesOn) {
   return out;
 }
 
+// Quita del resumen la producción PENDIENTE (facturación de pólizas todavía no
+// emitidas). Espeja, del lado del cliente, el toggle includePending/pendExtra que
+// el Tablero tiene por vista: devuelve los números como si lo pendiente no contara,
+// sin que el admin tenga que republicar. Función PURA (no muta `res`).
+// Resta lo que EFECTIVAMENTE está sumado en facturación — chart.pendiente /
+// chart.extraPend — y NO res.pendiente crudo (que viaja siempre), para no
+// doble-restar si el reporte ya se publicó con includePending en false.
+function _sinPendiente(res) {
+  if (!res) return res;
+  const ch = res.chart || {};
+  const basePend  = ch.pendiente != null ? (ch.pendiente || 0) : (res.pendiente || 0);
+  const extraPend = ch.extraPend != null ? (ch.extraPend || 0) : (res.extraPendiente || 0);
+  if (basePend <= 0 && extraPend <= 0) return res;   // nada que quitar en esta vista
+  const out = { ...res };
+  // Productividad incluye el conteo de pendientes solo cuando el reporte las sumó
+  // (mismo caso en que basePend>0). Se descuenta por el detalle publicado (siempre viaja).
+  const pendCount = (res.pendPolicies && res.pendPolicies.length)
+    || (res.detalle || []).filter(d => d && d.pend).length;
+  out.facturacion = Math.max((res.facturacion || 0) - basePend - extraPend, 0);
+  out.pendiente = 0;
+  out.extra = Math.max((res.extra || 0) - extraPend, 0);
+  out.extraPendiente = 0;
+  // extraActivo y activoPuro (base sin caídas) NO incluyen pendiente → intactos.
+  out.productividad = Math.max((res.productividad || 0) - pendCount, 0);
+  out.pct = res.objetivo > 0 ? Math.round(out.facturacion / res.objetivo * 100) : res.pct;
+  out.pctProd = res.objetivoProd > 0 ? Math.round(out.productividad / res.objetivoProd * 100) : res.pctProd;
+  if (res.chart) {
+    out.chart = { ...res.chart, pendiente: 0, extraPend: 0,
+      extraByInc: (res.chart.extraByInc || []).map(s => ({ ...s, pend: 0 })).filter(s => (s.activo || 0) > 0) };
+  }
+  // Detalle: ocultar las filas pendientes (las caídas siguen bajo su propio toggle).
+  if (Array.isArray(res.detalle)) out.detalle = res.detalle.filter(d => !(d && d.pend));
+  out.pendPolicies = [];
+  out.exPendPols = [];
+  out.persistPeriodoPend = 0;
+  return out;
+}
+
 function ProduccionOLE({ target, selfUserId, esAsistente }) {
   const [rows, setRows]   = useState(null);
   const [vista, setVista] = useState(null);
@@ -12784,11 +12822,12 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
   const puedeProyectar = target.type === 'user' && !esAsistente;
   const proyEsPropio = puedeProyectar && target.userId === selfUserId;
   const [proy, setProy] = useState(false);
+  const [sinPend, setSinPend] = useState(false);   // toggle "Sin pendiente": saca la facturación pendiente del reporte
   const [panelOpen, setPanelOpen] = useState(true);
   const [clientes, setClientes] = useState([]);
   const [draft, setDraft] = useState({ nombre: '', prima: '', fecha: _proyHoyISO() });
   useEffect(() => {   // cargar la proyección del target desde Supabase (no auto-prende)
-    setProy(false); setClientes([]);
+    setProy(false); setSinPend(false); setClientes([]);
     if (!puedeProyectar) return;
     let vivo = true;
     sb.from('ole_proyeccion').select('clientes').eq('user_id', target.userId).maybeSingle()
@@ -12891,11 +12930,24 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
   const rReal = actual.resumen || {};
   const clientesOn = proy ? clientes.filter(c => c.on) : [];
   const proyOn = puedeProyectar && proy && clientesOn.length > 0;
-  const r = proyOn ? _proyResumen(rReal, clientesOn) : rReal;
-  const rowsProj = proyOn
-    ? rows.map(row => (row && row.resumen) ? { ...row, resumen: _proyResumen(row.resumen, clientesOn) } : row)
+  // ¿Hay facturación pendiente realmente sumada en esta vista? (lo que quitaría el toggle)
+  const _pendInclBase  = (rReal.chart && rReal.chart.pendiente != null) ? (rReal.chart.pendiente || 0) : (rReal.pendiente || 0);
+  const _pendInclExtra = (rReal.chart && rReal.chart.extraPend != null) ? (rReal.chart.extraPend || 0) : (rReal.extraPendiente || 0);
+  const hayPendiente = _pendInclBase > 0 || _pendInclExtra > 0;
+  const sinPendOn = sinPend && hayPendiente;
+  // Transforma un resumen: primero saca lo pendiente (si el toggle está), después proyecta.
+  const _xform = (res) => {
+    if (!res) return res;
+    let out = sinPendOn ? _sinPendiente(res) : res;
+    if (proyOn) out = _proyResumen(out, clientesOn);
+    return out;
+  };
+  const rBase = sinPendOn ? _sinPendiente(rReal) : rReal;
+  const r = _xform(rReal);
+  const rowsProj = (proyOn || sinPendOn)
+    ? rows.map(row => (row && row.resumen) ? { ...row, resumen: _xform(row.resumen) } : row)
     : rows;
-  const proyDelta = proyOn ? (r.facturacion || 0) - (rReal.facturacion || 0) : 0;
+  const proyDelta = proyOn ? (r.facturacion || 0) - (rBase.facturacion || 0) : 0;
   // Incentivos multiplicador vigentes (para taggear ventas que caen en su ventana).
   const proyIncs = (rReal.campanias || []).filter(c => c.kind === 'incentivo' && c.tipo === 'multiplicador' && c.desde && c.hasta);
   const proyIncDe = (fecha) => proyIncs.find(m => _proyInWin(fecha, m.desde, m.hasta));
@@ -13073,14 +13125,33 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
         );
       })()}
         </div>
-        {/* Modo proyección: toggle + badge (a la derecha de las vistas) — solo por asesor individual, no asistentes */}
-        {puedeProyectar && (
+        {/* Toggles de vista (a la derecha): "Sin pendiente" (cuando hay pendiente que
+            quitar, para todos) + "Modo proyección" (solo asesor individual, no asistentes). */}
+        {(puedeProyectar || hayPendiente) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          {sinPendOn && (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#d97706', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(217,119,6,.32)' }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />SIN PENDIENTE
+            </div>
+          )}
           {proyOn && (
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: '#0098DA', color: '#fff', borderRadius: 999, padding: '6px 14px', fontSize: 12.5, fontWeight: 800, letterSpacing: '0.03em', boxShadow: '0 6px 18px rgba(0,152,218,.32)' }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#fff', opacity: 0.85 }} />PROYECCIÓN
             </div>
           )}
+          {hayPendiente && (
+          <div onClick={() => setSinPend(v => !v)} title="Saca del reporte la facturación pendiente (pólizas todavía no emitidas). Espeja el criterio del Tablero, solo en tu vista — no cambia lo publicado."
+            style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: sinPend ? '#fff7ed' : '#fff', border: '1.5px solid ' + (sinPend ? '#d97706' : '#e5e7eb'), borderRadius: 12, padding: '7px 12px' }}>
+            <div style={{ width: 44, height: 25, borderRadius: 25, background: sinPend ? '#d97706' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
+              <div style={{ position: 'absolute', top: 3, left: sinPend ? 22 : 3, width: 19, height: 19, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,.25)', transition: 'left .2s' }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: sinPend ? '#b45309' : '#374151', whiteSpace: 'nowrap' }}>Sin pendiente</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', whiteSpace: 'nowrap' }}>{sinPend ? 'solo facturación activa' : 'incluye pendiente'}</div>
+            </div>
+          </div>
+          )}
+          {puedeProyectar && (
           <div onClick={() => setProy(p => !p)} title={proyEsPropio ? 'Cargá ventas por cerrar y mirá cómo quedás si las cerrás. Se guarda en tu cuenta.' : 'Mirá lo que cargó el asesor y especulá encima (no se guarda).'}
             style={{ display: 'flex', alignItems: 'center', gap: 11, cursor: 'pointer', userSelect: 'none', background: proy ? '#e8f6fd' : '#fff', border: '1.5px solid ' + (proy ? '#0098DA' : '#e5e7eb'), borderRadius: 12, padding: '7px 12px' }}>
             <div style={{ width: 44, height: 25, borderRadius: 25, background: proy ? '#0098DA' : '#d1d5db', position: 'relative', transition: 'background .2s', flexShrink: 0 }}>
@@ -13091,6 +13162,7 @@ function ProduccionOLE({ target, selfUserId, esAsistente }) {
               <div style={{ fontSize: 10, fontWeight: 600, color: '#9ca3af', whiteSpace: 'nowrap' }}>{proy ? 'sumando ventas a la vista' : 'datos reales'}</div>
             </div>
           </div>
+          )}
         </div>
         )}
       </div>

@@ -389,6 +389,56 @@ test('_proyResumen: requisitos.cumplePersist NO se proyecta (calificación real)
   assert.equal(p.requisitos.calificado, false);     // no califica por persistencia
 });
 
+// ── _sinPendiente: toggle "Sin pendiente" de Mi producción ───────────────────
+// Resumen con pendiente incluido: facturacion = base(incl caidas) + extraAct + pend + extraPend
+//   79000(base79k=chart.base74k+caidas5k) + 8000 + 9000 + 4000 = 100000
+const _pendRes = () => ({
+  periodo: { desde: '2026-01-01', hasta: '2026-12-31' },
+  objetivo: 120000, objetivoProd: 20,
+  facturacion: 100000, activoPuro: 74000, caidas: 5000,
+  extra: 12000, extraActivo: 8000, extraPendiente: 4000, pendiente: 9000,
+  productividad: 16, pct: 83, pctProd: 80,
+  chart: { objetivo: 120000, base: 74000, caidas: 5000, pendiente: 9000, extraActivo: 8000, extraPend: 4000,
+    extraByInc: [{ incId: 'inc1', name: 'Multi', activo: 8000, pend: 4000 }] },
+  detalle: [{ asegurado: 'A', pend: false }, { asegurado: 'B', pend: false }, { asegurado: 'C', pend: true }, { asegurado: 'D', pend: true }],
+  pendPolicies: [{}, {}],
+});
+test('_sinPendiente: resta base+extra pendiente de facturacion y recomputa pct', () => {
+  const r = _pendRes();
+  const s = g('_sinPendiente')(r);
+  assert.equal(s.facturacion, 87000);   // 100000 - 9000 - 4000
+  assert.equal(s.pendiente, 0);
+  assert.equal(s.extraPendiente, 0);
+  assert.equal(s.extra, 8000);          // 12000 - 4000 (solo activo)
+  assert.equal(s.extraActivo, 8000);    // intacto
+  assert.equal(s.activoPuro, 74000);    // intacto (no incluye pendiente)
+  assert.equal(s.pct, Math.round(87000 / 120000 * 100));  // 73
+  assert.equal(r.facturacion, 100000);  // input intacto
+});
+test('_sinPendiente: descuenta las pendientes de productividad y del detalle', () => {
+  const s = g('_sinPendiente')(_pendRes());
+  assert.equal(s.productividad, 14);    // 16 - 2 pendientes
+  assert.equal(s.pctProd, 70);          // round(14/20*100)
+  assert.equal(s.detalle.length, 2);    // solo activas
+  assert.equal(s.detalle.every(d => !d.pend), true);
+  assert.equal(s.pendPolicies.length, 0);
+});
+test('_sinPendiente: chart sin segmentos pendientes', () => {
+  const s = g('_sinPendiente')(_pendRes());
+  assert.equal(s.chart.pendiente, 0);
+  assert.equal(s.chart.extraPend, 0);
+  assert.equal(s.chart.extraByInc.length, 1);   // el inc con activo>0 se conserva
+  assert.equal(s.chart.extraByInc[0].pend, 0);
+  assert.equal(s.chart.extraByInc[0].activo, 8000);
+});
+test('_sinPendiente: usa chart.pendiente, no res.pendiente (no doble-resta si ya se publicó sin pend)', () => {
+  // includePending OFF en el Tablero -> chart.pendiente=0 aunque res.pendiente traiga el monto.
+  const r = { ..._pendRes(), pendiente: 9000, extraPendiente: 0,
+    facturacion: 82000,   // ya sin la base pendiente
+    chart: { objetivo: 120000, base: 74000, caidas: 5000, pendiente: 0, extraActivo: 8000, extraPend: 0, extraByInc: [{ incId: 'inc1', name: 'Multi', activo: 8000, pend: 0 }] } };
+  assert.equal(g('_sinPendiente')(r), r);   // nada que quitar -> devuelve el mismo objeto
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
