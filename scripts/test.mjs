@@ -461,6 +461,17 @@ test('_sinPendiente: descuenta las pendientes de productividad y del detalle', (
   assert.equal(s.detalle.every(d => !d.pend), true);
   assert.equal(s.pendPolicies.length, 0);
 });
+test('_sinPendiente: re-evalua requisitos.cumpleMonto/calificado con la facturacion pura', () => {
+  // Facturacion publicada 100k >= objetivo 95k (califica), pero 87k de lo pendiente
+  // (9k base + 4k extra) lo baja a 87k < 95k -> ya NO califica por monto.
+  const r = { ..._pendRes(), objetivo: 95000,
+    requisitos: { cumpleMonto: true, minPolizas: 10, cumplePol: true, persistenciaMinPct: 0, cumplePersist: true, calificado: true } };
+  const s = g('_sinPendiente')(r);
+  assert.equal(s.facturacion, 87000);
+  assert.equal(s.requisitos.cumpleMonto, false);   // 87000 < 95000
+  assert.equal(s.requisitos.calificado, false);
+  assert.equal(r.requisitos.cumpleMonto, true);    // input intacto
+});
 test('_sinPendiente: chart sin segmentos pendientes', () => {
   const s = g('_sinPendiente')(_pendRes());
   assert.equal(s.chart.pendiente, 0);
