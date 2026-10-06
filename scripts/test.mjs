@@ -488,6 +488,35 @@ test('_sinPendiente: usa chart.pendiente, no res.pendiente (no doble-resta si ya
   assert.equal(g('_sinPendiente')(r), r);   // nada que quitar -> devuelve el mismo objeto
 });
 
+// ── Calendario de pagos: derivación de cuotas (buscador en "cada pago") ───────
+test('calpagoNormFreq reconoce las 4 frecuencias del reporte OLE', () => {
+  assert.equal(g('calpagoNormFreq')('MONTHLY'), 'mensual');
+  assert.equal(g('calpagoNormFreq')('QUARTERLY'), 'trimestral');
+  assert.equal(g('calpagoNormFreq')('SEMIANNUAL'), 'semestral');
+  assert.equal(g('calpagoNormFreq')('ANNUAL'), 'anual');
+});
+test('calpagoDerivePagos: semestral da 2 cuotas en una ventana de 12 meses', () => {
+  // Caso Diego Bobadilla: renovación 11/04/2027, SEMIANNUAL (step 6m).
+  const rd = g('calpagoParseDMY')('11/04/2027');
+  const hoy = new Date(2026, 9, 6);                 // 06/10/2026
+  const hoyMas12 = g('calpagoAddMonths')(hoy, 12);  // 06/10/2027
+  const dates = g('calpagoDerivePagos')(rd, 6, hoy, hoyMas12, null, null);
+  assert.equal(dates.length, 2);
+  // Próxima: 11/10/2026 (NO la renovación anual, que es lo que mostraba antes)
+  assert.equal(dates[0].getMonth(), 9);  assert.equal(dates[0].getDate(), 11);  // octubre
+  assert.equal(dates[1].getMonth(), 3);  assert.equal(dates[1].getDate(), 11);  // abril (aniversario)
+  // Aniversario = misma mes que el ancla
+  assert.equal(dates[0].getMonth() === rd.getMonth(), false);  // octubre NO
+  assert.equal(dates[1].getMonth() === rd.getMonth(), true);   // abril SÍ
+});
+test('calpagoDerivePagos: mensual da 12 cuotas y anual 1 en la ventana de 12m', () => {
+  const rd = g('calpagoParseDMY')('11/04/2027');
+  const hoy = new Date(2026, 9, 6);
+  const hoyMas12 = g('calpagoAddMonths')(hoy, 12);
+  assert.equal(g('calpagoDerivePagos')(rd, 1, hoy, hoyMas12, null, null).length, 12);
+  assert.equal(g('calpagoDerivePagos')(rd, 12, hoy, hoyMas12, null, null).length, 1);
+});
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {

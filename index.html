@@ -13889,27 +13889,50 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
     return true;
   }), [eventos, freqF, pagF, ciaF]);
   // Búsqueda sobre TODO el libro (todos los años, no solo el que se ve).
+  // En "cada pago" la búsqueda deriva TODAS las cuotas de los próximos 12 meses
+  // (espeja el toggle) marcando la de aniversario; en "solo renovación", una fila
+  // por póliza = la próxima renovación.
   const searchResults = useMemo(() => {
     if (!nq) return [];
     const out = [];
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const hoyMas12 = calpagoAddMonths(hoy, 12);
     detalle.forEach(p => {
       const hay = calpagoNorm((p.asegurado || '') + ' ' + (nombreDe[p._asesorId] || p._asesorTxt || '') + ' ' + (p.poliza || ''));
       if (!hay.includes(nq)) return;
       const rec = p._origen === 'manual'
         ? { paga: p._paga || null, obs: p._obs || '' }
         : (pagoMap[calpagoPagoKey(p._asesorId, p.poliza)] || null);
-      out.push({
+      const freq = calpagoNormFreq(p.frecuencia);
+      const rd = calpagoParseDMY(p.fRenovacion);
+      const base = {
         poliza: p.poliza, asegurado: p.asegurado || '(sin nombre)', plan: p.plan || '',
         prima: p.prima, estado: p.estado || '', tipo: p.tipo || '',
-        freq: calpagoNormFreq(p.frecuencia), freqRaw: p.frecuencia || '',
-        date: calpagoNextAnniversary(calpagoParseDMY(p.fRenovacion)), pagador: rec ? rec.paga : null, obs: rec ? (rec.obs || '') : '',
+        freq, freqRaw: p.frecuencia || '', pagador: rec ? rec.paga : null, obs: rec ? (rec.obs || '') : '',
         asesorId: p._asesorId, asesorNombre: nombreDe[p._asesorId] || p._asesorTxt || '',
         compania: p._compania || 'ole', origen: p._origen || 'ole', manualId: p._manualId || null,
-      });
+      };
+      if (eachPay && rd) {
+        // Mismo anclaje que el calendario: manual con emisión ancla en la emisión
+        // (y acota a la vigencia si hay duración); OLE ancla en la renovación.
+        let anchor = rd, ini = null, fin = null;
+        if (p._origen === 'manual' && p._emision) {
+          const [ey, em, edd] = String(p._emision).split('-').map(Number);
+          const emisionD = (ey && em && edd) ? new Date(ey, em - 1, edd) : null;
+          if (emisionD && !isNaN(emisionD)) { anchor = emisionD; ini = emisionD; if (p._duracion) fin = calpagoAddMonths(emisionD, p._duracion * 12); }
+        }
+        const stepM = freq ? CALPAGO_FREQ_MESES[freq] : 12;
+        const dates = calpagoDerivePagos(anchor, stepM, hoy, hoyMas12, ini, fin);
+        // Aniversario = la cuota del mismo mes que el ancla (único en una ventana de 12m).
+        if (dates.length) dates.forEach(d => out.push({ ...base, date: d, esAniversario: d.getMonth() === anchor.getMonth() }));
+        else out.push({ ...base, date: calpagoNextAnniversary(rd), esAniversario: true });  // plan vencido: no desaparece
+      } else {
+        out.push({ ...base, date: calpagoNextAnniversary(rd), esAniversario: true });
+      }
     });
     out.sort((a, b) => (a.date ? a.date.getTime() : Infinity) - (b.date ? b.date.getTime() : Infinity));
     return out;
-  }, [detalle, nq, pagoMap, nombreDe]);
+  }, [detalle, nq, pagoMap, nombreDe, eachPay]);
   const byDay = useMemo(() => {
     const m = {};
     shown.forEach(e => { const k = dayKey(e.date); (m[k] = m[k] || []).push(e); });
@@ -14183,8 +14206,8 @@ function CalendarioPagosOLE({ effIds, nombreDe, isAdmin, selfId, selfNombre, nue
             <div className="calpago-row" key={i} style={{ cursor: 'pointer' }} onClick={() => { if (e.date) { goToDate(e.date); setQ(''); } else abrirEvento(e); }}>
               <span className="calpago-badge" style={calpagoBadgeStyle(e)}>{e.pagador ? CALPAGO_PAG[e.pagador].label : 'Sin definir'}</span>
               <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, color: calpagoEsInactiva(e.estado) ? '#94a3b8' : '#1e1b4b', textDecoration: calpagoEsInactiva(e.estado) ? 'line-through' : undefined }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem', textDecoration: 'none' }}> · {e.asesorNombre}</span> : null}</div>
-                <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')} · renueva {e.date ? e.date.toLocaleDateString('es-AR') : 'sin fecha'}</div>
+                <div style={{ fontWeight: 700, color: calpagoEsInactiva(e.estado) ? '#94a3b8' : '#1e1b4b', textDecoration: calpagoEsInactiva(e.estado) ? 'line-through' : undefined }}>{e.asegurado}{isAdmin && e.asesorNombre ? <span style={{ fontWeight: 500, color: '#7C3AED', fontSize: '0.76rem', textDecoration: 'none' }}> · {e.asesorNombre}</span> : null}{eachPay && e.esAniversario ? <span style={{ marginLeft: 6, fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.3px', textTransform: 'uppercase', color: '#3E4095', background: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 6, padding: '1px 6px', textDecoration: 'none', verticalAlign: 'middle' }}>Aniversario</span> : null}</div>
+                <div style={{ fontSize: '0.74rem', color: '#6b7280' }}>{[CALPAGO_FREQ_LABEL[e.freq] || e.freqRaw, e.estado].filter(Boolean).join(' · ')} · {e.esAniversario ? 'renueva' : 'paga'} {e.date ? e.date.toLocaleDateString('es-AR') : 'sin fecha'}</div>
                 {e.obs && <div style={{ fontSize: '0.72rem', color: '#9ca3af', marginTop: 2, fontStyle: 'italic' }}>{e.obs}</div>}
               </div>
               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#3E4095' }}>{e.date ? 'Ir al calendario' : 'Editar'}</span>
