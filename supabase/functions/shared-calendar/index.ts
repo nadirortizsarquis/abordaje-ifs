@@ -23,6 +23,20 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
+// SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
+function envKey(jsonVar: string, legacyVar: string): string {
+  try {
+    // 'default' si existe; si no, la primera (la secret actual se llama 'rotationjarvis').
+    const m = JSON.parse(Deno.env.get(jsonVar) ?? "");
+    const k = m?.default ?? Object.values(m ?? {})[0];
+    if (typeof k === "string" && k) return k;
+  } catch { /* sin keys nuevas */ }
+  console.warn(`envKey: usando legacy ${legacyVar}`);
+  return Deno.env.get(legacyVar)!;
+}
+const SERVICE_KEY = envKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
+
 const WORKSPACE_DOMAIN = "ifs-broker.com";
 const DEFAULT_DUR_MIN = 60; // duración por defecto de una agenda sin fin explícito
 
@@ -132,7 +146,7 @@ Deno.serve(async (req: Request) => {
   if (req.method !== "POST") return new Response("method not allowed", { status: 405, headers: corsHeaders });
 
   try {
-    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!, { auth: { persistSession: false } });
+    const supabase = createClient(Deno.env.get("SUPABASE_URL")!, SERVICE_KEY, { auth: { persistSession: false } });
 
     const jwt = (req.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
     const { data: { user }, error: userErr } = await supabase.auth.getUser(jwt);

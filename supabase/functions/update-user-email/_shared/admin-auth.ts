@@ -7,8 +7,21 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 export const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
-export const SUPABASE_ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!;
-export const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+// Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
+// SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
+function envKey(jsonVar: string, legacyVar: string): string {
+  try {
+    // 'default' si existe; si no, la primera (la secret actual se llama 'rotationjarvis').
+    const m = JSON.parse(Deno.env.get(jsonVar) ?? '');
+    const k = m?.default ?? Object.values(m ?? {})[0];
+    if (typeof k === 'string' && k) return k;
+  } catch { /* sin keys nuevas */ }
+  console.warn(`envKey: usando legacy ${legacyVar}`);
+  return Deno.env.get(legacyVar)!;
+}
+
+export const SUPABASE_ANON_KEY = envKey('SUPABASE_PUBLISHABLE_KEYS', 'SUPABASE_ANON_KEY');
+export const SUPABASE_SERVICE_ROLE_KEY = envKey('SUPABASE_SECRET_KEYS', 'SUPABASE_SERVICE_ROLE_KEY');
 
 export const CORS = {
   'Access-Control-Allow-Origin': '*',

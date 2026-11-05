@@ -7,10 +7,23 @@
 // que el MCP (abordaje-ifs-mcp, autenticado con service-role) opere sobre el
 // calendar de cualquier user IFS sin necesitar JWT del frontend.
 //
-// SEGURIDAD: Authorization HEADER debe ser exactamente el SUPABASE_SERVICE_ROLE_KEY.
+// SEGURIDAD: Authorization HEADER debe ser una secret key del proyecto (sb_secret_ o legacy service_role).
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// Keys validas como credencial del caller: todas las secret nuevas (JSON
+// SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
+function serviceKeys(): string[] {
+  const keys: string[] = [];
+  try {
+    const m = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "");
+    for (const v of Object.values(m ?? {})) if (typeof v === "string" && v) keys.push(v);
+  } catch { /* sin keys nuevas */ }
+  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacy) keys.push(legacy);
+  return keys;
+}
 
 const WORKSPACE_DOMAIN = "ifs-broker.com";
 const DEFAULT_CALENDAR = "primary";
@@ -117,15 +130,15 @@ Deno.serve(async (req: Request) => {
     return new Response("method not allowed", { status: 405, headers: corsHeaders });
   }
   try {
-    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const validKeys = serviceKeys();
     const authHeader = req.headers.get("Authorization") || "";
     const presented = authHeader.replace(/^Bearer\s+/i, "");
-    if (!presented || !timingSafeEqualStr(presented, serviceRoleKey)) {
+    if (!presented || !validKeys.some((k) => timingSafeEqualStr(presented, k))) {
       return jsonResponse({ error: "unauthorized: requires service-role" }, 401);
     }
 
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!, serviceRoleKey,
+      Deno.env.get("SUPABASE_URL")!, validKeys[0],
       { auth: { persistSession: false } },
     );
 
