@@ -9,10 +9,16 @@
 // en Abordaje, BTP, etc.
 import { requireAdmin, json } from './_shared/admin-auth.ts';
 
+// Crear un usuario con role='admin' queda restringido al megaadmin (Nadir),
+// igual que delete-user y los cambios de email/clave de otro admin. Evita que un
+// admin común (o alguien con Postman/consola) se fabrique otro admin. El trigger
+// block_role_escalation solo cubre el UPDATE de role; la creación va por acá.
+const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
+
 Deno.serve(async req => {
   const auth = await requireAdmin(req);
   if (!auth.ok) return auth.response;
-  const { admin } = auth;
+  const { caller, admin } = auth;
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return json({ error: 'JSON inválido' }, 400); }
@@ -28,6 +34,9 @@ Deno.serve(async req => {
   }
   if (role !== 'agent' && role !== 'admin') {
     return json({ error: 'Role inválido (admin o agent)' }, 400);
+  }
+  if (role === 'admin' && (caller.email || '').toLowerCase() !== MEGAADMIN_EMAIL) {
+    return json({ error: 'Solo el megaadmin puede crear usuarios admin' }, 403);
   }
 
   const { data: created, error: createErr } = await admin.auth.admin.createUser({
