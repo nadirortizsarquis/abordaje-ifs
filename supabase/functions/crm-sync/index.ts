@@ -35,8 +35,11 @@
 // propio asesor (agente_id == caller) salvo admin. advisor_email = SIEMPRE el
 // email del asesor DUEÑO del ítem (si un admin opera sobre un ítem ajeno, la
 // bitácora queda atribuida al asesor real, no al admin).
+// Propiedad del cliente CRM (nov 2026): un no-admin solo vincula / vuelca / ve
+// candidatos de clientes de SU cartera (clienteEsDelAsesor), aunque el bot vea todo.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { clienteEsDelAsesor } from "./ownership.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -404,7 +407,9 @@ Deno.serve(async (req: Request) => {
       const q = String(body?.q ?? "").trim();
       if (!q) return jsonResponse({ ok: true, clients: [], scoped: true });
       const crm = crmClient();
-      const scopeParam = (!isAdmin && advisorEmail) ? `&advisor_email=${encodeURIComponent(advisorEmail)}` : "";
+      // Fail-closed: un no-admin sin email NO puede buscar sin scope (el bot ve todo).
+      if (!isAdmin && !advisorEmail) return jsonResponse({ ok: true, clients: [], scoped: true });
+      const scopeParam = !isAdmin ? `&advisor_email=${encodeURIComponent(advisorEmail)}` : "";
       const r = await crm(`/clients/?search=${encodeURIComponent(q)}${scopeParam}`);
       const clients = (r?.results ?? []).slice(0, 15);
       return jsonResponse({ ok: true, clients, scoped: true });
@@ -505,6 +510,18 @@ Deno.serve(async (req: Request) => {
           crm_status: (e as any)?.status || 504,
         }, 502);
       }
+      if (!isAdmin) {
+        let propio = false;
+        try { propio = await clienteEsDelAsesor(crmClient(), crmClientId, actingEmail); } catch (e) {
+          return jsonResponse({
+            error: "No se pudo validar el cliente en el CRM (no respondió). No se fijó el vínculo; reintentá en un momento.",
+            crm_status: (e as any)?.status || 504,
+          }, 502);
+        }
+        if (!propio) {
+          return jsonResponse({ error: "client_not_owned", message: "Ese cliente del CRM no está en tu cartera. Pedile a un administrador que lo vincule." }, 403);
+        }
+      }
       await setLink(crmClientId);
       return jsonResponse({
         ok: true, action: "linked", crm_client_id: crmClientId,
@@ -535,6 +552,21 @@ Deno.serve(async (req: Request) => {
         try {
           const dup = await crm(`/clients/?document_number=${encodeURIComponent(doc)}`);
           const cands = dup?.results ?? [];
+          // No-admin: el chequeo es global (no duplicar en el CRM), pero NO se
+          // exponen clientes de otros asesores (nombre/email/teléfono): solo los propios.
+          if (cands.length && !isAdmin) {
+            const own = await crm(`/clients/?document_number=${encodeURIComponent(doc)}&advisor_email=${encodeURIComponent(actingEmail)}`);
+            const propios = own?.results ?? [];
+            return jsonResponse(propios.length ? {
+              error: "duplicate_document",
+              message: `Ya tenés un cliente con el documento ${doc} en el CRM. Vinculá en vez de crear uno nuevo.`,
+              candidates: propios.slice(0, 10),
+            } : {
+              error: "duplicate_document",
+              message: `Ya existe un cliente con el documento ${doc} en el CRM, asignado a otro asesor. Pedile a un administrador que lo revise.`,
+              candidates: [],
+            }, 409);
+          }
           if (cands.length) {
             return jsonResponse({
               error: "duplicate_document",
@@ -607,6 +639,11 @@ Deno.serve(async (req: Request) => {
       }
       const crm = crmClient();
       const clientId = anchor.effectiveClientId;
+      // Barrera real: crm_client_id puede venir del typeahead o setearse directo en
+      // la fila (RLS deja editar la propia), sin pasar por `link`. Re-verificar SIEMPRE.
+      if (!isAdmin && !(await clienteEsDelAsesor(crm, clientId, actingEmail))) {
+        return jsonResponse({ error: "client_not_owned", message: "El cliente vinculado no está en tu cartera del CRM. No se volcó nada; desvinculalo o pedile a un administrador." }, 403);
+      }
       const { contactos, agendados, tareas, prospIds } =
         await gatherByClient(supabase, clientId, anchor.agenteId);
       const multiProspecto = (prospIds?.length || 0) > 1;
