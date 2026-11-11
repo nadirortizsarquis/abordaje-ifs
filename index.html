@@ -4403,7 +4403,7 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, documento, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, crm_client_id, crm_linked_at, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, orden, fijada_at, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
@@ -4625,7 +4625,7 @@ const storage = {
   },
 
   // ── Tareas Kanban ──
-  async createTarea({ columnaId, prospectoId = null, prospectoRefId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '' }) {
+  async createTarea({ columnaId, prospectoId = null, prospectoRefId = null, titulo = '', fechaRecordatorio = null, horaRecordatorio = null, observacion = '', etiquetas = [] }) {
     const user = await auth.getUser();
     const agenteId = await auth.getEffectiveAgenteId();
     const { data, error } = await sb.from('abordaje_tareas').insert({
@@ -4637,7 +4637,8 @@ const storage = {
       titulo,
       observacion,
       fecha_recordatorio: fechaRecordatorio,
-      hora_recordatorio: horaRecordatorio
+      hora_recordatorio: horaRecordatorio,
+      etiquetas: normEtiquetas(etiquetas)
     }).select().single();
     if (error) throw error;
     return mapTareaFromDB(data);
@@ -4688,7 +4689,7 @@ const storage = {
   async listTareasArchivadas() {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
-    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, orden, fijada_at, archivada, created_at, updated_at';
     const { data, error } = await selectAllRows(() => sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
@@ -6706,7 +6707,7 @@ function useSeguimientoEngine({ state, setState, isPilot, bumpGcal }) {
     let tareasAuto = [];
     if (agenteEffectiveId) {
       const { data: tareasDB, error: tareasErr } = await sb.from('abordaje_tareas')
-        .select('id, google_event_id')
+        .select('id, google_event_id, etiquetas')
         .eq('agente_id', agenteEffectiveId)
         .eq('prospecto_id', prospectoId)
         .eq('archivada', false);
@@ -6715,7 +6716,7 @@ function useSeguimientoEngine({ state, setState, isPilot, bumpGcal }) {
         // Fallback al state local si la query falla.
         tareasAuto = (prevState.tareas?.items || [])
           .filter(t => t.prospectoId === prospectoId)
-          .map(t => ({ id: t.id, google_event_id: t.googleEventId }));
+          .map(t => ({ id: t.id, google_event_id: t.googleEventId, etiquetas: t.etiquetas }));
       } else {
         tareasAuto = tareasDB || [];
       }
@@ -6813,7 +6814,9 @@ function useSeguimientoEngine({ state, setState, isPilot, bumpGcal }) {
           titulo,
           fechaRecordatorio: fecha,
           horaRecordatorio: hora,
-          observacion: obsTarea
+          observacion: obsTarea,
+          // La tarea auto se borra y se recrea: hereda las etiquetas de las anteriores.
+          etiquetas: tareasAuto.flatMap(t => t.etiquetas || []),
         });
         // En piloto, también crear evento en Google para que aparezca en el calendar.
         if (isPilot) {
@@ -8730,7 +8733,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onUnlinkOAuth={handleUnlinkOAuth}
           onToggleShareCalWithAssistant={handleToggleShareCalWithAssistant}
           onTogglePermitirAsistenteVerProd={handleTogglePermitirAsistenteVerProd}
-          onOpenConectarClaude={viewAs ? null : () => { setShowSettings(false); setShowConectarClaude(true); }}
+          onOpenConectarClaude={viewAs ? null : () => setShowConectarClaude(true)}
         />
       )}
 
@@ -19096,6 +19099,12 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
   const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  // Etiquetas solo viajan si el usuario las cambió: así un guardado nunca pisa
+  // etiquetas que el modal no conoce (ej. cargadas por el MCP con datos viejos).
+  const etiquetasPatch = () => (
+    JSON.stringify(form.etiquetas || []) === JSON.stringify(tarea.etiquetas || [])
+      ? {} : { etiquetas: form.etiquetas }
+  );
   // Atajos de bitácora: agregan una frase al campo de nueva entrada. Si ya hay
   // texto, la concatenan con " · " para poder combinar acciones (ej: mensaje + llamada).
   const agregarAtajo = (txt) => {
@@ -19131,7 +19140,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
-      etiquetas: form.etiquetas,
+      ...etiquetasPatch(),
       crmClientId: crmCliente?.id || undefined,
     })).finally(() => setSaving(false));
   };
@@ -19149,7 +19158,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: built,
       compania: form.compania || null,
-      etiquetas: form.etiquetas,
+      ...etiquetasPatch(),
     });
     // Reflejar en el form: la entrada nueva ya quedó dentro de observacion,
     // así un Guardar posterior no la vuelve a agregar.
@@ -19166,7 +19175,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: hora,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
-      etiquetas: form.etiquetas,
+      ...etiquetasPatch(),
     });
   };
   const quickHoy = () => {
@@ -19807,9 +19816,6 @@ function OrphanEventModal({ event, onCancel, onDelete }) {
 }
 
 // ── MODAL: INSTRUCCIONES DE USO ───────────────────────────────
-// Tour rápido de las funciones del Planificador de Abordaje. Secciones
-// colapsables tipo acordeón, agrupadas por tópico. La primera sección queda
-// abierta por defecto para que el primer impacto sea informativo.
 // ── CONECTAR CON CLAUDE ────────────────────────────────────────
 // Guía de un minuto para sumar el conector MCP de IFS a la cuenta de Claude del
 // asesor (plan Pro individual). Se agrega una vez en claude.ai y queda andando en
@@ -19819,25 +19825,27 @@ function OrphanEventModal({ event, onCancel, onDelete }) {
 const MCP_IFS_URL = 'https://mcp.broker-ifs.com/mcp';
 const CLAUDE_CONECTORES_WEB = 'https://claude.ai/settings/connectors';
 const CLAUDE_ICON = 'data:image/png;base64,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';
-const C = { navy: '#1e1b4b', fondo: '#f0f2f7', borde: '#e5e7eb', texto: '#1a1a2e', suave: '#6b7280' };
+const CC_COL = { navy: '#1e1b4b', fondo: '#f0f2f7', borde: '#e5e7eb', texto: '#1a1a2e', suave: '#6b7280' };
 
 function Copiable({ valor }) {
   const [copiado, setCopiado] = useState(false);
   const copiar = async () => {
-    try { await navigator.clipboard.writeText(valor); }
+    let ok = false;
+    try { await navigator.clipboard.writeText(valor); ok = true; }
     catch (_) {
       const ta = document.createElement('textarea');
       ta.value = valor; document.body.appendChild(ta); ta.select();
-      try { document.execCommand('copy'); } catch (__) { /* queda visible para copiar a mano */ }
+      try { ok = document.execCommand('copy'); } catch (__) { ok = false; }
       ta.remove();
     }
-    setCopiado(true);
-    setTimeout(() => setCopiado(false), 2000);
+    // Sin portapapeles: no mentir "Copiado"; la dirección queda visible para copiarla a mano.
+    setCopiado(ok ? 'ok' : 'error');
+    setTimeout(() => setCopiado(false), 2500);
   };
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}>
-      <code style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 13, padding: '8px 10px', background: C.fondo, border: '1px solid ' + C.borde, borderRadius: 8, color: C.navy }}>{valor}</code>
-      <button type="button" className="btn-secondary" onClick={copiar} style={{ flex: '0 0 auto' }}>{copiado ? 'Copiado' : 'Copiar'}</button>
+      <code style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 13, padding: '8px 10px', background: CC_COL.fondo, border: '1px solid ' + CC_COL.borde, borderRadius: 8, color: CC_COL.navy }}>{valor}</code>
+      <button type="button" className="btn-secondary" onClick={copiar} style={{ flex: '0 0 auto' }}>{copiado === 'ok' ? 'Copiado' : copiado === 'error' ? 'Copiala a mano' : 'Copiar'}</button>
     </div>
   );
 }
@@ -19850,13 +19858,13 @@ function ConectarClaudeModal({ onClose }) {
   }, [onClose]);
 
   const paso = { display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 16 };
-  const num = { flex: '0 0 auto', width: 24, height: 24, borderRadius: '50%', background: C.navy, color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-  const tit = { fontWeight: 700, color: C.navy, fontSize: 14, marginBottom: 4 };
-  const txt = { fontSize: 13.5, color: C.suave, lineHeight: 1.5, margin: 0 };
+  const num = { flex: '0 0 auto', width: 24, height: 24, borderRadius: '50%', background: CC_COL.navy, color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const tit = { fontWeight: 700, color: CC_COL.navy, fontSize: 14, marginBottom: 4 };
+  const txt = { fontSize: 13.5, color: CC_COL.suave, lineHeight: 1.5, margin: 0 };
   const nota = { ...txt, fontSize: 12.5, marginTop: 6 };
 
   return (
-    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="modal-backdrop" style={{ zIndex: 1100 }} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="modal" role="dialog" aria-modal="true" aria-labelledby="conectar-claude-title" style={{ maxWidth: 540 }}>
         <div className="modal-header">
           <h3 id="conectar-claude-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -19866,7 +19874,7 @@ function ConectarClaudeModal({ onClose }) {
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body">
-          <p style={{ ...txt, color: C.texto, marginBottom: 18 }}>
+          <p style={{ ...txt, color: CC_COL.texto, marginBottom: 18 }}>
             Pedile a Claude que trabaje sobre tus prospectos, tareas y agenda hablándole normal
             (por ejemplo: <i>"¿qué tengo para hoy?"</i>). Ve solo lo tuyo. Se hace <b>una sola vez</b>,
             desde la <b>computadora</b>, y tarda unos 3 minutos.
@@ -19921,12 +19929,12 @@ function ConectarClaudeModal({ onClose }) {
             </div>
           </div>
 
-          <p style={{ ...txt, marginTop: 14, padding: '10px 12px', background: C.fondo, borderRadius: 8 }}>
+          <p style={{ ...txt, marginTop: 14, padding: '10px 12px', background: CC_COL.fondo, borderRadius: 8 }}>
             Desde ahora funciona en la web, en la app de Claude de la computadora y en el celular, sin hacer nada más.
             Para probarlo, abrí un chat nuevo y preguntale <i>"¿qué tareas tengo hoy?"</i>.
           </p>
 
-          <details style={{ marginTop: 12, fontSize: 12.5, color: C.suave }}>
+          <details style={{ marginTop: 12, fontSize: 12.5, color: CC_COL.suave }}>
             <summary style={{ cursor: 'pointer' }}>¿Usás Claude Code?</summary>
             <code style={{ display: 'block', marginTop: 6, overflowWrap: 'anywhere', fontSize: 12 }}>claude mcp add --transport http ifs {MCP_IFS_URL}</code>
           </details>
@@ -19939,6 +19947,9 @@ function ConectarClaudeModal({ onClose }) {
   );
 }
 
+// Tour rápido de las funciones del Planificador de Abordaje. Secciones
+// colapsables tipo acordeón, agrupadas por tópico. La primera sección queda
+// abierta por defecto para que el primer impacto sea informativo.
 function InstruccionesModal({ onClose }) {
   const [openId, setOpenId] = useState('arranque');
   useEffect(() => {
