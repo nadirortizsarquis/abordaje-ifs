@@ -8693,6 +8693,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onUnlinkOAuth={handleUnlinkOAuth}
           onToggleShareCalWithAssistant={handleToggleShareCalWithAssistant}
           onTogglePermitirAsistenteVerProd={handleTogglePermitirAsistenteVerProd}
+          onOpenConectarClaude={viewAs ? null : () => { setShowSettings(false); setShowConectarClaude(true); }}
         />
       )}
 
@@ -18055,7 +18056,7 @@ function ErroresSection() {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd, onOpenConectarClaude }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -18189,6 +18190,21 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
             onTogglePermitirAsistenteVerProd={onTogglePermitirAsistenteVerProd}
           />
+          {onOpenConectarClaude && (
+            <section style={adminSectionStyle}>
+              <h3 style={{ ...adminSectionTitleStyle, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <img src={CLAUDE_ICON} alt="" width={20} height={20} style={{ borderRadius: 4 }} />
+                Conectar con Claude
+              </h3>
+              <p style={adminSectionDescStyle}>
+                Usá Claude como asistente sobre tus prospectos, tareas y agenda, hablándole normal. Se configura
+                una sola vez desde la computadora y después funciona también en el celular.
+              </p>
+              <div style={{ marginTop: 14 }}>
+                <button type="button" onClick={onOpenConectarClaude} style={adminBtnPrimary}>Ver cómo conectarlo</button>
+              </div>
+            </section>
+          )}
           {!esAdmin && currentUser?.id && (
             <CalendarioCompartidoGeneralSection userId={currentUser.id} />
           )}
