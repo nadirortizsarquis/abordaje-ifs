@@ -5082,6 +5082,10 @@ function gcalFinLocalIso(ev) {
   if (ev?.end?.date) return `${ev.end.date}T00:00:00`;
   return null;
 }
+// Textos fijos que las edge functions ponen en Google en lugar de la nota (A1, opción b):
+// adentro de la plataforma no se muestran (la nota real se lee de la base).
+const GCAL_TEXTOS_FIJOS = new Set(['Agendado desde IFS. El detalle está en Abordaje / Universo IFS.', 'Reunión agendada con IFS - Insurance Financial Solution.']);
+const gcalNotaVisible = (d) => (d && !GCAL_TEXTOS_FIJOS.has(String(d).trim()) ? d : '');
 function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + durationMin * 60_000);
@@ -14801,7 +14805,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       // Último día (inclusive) de un evento de día completo de varios días.
       allDayHasta: gcalEsDiaCompleto(ev) && ev.end?.date ? dayKey(new Date(new Date(`${ev.end.date}T00:00:00`).getTime() - 86400000 / 2)) : null,
       tipo: tipoEvento,
-      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : (ev.description || ''),
+      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : gcalNotaVisible(ev.description),
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,

@@ -134,6 +134,10 @@ export function sendUpdatesPara(tarea: TareaEvento | null): "all" | "none" {
 // los invitados, se asume que hay externos.
 export const DESCRIPCION_NEUTRA = "Reunión agendada con IFS - Insurance Financial Solution.";
 export const TITULO_NEUTRO = "Reunión con IFS";
+// Opción (b) de Nadir (11-nov): la bitácora NUNCA va a Google, en ningún evento de tarjeta o
+// de prospecto (haya o no invitados). La nota se ve en Abordaje / Universo, que la leen de
+// la base. Así, si alguien agrega un invitado a mano en Google, no hay notas que se filtren.
+export const DESCRIPCION_SIN_NOTAS = "Agendado desde IFS. El detalle está en Abordaje / Universo IFS.";
 const HUELLA = { summary: "abordaje_sum_h", description: "abordaje_desc_h" } as const;
 
 // Huella corta (no es criptográfica: solo detecta si el texto cambió).
@@ -146,7 +150,7 @@ export function huella(txt: string): string {
 // ¿Ese campo del evento lo escribió alguien a mano en Google?
 export function esManual(previo: any, campo: "summary" | "description"): boolean {
   const v = previo?.[campo];
-  if (!v || v === DESCRIPCION_NEUTRA || v === TITULO_NEUTRO) return false;
+  if (!v || v === DESCRIPCION_NEUTRA || v === DESCRIPCION_SIN_NOTAS || v === TITULO_NEUTRO) return false;
   const h = previo?.extendedProperties?.private?.[HUELLA[campo]];
   return !!h && huella(String(v)) !== h;
 }
@@ -180,23 +184,24 @@ export function hayExternos(event: any, previo: any, internos: Set<string>): boo
 }
 
 // Cuerpo listo para mandar.
-//  - Evento de TARJETA (tarjeta=true), con externos: título y descripción neutros, aunque el
-//    cliente no los mande (así se pisa la bitácora que hubiera quedado), salvo que el agente
-//    los haya escrito a mano en Google: esos se respetan (no se mandan). Siempre deja la
-//    huella de lo que queda escrito.
-//  - Evento propio del usuario en Google (tarjeta=false), con externos: solo se neutraliza la
-//    descripción que manda Abordaje; el resto es del usuario y no se toca.
-export function blindarCuerpo(event: any, externos: boolean, tarjeta = true, previo: any = null): any {
+//  - Evento de TARJETA o de PROSPECTO (deAbordaje=true): la descripción nunca lleva la nota
+//    de Abordaje: con invitados externos va la neutra; sin externos, un aviso de que el
+//    detalle está en la plataforma. Con externos además el título es neutro. Lo que el
+//    agente escribió A MANO en Google se respeta (no se manda). Siempre deja la huella.
+//  - Evento propio del usuario en Google o agenda suelta (deAbordaje=false): con externos
+//    solo se neutraliza la descripción que manda Abordaje; el resto no se toca (la nota de
+//    una agenda suelta vive solo en Google).
+export function blindarCuerpo(event: any, externos: boolean, deAbordaje = true, previo: any = null): any {
   const ev = { ...(event || {}) };
-  if (!tarjeta) {
+  if (!deAbordaje) {
     if (externos && "description" in ev) ev.description = DESCRIPCION_NEUTRA;
     return ev;
   }
+  if (esManual(previo, "description")) delete ev.description;
+  else ev.description = externos ? DESCRIPCION_NEUTRA : DESCRIPCION_SIN_NOTAS;
   if (externos) {
-    if (esManual(previo, "description")) delete ev.description; else ev.description = DESCRIPCION_NEUTRA;
     if (esManual(previo, "summary")) delete ev.summary; else ev.summary = TITULO_NEUTRO;
   }
-  // Se parte de las propiedades privadas que ya tiene (abordaje_tarea_id, etc.): no se pierden.
   const priv: Record<string, string> = { ...(previo?.extendedProperties?.private || {}), ...(ev.extendedProperties?.private || {}) };
   for (const campo of ["summary", "description"] as const) {
     const final = campo in ev ? ev[campo] : previo?.[campo];
@@ -248,7 +253,9 @@ export async function escribirEvento(
     else if (emailsInvitados(event, actual).length) externos = hayExternos(event, actual, await ctx.internos());
   }
   if (externos) console.warn(`blindaje: evento con invitados externos, título y descripción neutros (${method})`);
-  const cuerpo = blindarCuerpo(event, externos, tarjeta, actual);
+  // Las citas de prospecto (no son tarjeta) también llevan notas de la base: mismo trato.
+  const dePro = !!(event?.extendedProperties?.private?.abordaje_prospect_id || actual?.extendedProperties?.private?.abordaje_prospect_id);
+  const cuerpo = blindarCuerpo(event, externos, tarjeta || dePro, actual);
   // Mail a invitados solo si cambia algo que les importa (se decide sobre el cuerpo final).
   let destino = url;
   if (actual && /[?&]sendUpdates=all/.test(url) && !cambiaParaInvitados(cuerpo, actual)) destino = url.replace(/sendUpdates=all/, "sendUpdates=none");

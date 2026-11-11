@@ -226,9 +226,9 @@ Deno.serve(async (req: Request) => {
     // Toda escritura a Google pasa por escribirEvento (blindaje de invitados externos).
     const ctx = { internos: internosPerezosos(supabase) };
 
-    // blindar: control periódico del reconciliador del MCP. Si el evento tiene invitados
-    // externos y su descripción no es la neutra (por ejemplo, alguien agregó un invitado
-    // a mano en Google), se la neutraliza sin avisar por mail.
+    // blindar: control del reconciliador del MCP (y del barrido inicial). Saca la bitácora
+    // que haya quedado en el evento de una tarjeta (opción b) y, con invitados externos,
+    // neutraliza título y descripción. Lo escrito a mano en Google se respeta. Sin mails.
     if (op === "blindar") {
       const eid = String(body.eventId || "");
       if (!/^[A-Za-z0-9_-]{5,1024}$/.test(eid)) return jsonResponse({ error: "eventId inválido" }, 400);
@@ -237,13 +237,13 @@ Deno.serve(async (req: Request) => {
       if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
       const ev = await gr.json();
       const externos = hayExternos(null, ev, await ctx.internos());
-      const cuerpo = externos ? blindarCuerpo({}, true, true, ev) : null;
-      const cambia = !!cuerpo && ((cuerpo.description !== undefined && cuerpo.description !== ev.description)
+      const cuerpo = blindarCuerpo({}, externos, true, ev); // (b): nunca notas, con o sin externos
+      const cambia = ((cuerpo.description !== undefined && cuerpo.description !== ev.description)
         || (cuerpo.summary !== undefined && cuerpo.summary !== ev.summary));
       if (!cambia) return jsonResponse({ ok: true, existe: true, externos, corregido: false });
       const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, {}, ev, ctx);
       if (!r.ok) throw new Error(`blindar failed: ${r.status} ${await r.text()}`);
-      console.warn(`blindaje: título/descripción neutralizados en evento ${eid} (invitados externos)`);
+      console.warn(`blindaje: título/descripción neutralizados en evento ${eid}${externos ? " (invitados externos)" : ""}`);
       return jsonResponse({ ok: true, existe: true, externos, corregido: true });
     }
 

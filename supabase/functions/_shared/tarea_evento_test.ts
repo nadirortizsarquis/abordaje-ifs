@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { DESCRIPCION_SIN_NOTAS, blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -90,7 +90,7 @@ const bl = blindarCuerpo({ summary: "Juan Perez - hipertension", description: "B
 check(bl.description === DESCRIPCION_NEUTRA && bl.summary === TITULO_NEUTRO, "con externos: título y descripción neutros");
 const bl2 = blindarCuerpo({}, true);
 check(bl2.description === DESCRIPCION_NEUTRA && bl2.summary === TITULO_NEUTRO, "con externos se pisan aunque no vengan");
-check(blindarCuerpo({ description: "nota" }, false).description === "nota", "sin externos la nota se conserva");
+check(blindarCuerpo({ description: "nota" }, false, false).description === "nota", "evento propio de Google sin externos: su nota se conserva");
 // Lo que el agente escribió a mano en Google se respeta (huella de Abordaje distinta).
 const PRIV = (sum: string, desc: string) => ({ extendedProperties: { private: { abordaje_tarea_id: "t1", abordaje_sum_h: huella(sum), abordaje_desc_h: huella(desc) } } });
 const manual = { summary: "Reunión Juan - revisión de póliza", description: "Agenda: revisar póliza y beneficiarios", ...PRIV("Juan Perez - hipertension", "BITACORA") };
@@ -105,7 +105,10 @@ check(!esManual(legacy, "description") && blindarCuerpo({}, true, true, legacy).
 check(ba.extendedProperties.private.abordaje_tarea_id === "t1", "al dejar la huella no se pierde abordaje_tarea_id");
 check(ba.extendedProperties.private.abordaje_desc_h === huella(DESCRIPCION_NEUTRA), "deja la huella de lo que quedó escrito");
 const sinExt = blindarCuerpo({ summary: "T", description: "B" }, false, true, null);
-check(sinExt.description === "B" && sinExt.extendedProperties.private.abordaje_desc_h === huella("B"), "sin externos: nota intacta + huella");
+check(sinExt.description === DESCRIPCION_SIN_NOTAS && sinExt.summary === "T", "(b) sin externos: sin bitácora, título real");
+check(sinExt.extendedProperties.private.abordaje_desc_h === huella(DESCRIPCION_SIN_NOTAS), "deja huella de la descripción sin notas");
+check(!("description" in blindarCuerpo({ description: "BIT" }, false, true, manual)), "(b) descripción escrita a mano en Google: se respeta");
+
 check(blindarCuerpo({ start: {} }, true, false).description === undefined, "evento propio de Google: si Abordaje no manda descripción, no se toca la del usuario");
 check(blindarCuerpo({ description: "nota de agenda" }, true, false).description === DESCRIPCION_NEUTRA, "evento propio de Google: la descripción que manda Abordaje se neutraliza igual");
 
@@ -139,7 +142,7 @@ const BIT = "[11/11/26 10:00] hipertension, ofrecer 15% de descuento";
 {
   const { f, enviados } = fakeFetch({ attendees: [{ email: "nadir@gmail.com" }] });
   await escribirEvento("https://x/events/abc", "PATCH", {}, { description: BIT }, undefined, ctxT, f);
-  check(enviados[0].description === BIT, "solo invitados internos → la bitácora se mantiene");
+  check(enviados[0].description === DESCRIPCION_SIN_NOTAS, "(b) solo internos: igual no va la bitácora a Google");
 }
 {
   const { f, enviados } = fakeFetch(null);
@@ -153,6 +156,17 @@ const BIT = "[11/11/26 10:00] hipertension, ofrecer 15% de descuento";
   const f = (async (url: string, init?: any) => { if (init?.method) urls.push(url); return new Response("{}", { status: 200 }); }) as unknown as typeof fetch;
   await escribirEvento("https://x/events/abc?sendUpdates=all", "PATCH", {}, { summary: "Juan - hipertension", description: BIT }, prev, ctxT, f);
   check(urls[0].includes("sendUpdates=none"), "nota nueva en reunión con externo: no se le manda mail (cuerpo final igual)");
+}
+
+{
+  const { f, enviados } = fakeFetch(null);
+  await escribirEvento("https://x/events", "POST", {}, { description: "notas del prospecto", extendedProperties: { private: { abordaje_prospect_id: "p1" } } }, null, ctxT, f, false);
+  check(enviados[0].description === DESCRIPCION_SIN_NOTAS, "(b) cita de prospecto: tampoco van sus notas");
+}
+{
+  const { f, enviados } = fakeFetch(null);
+  await escribirEvento("https://x/events", "POST", {}, { description: "nota de agenda suelta" }, null, ctxT, f, false);
+  check(enviados[0].description === "nota de agenda suelta", "agenda suelta sin invitados: su nota (vive solo en Google) se conserva");
 }
 
 // mails a invitados: solo si cambia algo que les importa (no por cada nota)
