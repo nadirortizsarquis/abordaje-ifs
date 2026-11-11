@@ -528,6 +528,54 @@ test('calpagoDerivePagos: mensual da 12 cuotas y anual 1 en la ventana de 12m', 
   assert.equal(g('calpagoDerivePagos')(rd, 1, hoy, hoyMas12, null, null).length, 12);
   assert.equal(g('calpagoDerivePagos')(rd, 12, hoy, hoyMas12, null, null).length, 1);
 });
+// ── Tarjeta como reunión: invitados ──
+test('normInvitados: minúscula, sin duplicados, separa inválidos', () => {
+  const r = g('normInvitados')('Cliente@Mail.com, otro@x.com; cliente@mail.com  no-es-mail');
+  assert.equal(JSON.stringify(r.validos), JSON.stringify(['cliente@mail.com', 'otro@x.com']));
+  assert.equal(JSON.stringify(r.invalidos), JSON.stringify(['no-es-mail']));
+  assert.equal(g('normInvitados')([]).validos.length, 0);
+  assert.equal(g('etiquetaDuracion')(90), '1 h 30 min');
+  assert.equal(g('etiquetaDuracion')(45), '45 min');
+});
+
+// ── Calendario: eventos de día completo de Google (brief calendar-apps, punto 1) ──
+test('día completo de Google cae en su día (no el anterior a las 21:00)', () => {
+  const evs = g('extractGcalEventsForCalendar')([
+    { id: 'cumple', summary: 'Cumple', start: { date: '2026-11-12' }, end: { date: '2026-11-13' } },
+    { id: 'reu', summary: 'Reunión', start: { dateTime: '2026-11-12T10:00:00-03:00' }, end: { dateTime: '2026-11-12T11:00:00-03:00' } },
+  ], [], []);
+  const cumple = evs.find(e => e.id === 'cumple');
+  const d = new Date(cumple.fecha);
+  assert.equal(cumple.allDay, true);
+  assert.equal(d.getDate(), 12);
+  assert.equal(d.getHours(), 0);
+  assert.equal(g('horaEventoCal')(cumple), 'Todo el día');
+  assert.equal(evs.find(e => e.id === 'reu').allDay, false);
+  assert.equal(evs[0].id, 'cumple');  // arriba del día
+});
+test('día completo de varios días ocupa cada día (12 al 14)', () => {
+  const evs = g('extractGcalEventsForCalendar')([
+    { id: 'vac', summary: 'Vacaciones', start: { date: '2026-11-12' }, end: { date: '2026-11-15' } },
+  ], [], []);
+  const m = g('eventsByDayKey')(evs);
+  assert.equal(Object.keys(m).sort().join(), '2026-11-12,2026-11-13,2026-11-14');
+});
+test('normInvitados: tope 20 (el de la base) y avisa los excedidos', () => {
+  const r = g('normInvitados')(Array.from({ length: 25 }, (_, i) => `p${i}@x.com`).join(','));
+  assert.equal(r.validos.length, 20);
+  assert.equal(r.excedidos, 5);
+});
+test('tarea local sin hora = día completo; con hora = horario', () => {
+  const evs = g('extractCalendarEvents')([], { items: [
+    { id: 't1', titulo: 'Sin hora', fechaRecordatorio: '2026-11-12', horaRecordatorio: null },
+    { id: 't2', titulo: 'Con hora', fechaRecordatorio: '2026-11-12', horaRecordatorio: '15:30' },
+  ] }, []);
+  assert.equal(evs.find(e => e.id === 't1_tarea').allDay, true);
+  assert.equal(new Date(evs.find(e => e.id === 't1_tarea').fecha).getDate(), 12);
+  assert.equal(evs.find(e => e.id === 't2_tarea').allDay, false);
+  assert.equal(g('horaEventoCal')(evs.find(e => e.id === 't2_tarea')), '15:30');
+});
+
 
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;

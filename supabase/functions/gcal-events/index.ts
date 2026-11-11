@@ -14,7 +14,7 @@
 // acá con service_role.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea } from "../_shared/tarea_evento.ts";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario } from "../_shared/tarea_evento.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -357,6 +357,12 @@ Deno.serve(async (req: Request) => {
       const r = await fetch(`${base}/${body.eventId}`, { method: "DELETE", headers });
       if (!r.ok && r.status !== 404 && r.status !== 410) {
         throw new Error(`delete failed: ${r.status} ${await r.text()}`);
+      }
+      // No estaba en este calendario y el cliente no eligió uno: el agente cambió de
+      // calendario en Ajustes y el evento quedó en el anterior → se borra allá.
+      if ((r.status === 404 || r.status === 410) && !body.calendarId && body.eventId) {
+        const borrado = await borrarEnOtroCalendario(base, headers, String(body.eventId));
+        if (borrado) return jsonResponse({ ok: true, action: "deleted", otroCalendario: true, asAssistant });
       }
       return jsonResponse({ ok: true, action: "deleted", asAssistant });
     }
