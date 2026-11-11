@@ -7280,6 +7280,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   const dupCount = React.useMemo(() => agruparDuplicados(state.prospectos).length, [state.prospectos]);
   const [showSettings, setShowSettings] = useState(false);
   const [showInstrucciones, setShowInstrucciones] = useState(false);
+  const [showConectarClaude, setShowConectarClaude] = useState(false);
   const [showPassModal, setShowPassModal] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
   // Click en una celda libre del calendario: muestra mini-modal Agenda/Tarea.
@@ -8333,6 +8334,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         onOpenSettings={() => setShowSettings(true)}
         onChangePassword={viewAs ? null : () => setShowPassModal(true)}
         onOpenInstrucciones={() => setShowInstrucciones(true)}
+        onOpenConectarClaude={viewAs ? null : () => setShowConectarClaude(true)}
         notifCount={notifUrgentes}
         onToggleBell={() => setBellOpen(o => !o)}
       />
@@ -8345,6 +8347,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       <MountInSlot slotId="headerSearch">
         <BuscadorGlobal state={state} isPilot={isPilot} onClickItem={handleNavToItem} />
       </MountInSlot>
+      {showConectarClaude && (
+        <ConectarClaudeModal onClose={() => setShowConectarClaude(false)} />
+      )}
       {showInstrucciones && (
         <InstruccionesModal onClose={() => setShowInstrucciones(false)} />
       )}
@@ -8822,7 +8827,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
 }
 
 // ── HEADER ACTIONS (portal al header, con backup indicator + Ajustes) ─
-function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, notifCount, onToggleBell }) {
+function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, onOpenConectarClaude, notifCount, onToggleBell }) {
   const esAdmin = agente?.role === 'admin';
   const displayName = agente?.display_name || user?.email || '';
   const enViewAs = !!viewAs;
@@ -8938,6 +8943,15 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       appSec.style.cssText = 'padding:6px;border-bottom:1px solid #f0f2f7;';
       if (onOpenInstrucciones) appSec.appendChild(mkAccBtn('Instrucciones', '#1a1a2e', onOpenInstrucciones));
       appSec.appendChild(mkAccBtn('Ajustes', '#1a1a2e', onOpenSettings));
+      if (onOpenConectarClaude) {
+        // "Conectar con Claude": ícono oficial de Claude a la izquierda del texto.
+        const cc = mkAccBtn('Conectar con Claude', '#1a1a2e', onOpenConectarClaude);
+        cc.style.display = 'flex'; cc.style.alignItems = 'center'; cc.style.gap = '9px';
+        const ic = document.createElement('img');
+        ic.src = CLAUDE_ICON; ic.alt = ''; ic.width = 18; ic.height = 18; ic.style.borderRadius = '4px';
+        cc.insertBefore(ic, cc.firstChild);
+        appSec.appendChild(cc);
+      }
       panel.appendChild(appSec);
 
       const phead = document.createElement('div');
@@ -8970,7 +8984,7 @@ function HeaderActions({ user, agente, viewAs, onExitViewAs, onLogout, onOpenSet
       menuCleanup = closeMenu;
     }
     return () => { if (menuCleanup) menuCleanup(); };
-  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, onToggleBell]);
+  }, [user, esAdmin, displayName, notifCount, onLogout, onOpenSettings, onChangePassword, onOpenInstrucciones, onOpenConectarClaude, onToggleBell]);
   return null;
 }
 
@@ -19697,6 +19711,135 @@ function OrphanEventModal({ event, onCancel, onDelete }) {
 // Tour rápido de las funciones del Planificador de Abordaje. Secciones
 // colapsables tipo acordeón, agrupadas por tópico. La primera sección queda
 // abierta por defecto para que el primer impacto sea informativo.
+// ── CONECTAR CON CLAUDE ────────────────────────────────────────
+// Guía de un minuto para sumar el conector MCP de IFS a la cuenta de Claude del
+// asesor (plan Pro individual). Se agrega una vez en claude.ai y queda andando en
+// web, escritorio y celular. Direcciones con botón Copiar (no link): con la app de
+// Claude instalada, el link a claude.ai lo abre la app y no el navegador.
+// Espejo de ConectarClaudeModal.jsx del Universo — si cambia el copy o el URL, tocar los dos.
+const MCP_IFS_URL = 'https://mcp.broker-ifs.com/mcp';
+const CLAUDE_CONECTORES_WEB = 'https://claude.ai/settings/connectors';
+const CLAUDE_ICON = 'data:image/png;base64,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';
+const C = { navy: '#1e1b4b', fondo: '#f0f2f7', borde: '#e5e7eb', texto: '#1a1a2e', suave: '#6b7280' };
+
+function Copiable({ valor }) {
+  const [copiado, setCopiado] = useState(false);
+  const copiar = async () => {
+    try { await navigator.clipboard.writeText(valor); }
+    catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = valor; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch (__) { /* queda visible para copiar a mano */ }
+      ta.remove();
+    }
+    setCopiado(true);
+    setTimeout(() => setCopiado(false), 2000);
+  };
+  return (
+    <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '6px 0' }}>
+      <code style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere', fontSize: 13, padding: '8px 10px', background: C.fondo, border: '1px solid ' + C.borde, borderRadius: 8, color: C.navy }}>{valor}</code>
+      <button type="button" className="btn-secondary" onClick={copiar} style={{ flex: '0 0 auto' }}>{copiado ? 'Copiado' : 'Copiar'}</button>
+    </div>
+  );
+}
+
+function ConectarClaudeModal({ onClose }) {
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const paso = { display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 16 };
+  const num = { flex: '0 0 auto', width: 24, height: 24, borderRadius: '50%', background: C.navy, color: '#fff', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+  const tit = { fontWeight: 700, color: C.navy, fontSize: 14, marginBottom: 4 };
+  const txt = { fontSize: 13.5, color: C.suave, lineHeight: 1.5, margin: 0 };
+  const nota = { ...txt, fontSize: 12.5, marginTop: 6 };
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="conectar-claude-title" style={{ maxWidth: 540 }}>
+        <div className="modal-header">
+          <h3 id="conectar-claude-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <img src={CLAUDE_ICON} alt="" width={22} height={22} style={{ borderRadius: 5 }} />
+            Conectá IFS a tu Claude
+          </h3>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ ...txt, color: C.texto, marginBottom: 18 }}>
+            Pedile a Claude que trabaje sobre tus prospectos, tareas y agenda hablándole normal
+            (por ejemplo: <i>"¿qué tengo para hoy?"</i>). Ve solo lo tuyo. Se hace <b>una sola vez</b>,
+            desde la <b>computadora</b>, y tarda unos 3 minutos.
+          </p>
+
+          <div style={paso}>
+            <span style={num}>1</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={tit}>Abrí Claude en el navegador</div>
+              <p style={txt}>
+                Abrí tu navegador de internet (Chrome, Safari o el que uses). Copiá esta dirección, pegala en la
+                barra de arriba del navegador y apretá <b>Enter</b>:
+              </p>
+              <Copiable valor={CLAUDE_CONECTORES_WEB} />
+              <p style={nota}>
+                Si aparece un cartel que dice <b>"Abrir Claude"</b> o <b>"Abrir en la app"</b>, tocá <b>Cancelar</b>:
+                esto se hace en la página web, no en la aplicación.
+              </p>
+              <p style={nota}>
+                Si te pide entrar, usá tu cuenta de Claude. Tenés que llegar a una pantalla que dice
+                <b> Conectores</b> (Connectors). Si no, abajo a la izquierda tocá tu nombre → <b>Configuración</b>
+                (Settings) → <b>Conectores</b> (Connectors).
+              </p>
+            </div>
+          </div>
+
+          <div style={paso}>
+            <span style={num}>2</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={tit}>Agregá el conector de IFS</div>
+              <p style={txt}>
+                En esa pantalla, bajá hasta el final de la lista y tocá <b>Agregar conector personalizado</b>
+                (Add custom connector). Se abre un cuadro con dos casilleros:
+              </p>
+              <ul style={{ ...txt, margin: '6px 0 0', paddingLeft: 18 }}>
+                <li><b>Nombre</b> (Name): escribí <b>IFS</b></li>
+                <li><b>URL</b>: copiá esta dirección y pegala ahí:</li>
+              </ul>
+              <Copiable valor={MCP_IFS_URL} />
+              <p style={txt}>Tocá <b>Agregar</b> (Add).</p>
+            </div>
+          </div>
+
+          <div style={{ ...paso, marginBottom: 6 }}>
+            <span style={num}>3</span>
+            <div style={{ flex: 1 }}>
+              <div style={tit}>Conectá y permití</div>
+              <p style={txt}>
+                En la lista aparece <b>IFS</b>: tocá <b>Conectar</b> (Connect). Se abre la pantalla de IFS: entrá con
+                tu usuario de IFS (el mismo de esta app) y tocá <b>Permitir</b>. Cuando diga <b>Conectado</b>, listo.
+              </p>
+            </div>
+          </div>
+
+          <p style={{ ...txt, marginTop: 14, padding: '10px 12px', background: C.fondo, borderRadius: 8 }}>
+            Desde ahora funciona en la web, en la app de Claude de la computadora y en el celular, sin hacer nada más.
+            Para probarlo, abrí un chat nuevo y preguntale <i>"¿qué tareas tengo hoy?"</i>.
+          </p>
+
+          <details style={{ marginTop: 12, fontSize: 12.5, color: C.suave }}>
+            <summary style={{ cursor: 'pointer' }}>¿Usás Claude Code?</summary>
+            <code style={{ display: 'block', marginTop: 6, overflowWrap: 'anywhere', fontSize: 12 }}>claude mcp add --transport http ifs {MCP_IFS_URL}</code>
+          </details>
+        </div>
+        <div className="modal-footer">
+          <button type="button" className="btn-secondary" onClick={onClose}>Cerrar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InstruccionesModal({ onClose }) {
   const [openId, setOpenId] = useState('arranque');
   useEffect(() => {
