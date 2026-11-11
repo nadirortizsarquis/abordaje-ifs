@@ -71,6 +71,9 @@ export function aplicarTarea(event: any, tarea: TareaEvento, crear: boolean, pre
     }
     if (yaTieneMeet) delete ev.conferenceData; // nunca tocar un Meet existente
     if (crear) delete ev.colorId; // azul = color del calendario
+    // Pasó de recordatorio a reunión: se le saca el lila que le puso Abordaje (un color que
+    // eligió el usuario se respeta). null en un PATCH vuelve al color del calendario.
+    else if (previo?.colorId === COLOR_RECORDATORIO) ev.colorId = null;
   } else if (crear && !ev.colorId) {
     ev.colorId = COLOR_RECORDATORIO;
   }

@@ -235,6 +235,32 @@ Deno.serve(async (req: Request) => {
       return { ...event, extendedProperties: { ...prevExt, private: priv } };
     };
 
+    // list: eventos del calendario en un rango (lo usa reconciliar_calendar del MCP para
+    // detectar duplicados). Rango acotado a 120 días; solo eventos vivos.
+    if (op === "list") {
+      const tMin = new Date(String(body.timeMin || "")), tMax = new Date(String(body.timeMax || ""));
+      if (isNaN(+tMin) || isNaN(+tMax) || tMax <= tMin || (+tMax - +tMin) > 120 * 864e5) {
+        return jsonResponse({ error: "timeMin/timeMax inválidos (máx. 120 días)" }, 400);
+      }
+      const items: any[] = [];
+      let pageToken = "";
+      for (let i = 0; i < 10; i++) {
+        const u = new URL(base);
+        u.searchParams.set("timeMin", tMin.toISOString());
+        u.searchParams.set("timeMax", tMax.toISOString());
+        u.searchParams.set("singleEvents", "true");
+        u.searchParams.set("maxResults", "250");
+        if (pageToken) u.searchParams.set("pageToken", pageToken);
+        const r = await fetch(u.toString(), { headers: reqHeaders });
+        if (!r.ok) throw new Error(`list failed: ${r.status} ${await r.text()}`);
+        const j = await r.json();
+        items.push(...(j.items || []).filter((e: any) => e.status !== "cancelled"));
+        pageToken = j.nextPageToken || "";
+        if (!pageToken) break;
+      }
+      return jsonResponse({ ok: true, events: items, asAssistant });
+    }
+
     if (op === "create") {
       // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
