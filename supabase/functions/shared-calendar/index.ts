@@ -22,6 +22,7 @@
 // Delegation (service account); gmail externos via su refresh_token guardado.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { localARaISO } from "./tz.js";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -38,6 +39,13 @@ function envKey(jsonVar: string, legacyVar: string): string {
 const SERVICE_KEY = envKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
 
 const WORKSPACE_DOMAIN = "ifs-broker.com";
+
+// Email REAL de un usuario (auth.users), nunca profiles.email: esa columna la podía
+// reescribir un admin y así elegir qué casilla impersonar por DWD (auditoría 05-nov, sec-01).
+async function authEmail(supabase: any, userId: string): Promise<string> {
+  const { data } = await supabase.auth.admin.getUserById(userId);
+  return (data?.user?.email || "").toLowerCase();
+}
 const DEFAULT_DUR_MIN = 60; // duración por defecto de una agenda sin fin explícito
 
 const corsHeaders = {
@@ -136,9 +144,10 @@ async function authorizedOwners(supabase: any, viewerId: string): Promise<Array<
   if (!ownerIds.length) return [];
   const { data: profs } = await supabase.from("profiles")
     .select("id, email, display_name, compartir_calendario").in("id", ownerIds);
-  return (profs ?? [])
-    .filter((p: any) => p.compartir_calendario) // el owner también tiene que participar
-    .map((p: any) => ({ id: p.id, email: p.email || "", name: p.display_name || p.email || "Agente" }));
+  const ok = (profs ?? []).filter((p: any) => p.compartir_calendario); // el owner también tiene que participar
+  return await Promise.all(ok.map(async (p: any) => ({
+    id: p.id, email: await authEmail(supabase, p.id), name: p.display_name || p.email || "Agente",
+  })));
 }
 
 Deno.serve(async (req: Request) => {
@@ -172,7 +181,7 @@ Deno.serve(async (req: Request) => {
       const filterIds: string[] | null = Array.isArray(body?.ownerIds) && body.ownerIds.length ? body.ownerIds : null;
       const targets = filterIds ? owners.filter((o) => filterIds.includes(o.id)) : owners;
 
-      const blocks: Array<{ ownerId: string; start: string; end: string }> = [];
+      const blocks: Array<{ ownerId: string; start: string; end: string; allDay?: boolean }> = [];
       const noAccess: string[] = [];
 
       await Promise.all(targets.map(async (owner) => {
@@ -191,7 +200,7 @@ Deno.serve(async (req: Request) => {
           for (const c of cts ?? []) {
             if (!c.fecha) continue;
             const hhmm = (c.hora || "09:00").slice(0, 5);
-            const s = new Date(`${c.fecha}T${hhmm}:00`);
+            const s = new Date(localARaISO(c.fecha, hhmm));
             if (isNaN(s.getTime())) continue;
             const e = new Date(s.getTime() + DEFAULT_DUR_MIN * 60000);
             blocks.push({ ownerId: owner.id, start: s.toISOString(), end: e.toISOString() });
@@ -213,10 +222,10 @@ Deno.serve(async (req: Request) => {
               // esas citas ya vienen (o no) de la DB según la regla.
               if (ext.abordaje_tarea_id || ext.abordaje_prospect_id || ext.abordaje_agente_id) continue;
               if (ev.transparency === "transparent") continue; // marcado "disponible" en Google
-              const start = ev.start?.dateTime || (ev.start?.date ? `${ev.start.date}T00:00:00` : null);
-              const end = ev.end?.dateTime || (ev.end?.date ? `${ev.end.date}T00:00:00` : null);
+              const start = ev.start?.dateTime || (ev.start?.date ? localARaISO(ev.start.date) : null);
+              const end = ev.end?.dateTime || (ev.end?.date ? localARaISO(ev.end.date) : null);
               if (!start || !end) continue;
-              blocks.push({ ownerId: owner.id, start: new Date(start).toISOString(), end: new Date(end).toISOString() });
+              blocks.push({ ownerId: owner.id, start: new Date(start).toISOString(), end: new Date(end).toISOString(), allDay: !ev.start?.dateTime });
             }
           }
         } catch (_) { noAccess.push(owner.id); }
@@ -262,11 +271,12 @@ Deno.serve(async (req: Request) => {
       const timeMax: string = body?.timeMax || "";
       if (!timeMin || !timeMax) return jsonResponse({ error: "missing timeMin/timeMax" }, 400);
       const { data: meProf } = await supabase.from("profiles").select("email, gcal_enabled").eq("id", user.id).maybeSingle();
-      const blocks: Array<{ start: string; end: string; title: string }> = [];
+      const blocks: Array<{ start: string; end: string; title: string; allDay?: boolean }> = [];
 
-      if (meProf?.gcal_enabled && meProf?.email) {
+      const myEmail = (user.email || "").toLowerCase();
+      if (meProf?.gcal_enabled && myEmail) {
         // Piloto: Google es la foto completa, con los títulos reales.
-        const token = await accessTokenForOwner(supabase, { id: user.id, email: meProf.email });
+        const token = await accessTokenForOwner(supabase, { id: user.id, email: myEmail });
         if (token) {
           try {
             const cals = await listCalendars(token);
@@ -276,10 +286,10 @@ Deno.serve(async (req: Request) => {
               for (const ev of evs) {
                 if (ev.status === "cancelled") continue;
                 if (ev.transparency === "transparent") continue; // "disponible" en Google
-                const start = ev.start?.dateTime || (ev.start?.date ? `${ev.start.date}T00:00:00` : null);
-                const end = ev.end?.dateTime || (ev.end?.date ? `${ev.end.date}T00:00:00` : null);
+                const start = ev.start?.dateTime || (ev.start?.date ? localARaISO(ev.start.date) : null);
+                const end = ev.end?.dateTime || (ev.end?.date ? localARaISO(ev.end.date) : null);
                 if (!start || !end) continue;
-                blocks.push({ start: new Date(start).toISOString(), end: new Date(end).toISOString(), title: ev.summary || "Ocupado" });
+                blocks.push({ start: new Date(start).toISOString(), end: new Date(end).toISOString(), title: ev.summary || "Ocupado", allDay: !ev.start?.dateTime });
               }
             }
           } catch (_) { /* best-effort */ }
@@ -299,7 +309,7 @@ Deno.serve(async (req: Request) => {
         for (const c of cts ?? []) {
           if (!c.fecha) continue;
           const hhmm = (c.hora || "09:00").slice(0, 5);
-          const s = new Date(`${c.fecha}T${hhmm}:00`);
+          const s = new Date(localARaISO(c.fecha, hhmm));
           if (isNaN(s.getTime())) continue;
           const e = new Date(s.getTime() + DEFAULT_DUR_MIN * 60000);
           const nombre = (c as any).abordaje_prospectos?.nombre || "Prospecto";

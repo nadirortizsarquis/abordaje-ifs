@@ -5,6 +5,7 @@
 // al user de vuelta a Abordaje con ?gcal_linked=1.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { retornoSeguro, RETORNO_DEFAULT } from "./retorno.js";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -78,7 +79,7 @@ Deno.serve(async (req) => {
   const stateSecret = Deno.env.get("GOOGLE_OAUTH_STATE_SECRET")!;
   let payload: any = null;
   if (state) payload = await verifyState(state, stateSecret);
-  const returnTo = payload?.r || "https://abordaje.broker-ifs.com";
+  const returnTo = payload?.r ? retornoSeguro(payload.r) : RETORNO_DEFAULT;   // M3: solo dominios propios
 
   if (errParam) return errorRedirect(returnTo, errParam);
   if (!code || !payload) return errorRedirect(returnTo, "invalid_state");
@@ -116,6 +117,25 @@ Deno.serve(async (req) => {
       { auth: { persistSession: false } },
     );
 
+    // Flujo del Universo (v=2): el token queda pendiente hasta que el navegador que vuelve
+    // lo confirme con la sesión del mismo usuario que inició (M3).
+    if (payload.v === 2) {
+      const { data: pend, error: pErr } = await admin.from("gcal_oauth_pendientes")
+        .insert({ user_id: payload.uid, refresh_token: refreshToken, scope: scope || null }).select("id").single();
+      if (pErr || !pend) return errorRedirect(returnTo, "server_error");
+      const u2 = new URL(returnTo);
+      u2.searchParams.set("gcal_confirm", pend.id);
+      return Response.redirect(u2.toString(), 302);
+    }
+    // Flujo viejo (Abordaje): el email de la cuenta de Google tiene que ser el del usuario,
+    // así un link reenviado no ata el Google de otra persona a esta cuenta (M3).
+    let emailGoogle = "";
+    try { emailGoogle = String(JSON.parse(b64urlDecodeStr(String(tokens.id_token || "").split(".")[1] || "")).email || ""); } catch { /* sin id_token */ }
+    const { data: au } = await admin.auth.admin.getUserById(payload.uid);
+    const emailCuenta = String(au?.user?.email || "");
+    if (!emailGoogle || emailGoogle.toLowerCase() !== emailCuenta.toLowerCase()) {
+      return errorRedirect(returnTo, "email_distinto");
+    }
     // Upsert refresh token + scope
     await admin.from("user_google_tokens").upsert({
       user_id: payload.uid,
@@ -125,7 +145,6 @@ Deno.serve(async (req) => {
     });
     // Activar gcal_enabled en el profile
     await admin.from("profiles").update({ gcal_enabled: true }).eq("id", payload.uid);
-
     const u = new URL(returnTo);
     u.searchParams.set("gcal_linked", "1");
     return Response.redirect(u.toString(), 302);

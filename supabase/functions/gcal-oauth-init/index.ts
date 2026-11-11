@@ -6,6 +6,7 @@
 // edge function callback lo valida cuando Google nos devuelve el code.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { retornoSeguro } from "./retorno.js";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -67,24 +68,46 @@ Deno.serve(async (req) => {
     const { data: { user }, error } = await sb.auth.getUser(jwt);
     if (error || !user) return jsonResponse({ error: "unauthorized" }, 401);
 
-    // returnTo: el frontend pasa la URL a la que volvemos después del callback
-    // (típicamente la URL de Abordaje en producción o local). El callback
-    // redirige ahí con ?gcal_linked=1 o ?gcal_error=...
     const body = await req.json().catch(() => ({}));
-    const returnTo: string = body.returnTo || "https://abordaje.broker-ifs.com";
+
+    // Paso 2 del flujo del Universo (M3): el navegador que volvió de Google confirma el
+    // token pendiente. Solo se guarda si el usuario logueado ACÁ es el que inició el flujo:
+    // un link de OAuth reenviado a otra persona no puede atar su Google a otra cuenta.
+    if (body.confirmar) {
+      const { data: pend } = await sb.from("gcal_oauth_pendientes").select("*").eq("id", String(body.confirmar)).maybeSingle();
+      if (!pend) return jsonResponse({ error: "La conexión con Google venció. Probá conectar de nuevo." }, 400);
+      const edadSeg = (Date.now() - new Date(pend.created_at).getTime()) / 1000;
+      if (pend.user_id !== user.id || edadSeg > 900) {
+        if (edadSeg > 900) await sb.from("gcal_oauth_pendientes").delete().eq("id", pend.id);
+        return jsonResponse({ error: "Esta conexión con Google se inició con otra cuenta. Iniciá sesión con tu usuario y conectá de nuevo." }, 403);
+      }
+      const { error: e1 } = await sb.from("user_google_tokens").upsert({
+        user_id: user.id, refresh_token: pend.refresh_token, scope: pend.scope, granted_at: new Date().toISOString(),
+      });
+      if (e1) return jsonResponse({ error: e1.message }, 500);
+      await sb.from("profiles").update({ gcal_enabled: true }).eq("id", user.id);
+      await sb.from("gcal_oauth_pendientes").delete().eq("id", pend.id);
+      return jsonResponse({ ok: true });
+    }
+
+    // returnTo: a dónde volver después del callback. Solo dominios propios (M3).
+    const returnTo: string = retornoSeguro(body.returnTo);
 
     const stateSecret = Deno.env.get("GOOGLE_OAUTH_STATE_SECRET")!;
     const state = await signState({
       uid: user.id,
       r: returnTo,
       t: Math.floor(Date.now() / 1000),
+      // v=2: flujo con confirmación en el navegador (Universo). Sin v: flujo viejo de
+      // Abordaje, que exige que el email de Google coincida con el de la cuenta.
+      ...(body.confirmacion ? { v: 2 } : {}),
     }, stateSecret);
 
     const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
     url.searchParams.set("client_id", Deno.env.get("GOOGLE_OAUTH_CLIENT_ID")!);
     url.searchParams.set("redirect_uri", REDIRECT_URI);
     url.searchParams.set("response_type", "code");
-    url.searchParams.set("scope", "https://www.googleapis.com/auth/calendar");
+    url.searchParams.set("scope", "openid email https://www.googleapis.com/auth/calendar");
     url.searchParams.set("access_type", "offline");
     url.searchParams.set("prompt", "consent"); // fuerza refresh_token siempre
     url.searchParams.set("include_granted_scopes", "true");
