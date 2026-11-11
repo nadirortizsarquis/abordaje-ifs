@@ -14747,6 +14747,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     const tareaId = ext.abordaje_tarea_id || null;
     let kind = 'agenda';
     let prospectoNombre = null;
+    let tareaDeEv = null;
     let isOrphan = false;
     // Tipo del evento para colorear (coherente con la Lista). Por defecto
     // 'agendado' (citas/agendas/externos → verde). Para eventos de TAREA se
@@ -14768,6 +14769,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     } else if (tareaId) {
       kind = 'tarea';
       const tarea = tareasById.get(tareaId);
+      tareaDeEv = tarea || null;
       // Huérfano si: la tarea ya no existe, O existe pero apunta a otro evento
       // (duplicación de sync histórica antes del fix de googleEventId).
       if (!tarea || (tarea.googleEventId && tarea.googleEventId !== ev.id)) {
@@ -14791,13 +14793,15 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       tareaId,
       prospectoNombre,
       isOrphan,
-      label: prospectoNombre || ev.summary || '(sin título)',
+      // Eventos de TARJETA: título y nota salen de la tarjeta (base), no de Google. Con invitados
+      // externos Google tiene título/descripción neutros (A1) y acá se tiene que seguir viendo todo.
+      label: prospectoNombre || tareaDeEv?.titulo || ev.summary || '(sin título)',
       fecha: start,
       allDay: gcalEsDiaCompleto(ev),
       // Último día (inclusive) de un evento de día completo de varios días.
       allDayHasta: gcalEsDiaCompleto(ev) && ev.end?.date ? dayKey(new Date(new Date(`${ev.end.date}T00:00:00`).getTime() - 86400000 / 2)) : null,
       tipo: tipoEvento,
-      observacion: ev.description || '',
+      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : (ev.description || ''),
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,
