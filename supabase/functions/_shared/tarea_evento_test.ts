@@ -139,7 +139,9 @@ check(cambiaParaInvitados({ attendees: [{ email: "c@x.com" }, { email: "d@x.com"
 
 // Guardia estática: ninguna escritura a Google por fuera de escribirEvento.
 for (const f of ["../gcal-events/index.ts", "../gcal-events-admin/index.ts", "./tarea_evento.ts"]) {
-  const lines = (await Deno.readTextFile(new URL(f, import.meta.url))).split("\n");
+  let src: string;
+  try { src = await Deno.readTextFile(new URL(f, import.meta.url)); } catch { continue; } // la copia de este repo no la tiene
+  const lines = src.split("\n");
   const malas = lines.map((l, i) => [l, i] as const).filter(([l, i]) => {
     if (!/method:\s*"(POST|PATCH|PUT)"\s*[,}]/.test(l)) return false;
     const ctx = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
