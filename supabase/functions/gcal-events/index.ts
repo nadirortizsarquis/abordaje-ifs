@@ -14,6 +14,7 @@
 // acá con service_role.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea } from "../_shared/tarea_evento.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -198,7 +199,7 @@ Deno.serve(async (req: Request) => {
     // resolvemos el principal y operamos sobre su calendar siempre que haya
     // dado consentimiento via shares_calendar_with_assistant.
     const { data: callerProfile } = await supabase.from("profiles")
-      .select("id, email, gcal_enabled, assistant_of_id")
+      .select("id, email, gcal_enabled, assistant_of_id, gcal_calendar_id")
       .eq("id", user.id).maybeSingle();
 
     let targetProfile: any = callerProfile;
@@ -208,7 +209,7 @@ Deno.serve(async (req: Request) => {
     if (callerProfile?.assistant_of_id) {
       asAssistant = true;
       const { data: principal } = await supabase.from("profiles")
-        .select("id, email, gcal_enabled, shares_calendar_with_assistant")
+        .select("id, email, gcal_enabled, shares_calendar_with_assistant, gcal_calendar_id")
         .eq("id", callerProfile.assistant_of_id).maybeSingle();
       if (!principal) {
         return jsonResponse({ skip: "principal not found" });
@@ -299,7 +300,8 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, calendars, asAssistant });
     }
 
-    const calendarId = body.calendarId || DEFAULT_CALENDAR;
+    // Calendario del agente (Ajustes) o el principal de su cuenta.
+    const calendarId = body.calendarId || targetProfile?.gcal_calendar_id || DEFAULT_CALENDAR;
     const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
     const headers = {
       "Authorization": `Bearer ${accessToken}`,
@@ -307,6 +309,12 @@ Deno.serve(async (req: Request) => {
     };
 
     if (op === "create") {
+      // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
+      const tarea = await cargarTarea(supabase, body.event, targetUserId);
+      if (tarea) {
+        const { event: evt, reutilizado } = await crearEventoTarea(base, headers, body.event, tarea);
+        return jsonResponse({ ok: true, event: evt, reutilizado, asAssistant });
+      }
       const r = await fetch(base, {
         method: "POST", headers, body: JSON.stringify(body.event),
       });
@@ -315,6 +323,11 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, event: evt, asAssistant });
     }
     if (op === "update") {
+      const tarea = await cargarTarea(supabase, body.event, targetUserId);
+      if (tarea) {
+        const evt = await actualizarEventoTarea(base, headers, body.eventId, body.event, tarea);
+        return jsonResponse({ ok: true, event: evt, asAssistant });
+      }
       const r = await fetch(`${base}/${body.eventId}`, {
         method: "PATCH", headers, body: JSON.stringify(body.event),
       });

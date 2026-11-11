@@ -11,6 +11,7 @@
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea } from "../_shared/tarea_evento.ts";
 
 // Keys validas como credencial del caller: todas las secret nuevas (JSON
 // SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
@@ -150,7 +151,7 @@ Deno.serve(async (req: Request) => {
     if (!op) return jsonResponse({ error: "missing op" }, 400);
 
     const { data: callerProfile } = await supabase.from("profiles")
-      .select("id, email, gcal_enabled, assistant_of_id")
+      .select("id, email, gcal_enabled, assistant_of_id, gcal_calendar_id")
       .eq("id", userId).maybeSingle();
     if (!callerProfile) return jsonResponse({ error: "caller profile not found" }, 404);
 
@@ -161,7 +162,7 @@ Deno.serve(async (req: Request) => {
     if (callerProfile?.assistant_of_id) {
       asAssistant = true;
       const { data: principal } = await supabase.from("profiles")
-        .select("id, email, gcal_enabled, shares_calendar_with_assistant")
+        .select("id, email, gcal_enabled, shares_calendar_with_assistant, gcal_calendar_id")
         .eq("id", callerProfile.assistant_of_id).maybeSingle();
       if (!principal) return jsonResponse({ skip: "principal not found" });
       if (!principal.shares_calendar_with_assistant) {
@@ -174,7 +175,9 @@ Deno.serve(async (req: Request) => {
       targetUserId = principal.id;
     }
 
-    const targetEmail = (targetProfile?.email || "").toLowerCase();
+    // Email REAL de auth.users, nunca profiles.email (sec-01, igual que gcal-events).
+    const { data: authU } = await supabase.auth.admin.getUserById(targetUserId);
+    const targetEmail = (authU?.user?.email || "").toLowerCase();
     if (!targetEmail) return jsonResponse({ error: "no email on target" }, 400);
     if (!targetProfile?.gcal_enabled) {
       return jsonResponse({ skip: "gcal not enabled", email: targetEmail });
@@ -213,7 +216,8 @@ Deno.serve(async (req: Request) => {
       }
     }
 
-    const calendarId = body.calendarId || DEFAULT_CALENDAR;
+    // Calendario del agente (Ajustes) o el principal de su cuenta.
+    const calendarId = body.calendarId || targetProfile?.gcal_calendar_id || DEFAULT_CALENDAR;
     const base = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events`;
     const reqHeaders = {
       "Authorization": `Bearer ${accessToken}`,
@@ -232,6 +236,12 @@ Deno.serve(async (req: Request) => {
     };
 
     if (op === "create") {
+      // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
+      const tarea = await cargarTarea(supabase, body.event, targetUserId);
+      if (tarea) {
+        const { event: evt, reutilizado } = await crearEventoTarea(base, reqHeaders, decorate(body.event), tarea);
+        return jsonResponse({ ok: true, event: evt, reutilizado, asAssistant });
+      }
       const r = await fetch(base, {
         method: "POST", headers: reqHeaders,
         body: JSON.stringify(decorate(body.event)),
@@ -240,6 +250,11 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, event: await r.json(), asAssistant });
     }
     if (op === "update") {
+      const tarea = await cargarTarea(supabase, body.event, targetUserId);
+      if (tarea) {
+        const evt = await actualizarEventoTarea(base, reqHeaders, body.eventId, decorate(body.event), tarea);
+        return jsonResponse({ ok: true, event: evt, asAssistant });
+      }
       const r = await fetch(`${base}/${body.eventId}`, {
         method: "PATCH", headers: reqHeaders,
         body: JSON.stringify(decorate(body.event)),
