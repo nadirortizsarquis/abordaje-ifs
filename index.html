@@ -4306,6 +4306,79 @@ function mapTareaFromDB(t) {
   };
 }
 
+// ── Concurrencia de tarjetas (auditoría N1, nov 2026) ──
+// El MCP (Claude) y otros dispositivos escriben tarjetas mientras el modal está
+// abierto. Para no pisar en silencio lo que escribieron: (1) el modal relee la
+// tarjeta al abrir, (2) al guardar viaja solo lo que el usuario cambió respecto
+// de lo abierto, (3) el UPDATE exige el mismo updated_at (lo bumpea el trigger
+// trg_tareas_updated en cada UPDATE, incluida la RPC abordaje_tarea_avance).
+const TAREA_DB_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, tipo_evento, con_meet, invitados, duracion_min, orden, fijada_at, archivada, created_at, updated_at';
+const TAREA_CONFLICTO_MSG = 'La tarjeta cambió mientras la editabas (por Claude u otro dispositivo). Revisá los cambios y volvé a guardar.';
+const TAREA_BORRADA_MSG = 'La tarjeta ya no existe: la borraron o archivaron desde otro lado.';
+
+// Estado inicial del form del TareaModal a partir de una tarea (mapTareaFromDB).
+function tareaFormDesde(t) {
+  return {
+    titulo: t.titulo || '',
+    columnaId: t.columnaId,
+    fechaRecordatorio: t.fechaRecordatorio || '',
+    horaRecordatorio: t.horaRecordatorio || '',
+    observacion: t.observacion || '',
+    compania: t.compania || null,
+    etiquetas: t.etiquetas || [],
+    tipoEvento: t.tipoEvento || 'recordatorio',
+    conMeet: !!t.conMeet,
+    invitados: (t.invitados || []).join(', '),
+    duracionMin: t.duracionMin || 60,
+  };
+}
+
+// Patch con SOLO los campos que cambiaron entre la tarea abierta (`base`) y el form.
+// `observacionFinal` = la bitácora ya con la entrada nueva (si no, form.observacion).
+// `evento:false` deja afuera tipo/Meet/invitados/duración (atajos de fecha).
+function diffTareaPatch(base, form, { observacionFinal, evento = true } = {}) {
+  const b = tareaFormDesde(base || {});
+  const p = {};
+  const titulo = String(form.titulo || '').trim();
+  if (titulo !== b.titulo.trim()) p.titulo = titulo;
+  if (form.columnaId && form.columnaId !== b.columnaId) p.columnaId = form.columnaId;
+  if ((form.fechaRecordatorio || null) !== (b.fechaRecordatorio || null)) p.fechaRecordatorio = form.fechaRecordatorio || null;
+  if ((form.horaRecordatorio || null) !== (b.horaRecordatorio || null)) p.horaRecordatorio = form.horaRecordatorio || null;
+  const obs = String(observacionFinal !== undefined ? observacionFinal : (form.observacion || '')).trim();
+  if (obs !== b.observacion.trim()) p.observacion = obs;
+  if ((form.compania || null) !== (b.compania || null)) p.compania = form.compania || null;
+  if (JSON.stringify(form.etiquetas || []) !== JSON.stringify(b.etiquetas || [])) p.etiquetas = form.etiquetas || [];
+  if (evento) {
+    if ((form.tipoEvento || 'recordatorio') !== b.tipoEvento) p.tipoEvento = form.tipoEvento || 'recordatorio';
+    if (!!form.conMeet !== b.conMeet) p.conMeet = !!form.conMeet;
+    const inv = normInvitados(form.invitados).validos;
+    if (JSON.stringify(inv) !== JSON.stringify((base && base.invitados) || [])) p.invitados = inv;
+    if (Number(form.duracionMin) !== b.duracionMin) p.duracionMin = Number(form.duracionMin);
+  }
+  return p;
+}
+
+// Campos que ve el usuario. Si entre dos versiones de la tarjeta solo cambió lo
+// "mecánico" (google_event_id, orden, fijada, actor, updated_at), no hay conflicto real.
+const TAREA_CAMPOS_VISIBLES = ['titulo', 'columnaId', 'fechaRecordatorio', 'horaRecordatorio', 'observacion',
+  'compania', 'etiquetas', 'tipoEvento', 'conMeet', 'invitados', 'duracionMin', 'archivada', 'prospectoId'];
+function tareaCambiosVisibles(a, b) {
+  if (!a || !b) return TAREA_CAMPOS_VISIBLES.slice();
+  return TAREA_CAMPOS_VISIBLES.filter(k => JSON.stringify(a[k] ?? null) !== JSON.stringify(b[k] ?? null));
+}
+
+// Rebase del form sobre una versión nueva de la tarjeta: lo que el usuario tocó
+// (distinto de `viejaBase`) se conserva; lo que no tocó toma el valor de `nueva`.
+function rebaseTareaForm(form, viejaBase, nueva) {
+  const viejo = tareaFormDesde(viejaBase || {});
+  const fresco = tareaFormDesde(nueva || {});
+  const out = { ...form };
+  for (const k of Object.keys(fresco)) {
+    if (JSON.stringify(form[k]) === JSON.stringify(viejo[k])) out[k] = fresco[k];
+  }
+  return out;
+}
+
 // Orden de las tarjetas dentro de una columna del Kanban.
 //  1. Las fijadas (fijadaAt != null) van SIEMPRE arriba, ordenadas por el
 //     momento en que se fijaron (la primera fijada, primera arriba). Esto
@@ -4693,7 +4766,7 @@ const storage = {
     return mapTareaFromDB(data);
   },
 
-  async updateTarea(id, patch) {
+  async updateTarea(id, patch, opts = {}) {
     const dbPatch = {};
     if ('columnaId' in patch) dbPatch.columna_id = patch.columnaId;
     if ('titulo' in patch) dbPatch.titulo = patch.titulo;
@@ -4728,8 +4801,40 @@ const storage = {
       const user = await auth.getUser();
       if (user?.id) dbPatch.actor_id = user.id;
     }
-    const { error } = await sb.from('abordaje_tareas').update(dbPatch).eq('id', id);
+    // Sin `base`: update directo de los campos del patch (mover, fijar, compañía,
+    // google_event_id...). Devuelve la fila actualizada (o null si no afectó nada).
+    const base = opts.base || null;
+    if (!base || !base.updatedAt) {
+      const { data, error } = await sb.from('abordaje_tareas').update(dbPatch).eq('id', id).select(TAREA_DB_COLS);
+      if (error) throw error;
+      return data && data[0] ? mapTareaFromDB(data[0]) : null;
+    }
+    // Con `base` (modal): concurrencia optimista sobre updated_at. Si afecta 0 filas,
+    // la tarjeta cambió desde que se abrió. Si lo que cambió es solo mecánico (ej. el
+    // propio sync de Google seteó google_event_id) se reintenta con la versión nueva;
+    // si cambió algo visible (nota del MCP, fecha, columna...) se avisa sin escribir.
+    let expected = base.updatedAt;
+    let fresh = null;
+    for (let intento = 0; intento < 3; intento++) {
+      const { data, error } = await sb.from('abordaje_tareas').update(dbPatch)
+        .eq('id', id).eq('updated_at', expected).select(TAREA_DB_COLS);
+      if (error) throw error;
+      if (data && data[0]) return mapTareaFromDB(data[0]);
+      fresh = await storage.getTarea(id);
+      if (!fresh || tareaCambiosVisibles(base, fresh).length) break;
+      expected = fresh.updatedAt;
+    }
+    const err = new Error(fresh ? TAREA_CONFLICTO_MSG : TAREA_BORRADA_MSG);
+    err.code = 'TAREA_CONFLICTO';
+    err.fresh = fresh;
+    throw err;
+  },
+
+  // Relee una tarjeta de la base (al abrir el modal y ante un conflicto).
+  async getTarea(id) {
+    const { data, error } = await sb.from('abordaje_tareas').select(TAREA_DB_COLS).eq('id', id).maybeSingle();
     if (error) throw error;
+    return data ? mapTareaFromDB(data) : null;
   },
 
   async deleteTarea(id) {
@@ -8210,36 +8315,71 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Tablero de Tareas: compañía + drag&drop + fijar, extraídos a useTareaBoardHandlers (#32).
   const { handleSetCompania, handleDropTarea, handleTogglePin } = useTareaBoardHandlers({ state, setState, guardReadOnly, handleErr });
 
-  const handleUpdateTarea = async (id, patch) => {
-    if (guardReadOnly()) return;
+  // opts.base = la tarea tal como la abrió el modal (con su updated_at): activa la
+  // concurrencia optimista y devuelve { conflict, fresh } si otro (MCP, otro
+  // dispositivo) la cambió mientras tanto. Con base, el sync posterior (prospecto +
+  // Google) corre en background para que el modal cierre apenas se guardó en la base.
+  // Devuelve { ok, tarea } | { conflict, fresh } | { error }.
+  const handleUpdateTarea = async (id, patch, opts = {}) => {
+    if (guardReadOnly()) return { error: true };
+    if (!patch || Object.keys(patch).length === 0) return { ok: true, tarea: null };
     const prev = state.tareas.items.find(t => t.id === id);
+    const antes = opts.base || prev;
     setState(s => ({
       ...s,
       tareas: {
         ...s.tareas,
-        items: s.tareas.items.map(t => t.id === id
-          ? { ...t, ...patch, updatedAt: new Date().toISOString() } : t)
+        items: s.tareas.items.map(t => t.id === id ? { ...t, ...patch } : t)
       }
     }));
+    let row = null;
     try {
-      await storage.updateTarea(id, patch);
+      row = await storage.updateTarea(id, patch, { base: opts.base || null });
+    } catch (e) {
+      if (e?.code === 'TAREA_CONFLICTO') {
+        // No se escribió nada: el tablero pasa a mostrar la versión de la base.
+        const fresh = e.fresh || null;
+        setState(s => ({
+          ...s,
+          tareas: {
+            ...s.tareas,
+            items: fresh
+              ? s.tareas.items.map(t => t.id === id ? { ...t, ...fresh } : t)
+              : (prev ? s.tareas.items.map(t => t.id === id ? prev : t) : s.tareas.items)
+          }
+        }));
+        return { conflict: true, fresh };
+      }
+      handleErr(e, 'updateTarea');
+      if (prev) setState(s => ({
+        ...s,
+        tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? prev : t) }
+      }));
+      return { error: e };
+    }
+    // La fila devuelta es la verdad de la base (incluye lo que escribió el MCP y el
+    // updated_at real): la reflejamos en el tablero.
+    if (row) setState(s => ({
+      ...s,
+      tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? { ...t, ...row } : t) }
+    }));
+    const merged = row ? { ...(antes || {}), ...row } : { ...(antes || {}), ...patch };
+    const postSync = async () => {
       // Sync inverso: si es una tarea de prospecto y cambió la fecha/hora,
       // propagar al contacto activo del prospecto (Lista de Abordaje al día).
-      if (prev?.prospectoId) {
-        const merged = { ...prev, ...patch };
-        const fechaCambio = (merged.fechaRecordatorio || null) !== (prev.fechaRecordatorio || null)
-          || (merged.horaRecordatorio || null) !== (prev.horaRecordatorio || null);
+      if (antes?.prospectoId) {
+        const fechaCambio = ('fechaRecordatorio' in patch && (patch.fechaRecordatorio || null) !== (antes.fechaRecordatorio || null))
+          || ('horaRecordatorio' in patch && (patch.horaRecordatorio || null) !== (antes.horaRecordatorio || null));
         // SOLO propagamos (y convertimos el contacto a 'recordatorio') cuando cambió la
         // FECHA/HORA — que es re-agendar. Editar solo la nota NO debe cambiar el tipo/
         // estado semántico del contacto del prospecto (antes lo pisaba a 'recordatorio').
         if (fechaCambio) {
           const nota = extraerUltimaLineaBitacora(merged.observacion);
-          await _syncTareaAProspecto(prev, merged.fechaRecordatorio || null, merged.horaRecordatorio || null, nota);
+          await _syncTareaAProspecto(antes, merged.fechaRecordatorio || null, merged.horaRecordatorio || null, nota);
         }
       }
       // En piloto, sincronizar con Google Calendar.
-      if (isPilot && prev) {
-        const merged = { ...prev, ...patch };
+      if (isPilot && antes) {
         const hasFecha = !!merged.fechaRecordatorio;
         const fechaIso = hasFecha
           ? new Date(`${merged.fechaRecordatorio}T${(merged.horaRecordatorio || '09:00')}:00`).toISOString()
@@ -8280,13 +8420,12 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           bumpGcal();
         } catch (e) { console.warn('gcal sync (update tarea):', e?.message || e); }
       }
-    } catch (e) {
-      handleErr(e, 'updateTarea');
-      if (prev) setState(s => ({
-        ...s,
-        tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === id ? prev : t) }
-      }));
-    }
+    };
+    // El cambio ya está en la base: un fallo del sync posterior se informa pero no
+    // revierte el tablero (antes volvía a `prev` y mostraba datos que no eran los guardados).
+    const sync = postSync().catch(e => handleErr(e, 'updateTarea'));
+    if (!opts.base) await sync;
+    return { ok: true, tarea: row };
   };
 
   const handleDeleteTarea = async (id) => {
@@ -8839,8 +8978,18 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           columnas={state.tareas.columnas}
           readOnly={readOnly}
           onClose={() => setTareaEditando(null)}
-          onSave={(patch) => { handleUpdateTarea(tareaEditando.id, patch); setTareaEditando(null); }}
-          onPersist={(patch) => handleUpdateTarea(tareaEditando.id, patch)}
+          onSave={async (patch, base) => {
+            // Cierra solo si se guardó; ante un conflicto o error el modal queda
+            // abierto con lo que el usuario escribió.
+            const r = await handleUpdateTarea(tareaEditando.id, patch, { base });
+            if (r?.ok) setTareaEditando(null);
+            return r;
+          }}
+          onPersist={(patch, base) => handleUpdateTarea(tareaEditando.id, patch, { base })}
+          onRefresh={(fresh) => setState(s => ({
+            ...s,
+            tareas: { ...s.tareas, items: s.tareas.items.map(t => t.id === fresh.id ? { ...t, ...fresh } : t) }
+          }))}
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
           onOpenProspecto={(pid) => { setTareaEditando(null); setSelectedId(pid); }}
@@ -19280,42 +19429,55 @@ function EtiquetasInput({ value, onChange, readOnly }) {
   );
 }
 
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onOpenProspecto, gcalOn }) {
-  const [form, setForm] = useState({
-    titulo: tarea.titulo || '',
-    columnaId: tarea.columnaId,
-    fechaRecordatorio: tarea.fechaRecordatorio || '',
-    horaRecordatorio: tarea.horaRecordatorio || '',
-    observacion: tarea.observacion || '',
-    compania: tarea.compania || null,
-    etiquetas: tarea.etiquetas || [],
-    tipoEvento: tarea.tipoEvento || 'recordatorio',
-    conMeet: !!tarea.conMeet,
-    invitados: (tarea.invitados || []).join(', '),
-    duracionMin: tarea.duracionMin || 60,
-  });
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onRefresh, onOpenProspecto, gcalOn }) {
+  const [form, setForm] = useState(() => tareaFormDesde(tarea));
+  // `base` = la versión de la tarjeta sobre la que el usuario está editando (con su
+  // updated_at). Contra ella se calcula qué cambió y se chequea la concurrencia.
+  const baseRef = useRef(tarea);
+  const fijarBase = (nueva) => { baseRef.current = nueva; };
+  const [aviso, setAviso] = useState('');
   const [errEvento, setErrEvento] = useState('');
   const [nuevaEntrada, setNuevaEntrada] = useState('');
   const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
   const [saving, setSaving] = useState(false);
   const upd = (k, v) => setForm(f => ({ ...f, [k]: v }));
-  // Etiquetas solo viajan si el usuario las cambió: así un guardado nunca pisa
-  // etiquetas que el modal no conoce (ej. cargadas por el MCP con datos viejos).
-  const etiquetasPatch = () => (
-    JSON.stringify(form.etiquetas || []) === JSON.stringify(tarea.etiquetas || [])
-      ? {} : { etiquetas: form.etiquetas }
-  );
-  // Tipo de evento (recordatorio / reunión): mismo criterio, solo viaja lo que cambió
-  // (el MCP también los escribe). El evento lo arma el servidor con lo que queda en la base.
-  const eventoPatch = () => {
-    const p = {};
-    if (form.tipoEvento !== (tarea.tipoEvento || 'recordatorio')) p.tipoEvento = form.tipoEvento;
-    if (form.conMeet !== !!tarea.conMeet) p.conMeet = form.conMeet;
-    const inv = normInvitados(form.invitados).validos;
-    if (JSON.stringify(inv) !== JSON.stringify(tarea.invitados || [])) p.invitados = inv;
-    if (Number(form.duracionMin) !== (tarea.duracionMin || 60)) p.duracionMin = Number(form.duracionMin);
-    return p;
+
+  // Al abrir, releer la tarjeta de la base: el tablero se cargó al entrar y el MCP
+  // u otro dispositivo pudieron cambiarla. Lo que el usuario ya tocó se conserva.
+  useEffect(() => {
+    let vivo = true;
+    storage.getTarea(tarea.id).then(fresh => {
+      if (!vivo || !fresh) return;
+      const vieja = baseRef.current;
+      if (fresh.updatedAt === vieja.updatedAt) return;
+      setForm(f => rebaseTareaForm(f, vieja, fresh));
+      fijarBase(fresh);
+      if (onRefresh) onRefresh(fresh);
+    }).catch(e => console.warn('releer tarea:', e?.message || e));
+    return () => { vivo = false; };
+  }, [tarea.id]);
+
+  // Resultado de onSave/onPersist: ante un conflicto se adopta la versión nueva
+  // (sin perder lo que el usuario escribió) y se avisa.
+  const manejarResultado = (r) => {
+    if (r?.conflict) {
+      if (r.fresh) {
+        const vieja = baseRef.current;
+        setForm(f => rebaseTareaForm(f, vieja, r.fresh));
+        fijarBase(r.fresh);
+        setAviso(TAREA_CONFLICTO_MSG);
+      } else {
+        setAviso(TAREA_BORRADA_MSG);
+      }
+      return false;
+    }
+    if (r?.ok) {
+      setAviso('');
+      if (r.tarea) fijarBase(r.tarea);
+      return true;
+    }
+    return false;
   };
   const invitadosInvalidos = normInvitados(form.invitados).invalidos;
   // Atajos de bitácora: agregan una frase al campo de nueva entrada. Si ya hay
@@ -19355,34 +19517,23 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     }
     setErrEvento('');
     setSaving(true);
-    Promise.resolve(onSave({
-      titulo: form.titulo.trim(),
-      columnaId: form.columnaId,
-      fechaRecordatorio: form.fechaRecordatorio || null,
-      horaRecordatorio: form.horaRecordatorio || null,
-      observacion: buildObsConBitacora().trim(),
-      compania: form.compania || null,
-      ...etiquetasPatch(),
-      ...eventoPatch(),
-      crmClientId: crmCliente?.id || undefined,
-    })).finally(() => setSaving(false));
+    // Solo viaja lo que el usuario cambió respecto de la versión abierta: un guardado
+    // nunca reescribe campos que no tocó (ej. la nota o la fecha que puso el MCP).
+    const patch = diffTareaPatch(baseRef.current, form, { observacionFinal: buildObsConBitacora() });
+    if (crmCliente?.id) patch.crmClientId = crmCliente.id;
+    Promise.resolve(onSave(patch, baseRef.current))
+      .then(manejarResultado)
+      .finally(() => setSaving(false));
   };
 
   // Persiste los cambios pendientes SIN cerrar el modal, para que al abrir el
   // CRM la sincronización vea la gestión actualizada (ej. un comentario recién
-  // tipeado sin apretar Guardar). Reusa el mismo patch que Guardar.
+  // tipeado sin apretar Guardar). Mismo criterio que Guardar (sin campos de evento).
   const persistParaCrm = async () => {
     if (!onPersist) return;
     const built = buildObsConBitacora().trim();
-    await onPersist({
-      titulo: form.titulo.trim(),
-      columnaId: form.columnaId,
-      fechaRecordatorio: form.fechaRecordatorio || null,
-      horaRecordatorio: form.horaRecordatorio || null,
-      observacion: built,
-      compania: form.compania || null,
-      ...etiquetasPatch(),
-    });
+    const r = await onPersist(diffTareaPatch(baseRef.current, form, { observacionFinal: built, evento: false }), baseRef.current);
+    if (!manejarResultado(r)) return;
     // Reflejar en el form: la entrada nueva ya quedó dentro de observacion,
     // así un Guardar posterior no la vuelve a agregar.
     setForm(f => ({ ...f, observacion: built }));
@@ -19391,15 +19542,13 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
 
   // Quick-date: setea fecha/hora y guarda en un solo tap.
   const aplicarQuickDate = (fecha, hora) => {
-    onSave({
-      titulo: form.titulo.trim(),
-      columnaId: form.columnaId,
-      fechaRecordatorio: fecha,
-      horaRecordatorio: hora,
-      observacion: buildObsConBitacora().trim(),
-      compania: form.compania || null,
-      ...etiquetasPatch(),
-    });
+    if (saving) return;
+    setSaving(true);
+    const patch = diffTareaPatch(baseRef.current, { ...form, fechaRecordatorio: fecha, horaRecordatorio: hora },
+      { observacionFinal: buildObsConBitacora(), evento: false });
+    Promise.resolve(onSave(patch, baseRef.current))
+      .then(manejarResultado)
+      .finally(() => setSaving(false));
   };
   const quickHoy = () => {
     const now = new Date();
@@ -19450,6 +19599,8 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
           <button type="button" className="modal-close" onClick={onClose} aria-label="Cerrar">×</button>
         </div>
         <div className="modal-body sectioned">
+          {/* Conflicto de concurrencia: otro (MCP / otro dispositivo) cambió la tarjeta. */}
+          {aviso && <div className="field-error" role="alert" style={{ marginTop: 0 }}>{aviso}</div>}
           {/* Tarjeta convertida desde un prospecto: acceso a su ficha (historial vivo).
               El historial también quedó copiado en la nota de abajo. */}
           {tarea.prospectoRefId && onOpenProspecto && (

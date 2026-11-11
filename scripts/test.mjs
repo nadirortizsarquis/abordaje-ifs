@@ -577,6 +577,54 @@ test('tarea local sin hora = día completo; con hora = horario', () => {
 });
 
 
+// ── Concurrencia de tarjetas (auditoría N1): diff de campos + rebase del form ──
+const TAREA_BASE = {
+  id: 't1', columnaId: 'c1', titulo: 'Cotización Pérez', fechaRecordatorio: '2026-11-12', horaRecordatorio: '10:00',
+  observacion: '[11/11/26 09:00] Llamé', compania: 'ole', etiquetas: ['VIP'], tipoEvento: 'recordatorio',
+  conMeet: false, invitados: [], duracionMin: 60, updatedAt: '2026-11-11T12:00:00.123456+00:00',
+};
+test('diffTareaPatch: form sin tocar = patch vacío (no reescribe nada)', () => {
+  const form = g('tareaFormDesde')(TAREA_BASE);
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form) }, {});
+});
+test('diffTareaPatch: cambiar solo el título manda solo el título (no observacion ni fecha)', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), titulo: '  Cotización Pérez II ' };
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form) }, { titulo: 'Cotización Pérez II' });
+});
+test('diffTareaPatch: entrada nueva de bitácora manda observacion; columna y fecha solo si cambian', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), columnaId: 'c2', fechaRecordatorio: '' };
+  const p = g('diffTareaPatch')(TAREA_BASE, form, { observacionFinal: '[11/11/26 10:00] Nueva\n\n[11/11/26 09:00] Llamé' });
+  assert.deepEqual(Object.keys(p).sort(), ['columnaId', 'fechaRecordatorio', 'observacion']);
+  assert.equal(p.fechaRecordatorio, null);
+});
+test('diffTareaPatch: evento:false ignora tipo/Meet/invitados; invitados se comparan normalizados', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), tipoEvento: 'reunion', invitados: 'A@x.com' };
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form, { evento: false }) }, {});
+  const p = g('diffTareaPatch')(TAREA_BASE, form);
+  assert.equal(p.tipoEvento, 'reunion');
+  assert.deepEqual([...p.invitados], ['a@x.com']);
+  const base2 = { ...TAREA_BASE, invitados: ['a@x.com'] };
+  assert.equal('invitados' in g('diffTareaPatch')(base2, { ...g('tareaFormDesde')(base2), invitados: 'A@X.com,' }), false);
+});
+test('tareaCambiosVisibles: lo mecánico (google_event_id, orden, updated_at) no es conflicto', () => {
+  const mec = { ...TAREA_BASE, googleEventId: 'g1', orden: 3, fijadaAt: 'x', actorId: 'u2', updatedAt: 'otro' };
+  assert.equal(g('tareaCambiosVisibles')(TAREA_BASE, mec).length, 0);
+  const mcp = { ...TAREA_BASE, observacion: '[11/11/26 11:00] Nota del MCP\n\n' + TAREA_BASE.observacion, columnaId: 'c3' };
+  assert.deepEqual([...g('tareaCambiosVisibles')(TAREA_BASE, mcp)].sort(), ['columnaId', 'observacion']);
+  assert.ok(g('tareaCambiosVisibles')(TAREA_BASE, null).length > 0);
+});
+test('rebaseTareaForm: conserva lo que tocó el usuario y adopta lo nuevo de la base en lo demás', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), titulo: 'Título del usuario' };
+  const fresh = { ...TAREA_BASE, titulo: 'Título del MCP', observacion: '[11/11/26 11:00] MCP\n\n' + TAREA_BASE.observacion, columnaId: 'c3' };
+  const r = g('rebaseTareaForm')(form, TAREA_BASE, fresh);
+  assert.equal(r.titulo, 'Título del usuario');
+  assert.equal(r.observacion, fresh.observacion);
+  assert.equal(r.columnaId, 'c3');
+  // Tras el rebase, guardar manda solo el título (no pisa la nota ni la columna del MCP).
+  assert.deepEqual({ ...g('diffTareaPatch')(fresh, r) }, { titulo: 'Título del usuario' });
+});
+
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
