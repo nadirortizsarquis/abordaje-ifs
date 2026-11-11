@@ -72,5 +72,10 @@ check(calendarioDeBase("https://www.googleapis.com/calendar/v3/calendars/primary
 check(esEventoDeAbordaje(EV) && !esEventoDeAbordaje({ id: "x" }), "solo se buscan/mueven eventos de Abordaje");
 const muchos = Array.from({ length: 30 }, (_, i) => `p${i}@x.com`);
 check(aplicarTarea(EV, T({ tipo_evento: "reunion", invitados: muchos }), true).attendees.length === MAX_INVITADOS, "tope de invitados = el de la base (20)");
+
+// reunión que venía de recordatorio: se le saca el lila; un color elegido se respeta
+check(aplicarTarea(EV, reu, false, { colorId: "1" }).colorId === null, "recordatorio→reunión: saca el lila (azul)");
+check(aplicarTarea(EV, reu, false, { colorId: "5" }).colorId === undefined, "reunión con color elegido: se respeta");
+
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);
 if (mal) Deno.exit(1);
