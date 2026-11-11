@@ -885,6 +885,29 @@
   @media (hover: none) { .tarea-card-titulo.has-pin { padding-left: 20px; } }
   /* Línea de inserción al arrastrar (se pinta en la card destino). */
   .tarea-card.drop-before { box-shadow: inset 0 3px 0 0 var(--azul); }
+  .tarea-card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .tarea-tag {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 0.62rem; font-weight: 700; letter-spacing: 0.03em;
+    padding: 1px 7px; border-radius: 999px; line-height: 1.5;
+    border: 1px solid var(--teal, #5CC6D0); color: var(--azul-oscuro, #3E4095);
+    background: rgba(92, 198, 208, 0.10);
+  }
+  .tarea-tag button {
+    border: none; background: none; padding: 0 0 0 2px; cursor: pointer;
+    font-size: 0.85rem; line-height: 1; color: inherit; opacity: 0.7;
+  }
+  .tarea-tag button:hover { opacity: 1; }
+  .etiquetas-input {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+    border: 1.5px solid var(--borde); border-radius: 8px; padding: 6px 8px; min-height: 38px;
+    background: #fff;
+  }
+  .etiquetas-input .tarea-tag { font-size: 0.72rem; padding: 2px 8px; }
+  .etiquetas-input input {
+    flex: 1 1 120px; min-width: 120px; border: none !important; outline: none;
+    padding: 2px 0 !important; font-size: 0.85rem; background: transparent; box-shadow: none !important;
+  }
   .tarea-card-obs {
     font-size: 0.72rem;
     color: var(--texto-suave);
@@ -4199,6 +4222,18 @@ function mapColumnaFromDB(c) {
   };
 }
 
+// Etiquetas de tarea: MAYÚSCULAS, espacios colapsados, sin vacíos ni duplicados,
+// máx 10 de 40 caracteres. Mismo criterio que el MCP (_norm_etiquetas). Pura y testeable.
+function normEtiquetas(valores) {
+  const lista = typeof valores === 'string' ? valores.split(',') : (valores || []);
+  const out = [];
+  for (const v of lista) {
+    const e = String(v).split(/\s+/).filter(Boolean).join(' ').toUpperCase().slice(0, 40);
+    if (e && !out.includes(e)) out.push(e);
+  }
+  return out.slice(0, 10);
+}
+
 function mapTareaFromDB(t) {
   return {
     id: t.id,
@@ -4211,6 +4246,7 @@ function mapTareaFromDB(t) {
     observacion: t.observacion || '',
     googleEventId: t.google_event_id || null,
     compania: t.compania || null,
+    etiquetas: Array.isArray(t.etiquetas) ? t.etiquetas : [],
     orden: (t.orden === null || t.orden === undefined) ? null : Number(t.orden),
     fijadaAt: t.fijada_at || null,
     actorId: t.actor_id || null,
@@ -4616,6 +4652,7 @@ const storage = {
     if ('horaRecordatorio' in patch) dbPatch.hora_recordatorio = patch.horaRecordatorio;
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
     if ('compania' in patch) dbPatch.compania = patch.compania;
+    if ('etiquetas' in patch) dbPatch.etiquetas = normEtiquetas(patch.etiquetas);
     if ('orden' in patch) dbPatch.orden = patch.orden;
     if ('fijadaAt' in patch) dbPatch.fijada_at = patch.fijadaAt;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
@@ -18833,6 +18870,11 @@ const TareaCard = React.memo(function TareaCard({ tarea, columnas, tipoGestion, 
       {fechaTxt && (
         <div className={`tarea-card-fecha ${vencida ? 'vencida' : ''}`}>{fechaTxt}</div>
       )}
+      {tarea.etiquetas && tarea.etiquetas.length > 0 && (
+        <div className="tarea-card-tags">
+          {tarea.etiquetas.map(e => <span key={e} className="tarea-tag">{e}</span>)}
+        </div>
+      )}
       {tarea.observacion && (() => {
         // La bitácora es un string con entradas separadas por línea en blanco.
         // En la card mostramos sólo la primera entrada (= la más reciente),
@@ -19006,6 +19048,39 @@ function CompaniaPicker({ x, y, current, onPick, onClose }) {
 }
 
 // ── MODAL EDICIÓN DE TAREA ─────────────────────────────────────
+// Chips de etiquetas editables: Enter o coma agrega, × quita, Backspace con el
+// input vacío borra la última. Se normalizan con normEtiquetas.
+function EtiquetasInput({ value, onChange, readOnly }) {
+  const [txt, setTxt] = useState('');
+  const lista = value || [];
+  const agregar = (raw) => {
+    const nuevas = normEtiquetas([...lista, ...String(raw).split(',')]);
+    if (nuevas.length !== lista.length) onChange(nuevas);
+    setTxt('');
+  };
+  return (
+    <div className="etiquetas-input">
+      {lista.map(e => (
+        <span key={e} className="tarea-tag">
+          {e}
+          {!readOnly && (
+            <button type="button" aria-label={`Quitar ${e}`} onClick={() => onChange(lista.filter(x => x !== e))}>×</button>
+          )}
+        </span>
+      ))}
+      {!readOnly && lista.length < 10 && (
+        <input type="text" value={txt} placeholder={lista.length ? 'Agregar…' : 'Ej: BAJA, CUIDAR (Enter para agregar)'}
+          onChange={e => { const v = e.target.value; if (v.includes(',')) agregar(v); else setTxt(v); }}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); if (txt.trim()) agregar(txt); }
+            else if (e.key === 'Backspace' && !txt && lista.length) onChange(lista.slice(0, -1));
+          }}
+          onBlur={() => { if (txt.trim()) agregar(txt); }} />
+      )}
+    </div>
+  );
+}
+
 function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onOpenProspecto }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
@@ -19014,6 +19089,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     horaRecordatorio: tarea.horaRecordatorio || '',
     observacion: tarea.observacion || '',
     compania: tarea.compania || null,
+    etiquetas: tarea.etiquetas || [],
   });
   const [nuevaEntrada, setNuevaEntrada] = useState('');
   const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
@@ -19055,6 +19131,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
+      etiquetas: form.etiquetas,
       crmClientId: crmCliente?.id || undefined,
     })).finally(() => setSaving(false));
   };
@@ -19072,6 +19149,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: form.horaRecordatorio || null,
       observacion: built,
       compania: form.compania || null,
+      etiquetas: form.etiquetas,
     });
     // Reflejar en el form: la entrada nueva ya quedó dentro de observacion,
     // así un Guardar posterior no la vuelve a agregar.
@@ -19088,6 +19166,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       horaRecordatorio: hora,
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
+      etiquetas: form.etiquetas,
     });
   };
   const quickHoy = () => {
@@ -19155,6 +19234,10 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
               <input type="text" value={form.titulo} readOnly={readOnly}
                 onChange={e => upd('titulo', e.target.value)}
                 placeholder="Ej: Cotización Pérez, Llamar a Juan" />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}>
+              <label>Etiquetas</label>
+              <EtiquetasInput value={form.etiquetas} readOnly={readOnly} onChange={(v) => upd('etiquetas', v)} />
             </div>
           </div>
 

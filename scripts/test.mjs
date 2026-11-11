@@ -184,6 +184,18 @@ test('buildObsTarea: omite la observación vacía (solo el label)', () => {
   assert.equal(g('buildObsTarea')('contestador', ''), 'Contestador');
 });
 
+// ── Etiquetas de tarea: normEtiquetas (mismo criterio que el MCP) ────────────
+test('normEtiquetas: mayúsculas, espacios colapsados, sin vacíos ni duplicados', () => {
+  assert.deepEqual([...g('normEtiquetas')([' baja ', 'Manu   Torres', 'BAJA', ''])], ['BAJA', 'MANU TORRES']);
+});
+test('normEtiquetas: acepta string con comas y corta en 10', () => {
+  assert.deepEqual([...g('normEtiquetas')('a, b ,c')], ['A', 'B', 'C']);
+  assert.equal(g('normEtiquetas')(Array.from({ length: 12 }, (_, i) => 'e' + i)).length, 10);
+});
+test('mapTareaFromDB: etiquetas null -> []', () => {
+  assert.deepEqual([...g('mapTareaFromDB')({ id: 'x', etiquetas: null }).etiquetas], []);
+});
+
 // ── Núcleo del motor de seguimiento (refactor #32): appendBitacora ───────────
 test('appendBitacora: nota vacía -> undefined (sin cambio)', () => {
   assert.equal(g('appendBitacora')('algo', ''), undefined);
