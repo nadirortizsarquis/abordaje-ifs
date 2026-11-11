@@ -124,11 +124,32 @@ export function sendUpdatesPara(tarea: TareaEvento | null): "all" | "none" {
 // La descripción de un evento de tarjeta es la bitácora interna (observacion). Google
 // se la muestra (y la manda por mail) a todos los invitados. Regla de Nadir: si el evento
 // tiene AL MENOS UN invitado ajeno a la organización, la descripción se reemplaza por un
-// texto neutro, sin excepción. Se aplica acá, en el único punto por donde pasan TODAS las
+// texto neutro, y el título también (decisión de Nadir, 11-nov). Excepción: lo que el agente
+// escribió A MANO en Google (lo revisó él) se respeta. Para distinguirlo, cada escritura de
+// Abordaje deja en las propiedades privadas del evento (no las ven los invitados) una huella
+// del título y la descripción que escribió; si en Google ya no coinciden, los editó alguien
+// a mano. Sin huella (evento viejo) se asume que es de Abordaje (fail-closed). Se aplica acá, en el único punto por donde pasan TODAS las
 // escrituras a Google (escribirEvento), así cubre a Abordaje, Universo, el MCP y el
 // reconciliador sin depender del cliente. Fail-closed: si no se puede saber quiénes son
 // los invitados, se asume que hay externos.
 export const DESCRIPCION_NEUTRA = "Reunión agendada con IFS - Insurance Financial Solution.";
+export const TITULO_NEUTRO = "Reunión con IFS";
+const HUELLA = { summary: "abordaje_sum_h", description: "abordaje_desc_h" } as const;
+
+// Huella corta (no es criptográfica: solo detecta si el texto cambió).
+export function huella(txt: string): string {
+  let h = 5381;
+  for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
+
+// ¿Ese campo del evento lo escribió alguien a mano en Google?
+export function esManual(previo: any, campo: "summary" | "description"): boolean {
+  const v = previo?.[campo];
+  if (!v || v === DESCRIPCION_NEUTRA || v === TITULO_NEUTRO) return false;
+  const h = previo?.extendedProperties?.private?.[HUELLA[campo]];
+  return !!h && huella(String(v)) !== h;
+}
 export const DOMINIOS_INTERNOS = ["ifs-broker.com"];
 
 // Emails de invitados de uno o más eventos (las salas/recursos no cuentan).
@@ -158,15 +179,31 @@ export function hayExternos(event: any, previo: any, internos: Set<string>): boo
   return emailsInvitados(event, previo).some((e) => !esInterno(e, internos));
 }
 
-// Cuerpo listo para mandar. Con externos:
-//  - evento de TARJETA (forzar=true): la descripción SIEMPRE es la neutra, aunque el cliente
-//    no la mande (así se pisa la bitácora que hubiera quedado de antes).
-//  - evento propio del usuario en Google (forzar=false): solo se neutraliza la descripción
-//    que manda Abordaje; si no manda, no se toca la que el usuario escribió en Google.
-export function blindarCuerpo(event: any, externos: boolean, forzar = true): any {
-  if (!externos) return event;
-  if (!forzar && !(event && "description" in event)) return event;
-  return { ...event, description: DESCRIPCION_NEUTRA };
+// Cuerpo listo para mandar.
+//  - Evento de TARJETA (tarjeta=true), con externos: título y descripción neutros, aunque el
+//    cliente no los mande (así se pisa la bitácora que hubiera quedado), salvo que el agente
+//    los haya escrito a mano en Google: esos se respetan (no se mandan). Siempre deja la
+//    huella de lo que queda escrito.
+//  - Evento propio del usuario en Google (tarjeta=false), con externos: solo se neutraliza la
+//    descripción que manda Abordaje; el resto es del usuario y no se toca.
+export function blindarCuerpo(event: any, externos: boolean, tarjeta = true, previo: any = null): any {
+  const ev = { ...(event || {}) };
+  if (!tarjeta) {
+    if (externos && "description" in ev) ev.description = DESCRIPCION_NEUTRA;
+    return ev;
+  }
+  if (externos) {
+    if (esManual(previo, "description")) delete ev.description; else ev.description = DESCRIPCION_NEUTRA;
+    if (esManual(previo, "summary")) delete ev.summary; else ev.summary = TITULO_NEUTRO;
+  }
+  // Se parte de las propiedades privadas que ya tiene (abordaje_tarea_id, etc.): no se pierden.
+  const priv: Record<string, string> = { ...(previo?.extendedProperties?.private || {}), ...(ev.extendedProperties?.private || {}) };
+  for (const campo of ["summary", "description"] as const) {
+    const final = campo in ev ? ev[campo] : previo?.[campo];
+    if (typeof final === "string" && final) priv[HUELLA[campo]] = huella(final);
+  }
+  ev.extendedProperties = { ...(ev.extendedProperties || {}), private: priv };
+  return ev;
 }
 
 // Emails de las cuentas de la plataforma (auth.users, no profiles.email: esa columna no
@@ -196,7 +233,7 @@ export interface CtxEscritura { internos: () => Promise<Set<string>> }
 // `previo`: el evento actual en Google; null = alta; undefined = se lee acá (PATCH).
 export async function escribirEvento(
   url: string, method: "POST" | "PATCH", headers: Record<string, string>, event: any, previo: any, ctx: CtxEscritura,
-  fetcher: typeof fetch = fetch, forzar = true,
+  fetcher: typeof fetch = fetch, tarjeta = true,
 ): Promise<Response> {
   let actual = previo;
   let externos = false;
@@ -210,8 +247,12 @@ export async function escribirEvento(
     if (event?.attendeesOmitted || actual?.attendeesOmitted) externos = true;
     else if (emailsInvitados(event, actual).length) externos = hayExternos(event, actual, await ctx.internos());
   }
-  if (externos) console.warn(`blindaje: evento con invitados externos, descripción neutra (${method})`);
-  return await fetcher(url, { method, headers, body: JSON.stringify(blindarCuerpo(event, externos, forzar)) });
+  if (externos) console.warn(`blindaje: evento con invitados externos, título y descripción neutros (${method})`);
+  const cuerpo = blindarCuerpo(event, externos, tarjeta, actual);
+  // Mail a invitados solo si cambia algo que les importa (se decide sobre el cuerpo final).
+  let destino = url;
+  if (actual && /[?&]sendUpdates=all/.test(url) && !cambiaParaInvitados(cuerpo, actual)) destino = url.replace(/sendUpdates=all/, "sendUpdates=none");
+  return await fetcher(destino, { method, headers, body: JSON.stringify(cuerpo) });
 }
 
 // ¿El cambio le importa a los invitados? (para no mandarles un mail por cada nota).
@@ -316,8 +357,7 @@ function urlCon(url: string, params: Record<string, string>): string {
 }
 
 async function patchEvento(base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento | null, previo: any, ctx: CtxEscritura) {
-  const send = sendUpdatesPara(tarea) === "all" && cambiaParaInvitados(event, previo) ? "all" : "none";
-  const r = await escribirEvento(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: send }), "PATCH", headers, event, previo ?? undefined, ctx);
+  const r = await escribirEvento(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "PATCH", headers, event, previo ?? undefined, ctx);
   if (!r.ok) {
     const err: any = new Error(`update failed: ${r.status} ${await r.text()}`);
     err.status = r.status;
