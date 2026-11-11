@@ -11,7 +11,7 @@
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea } from "../_shared/tarea_evento.ts";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario } from "../_shared/tarea_evento.ts";
 
 // Keys validas como credencial del caller: todas las secret nuevas (JSON
 // SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
@@ -284,6 +284,12 @@ Deno.serve(async (req: Request) => {
       const r = await fetch(`${base}/${body.eventId}`, { method: "DELETE", headers: reqHeaders });
       if (!r.ok && r.status !== 404 && r.status !== 410) {
         throw new Error(`delete failed: ${r.status} ${await r.text()}`);
+      }
+      // No estaba en este calendario y el cliente no eligió uno: el agente cambió de
+      // calendario en Ajustes y el evento quedó en el anterior → se borra allá.
+      if ((r.status === 404 || r.status === 410) && !body.calendarId && body.eventId) {
+        const borrado = await borrarEnOtroCalendario(base, reqHeaders, String(body.eventId));
+        if (borrado) return jsonResponse({ ok: true, action: "deleted", otroCalendario: true, asAssistant });
       }
       return jsonResponse({ ok: true, action: "deleted", asAssistant });
     }

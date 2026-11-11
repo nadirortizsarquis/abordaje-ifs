@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { aplicarTarea, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { aplicarTarea, calendarioDeBase, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -64,6 +64,10 @@ const d4 = aplicarTarea(EV, CH, true);
 check(d4.start.date === undefined && d4.end.dateTime === "2026-11-12T19:00:00", "con hora al crear: igual que antes");
 check(aplicarTarea({ summary: "solo título" }, SH, false).start === undefined, "update sin start: no toca fechas");
 check(aplicarTarea(EV, T(), false).start.date === null, "tarjeta vieja sin fecha cargada: evento con hora");
+
+// cambio de calendario
+check(calendarioDeBase("https://www.googleapis.com/calendar/v3/calendars/abc%40group.calendar.google.com/events") === "abc@group.calendar.google.com", "calendario de la URL base");
+check(calendarioDeBase("https://www.googleapis.com/calendar/v3/calendars/primary/events") === "primary", "calendario principal");
 
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);
 if (mal) Deno.exit(1);

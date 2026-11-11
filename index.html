@@ -4256,6 +4256,27 @@ function normEtiquetas(valores) {
   return out.slice(0, 10);
 }
 
+// Invitados de una reunión: emails separados por coma, espacio o punto y coma. En
+// minúscula, sin duplicados, máx 30. Devuelve también los que no parecen un email
+// para avisar en el modal. Pura y testeable.
+const _EMAIL_INVITADO = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
+const DURACIONES_REUNION = [15, 30, 45, 60, 90, 120, 180];
+function etiquetaDuracion(m) {
+  const h = Math.floor(m / 60), r = m % 60;
+  return h === 0 ? `${m} min` : (r ? `${h} h ${r} min` : `${h} h`);
+}
+function normInvitados(valores) {
+  const lista = typeof valores === 'string' ? valores.split(/[\s,;]+/) : (valores || []);
+  const validos = [], invalidos = [];
+  for (const v of lista) {
+    const e = String(v || '').trim().toLowerCase();
+    if (!e) continue;
+    if (!_EMAIL_INVITADO.test(e)) { if (!invalidos.includes(e)) invalidos.push(e); continue; }
+    if (!validos.includes(e)) validos.push(e);
+  }
+  return { validos: validos.slice(0, 30), invalidos };
+}
+
 function mapTareaFromDB(t) {
   return {
     id: t.id,
@@ -4269,6 +4290,11 @@ function mapTareaFromDB(t) {
     googleEventId: t.google_event_id || null,
     compania: t.compania || null,
     etiquetas: Array.isArray(t.etiquetas) ? t.etiquetas : [],
+    // Tipo de evento en Google (lo resuelve el servidor, ver _shared/tarea_evento.ts).
+    tipoEvento: t.tipo_evento === 'reunion' ? 'reunion' : 'recordatorio',
+    conMeet: !!t.con_meet,
+    invitados: Array.isArray(t.invitados) ? t.invitados : [],
+    duracionMin: Number(t.duracion_min) || 60,
     orden: (t.orden === null || t.orden === undefined) ? null : Number(t.orden),
     fijadaAt: t.fijada_at || null,
     actorId: t.actor_id || null,
@@ -4425,7 +4451,7 @@ const storage = {
     const PROSPECTO_COLS = 'id, nombre, telefono, documento, preferencia_contacto, detalle, referente, observaciones, relevamiento, estado, proximo_contacto, agente_id, actor_id, archivado, crm_client_id, crm_linked_at, created_at, updated_at';
     const CONTACTO_COLS = 'id, prospecto_id, tipo, fecha, hora, observacion, agente_id, actor_id, created_at';
     const COLUMNA_COLS = 'id, agente_id, titulo, orden, slug, actor_id, updated_at';
-    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, tipo_evento, con_meet, invitados, duracion_min, orden, fijada_at, archivada, created_at, updated_at';
     const AGENDADO_COLS = 'id, prospecto_id, agente_id, actor_id, fecha, nota, created_at';
 
     const [prosRes, conRes, colRes, tarRes, agnRes, evcRes] = await Promise.all([
@@ -4676,6 +4702,10 @@ const storage = {
     if ('googleEventId' in patch) dbPatch.google_event_id = patch.googleEventId;
     if ('compania' in patch) dbPatch.compania = patch.compania;
     if ('etiquetas' in patch) dbPatch.etiquetas = normEtiquetas(patch.etiquetas);
+    if ('tipoEvento' in patch) dbPatch.tipo_evento = patch.tipoEvento === 'reunion' ? 'reunion' : 'recordatorio';
+    if ('conMeet' in patch) dbPatch.con_meet = !!patch.conMeet;
+    if ('invitados' in patch) dbPatch.invitados = normInvitados(patch.invitados).validos;
+    if ('duracionMin' in patch) dbPatch.duracion_min = Math.min(1440, Math.max(5, Number(patch.duracionMin) || 60));
     if ('orden' in patch) dbPatch.orden = patch.orden;
     if ('fijadaAt' in patch) dbPatch.fijada_at = patch.fijadaAt;
     if ('archivada' in patch) dbPatch.archivada = !!patch.archivada;
@@ -4711,7 +4741,7 @@ const storage = {
   async listTareasArchivadas() {
     const agenteId = await auth.getEffectiveAgenteId();
     if (!agenteId) return [];
-    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, orden, fijada_at, archivada, created_at, updated_at';
+    const TAREA_COLS = 'id, columna_id, prospecto_id, prospecto_ref_id, agente_id, actor_id, titulo, observacion, fecha_recordatorio, hora_recordatorio, google_event_id, compania, etiquetas, tipo_evento, con_meet, invitados, duracion_min, orden, fijada_at, archivada, created_at, updated_at';
     const { data, error } = await selectAllRows(() => sb.from('abordaje_tareas')
       .select(TAREA_COLS)
       .eq('agente_id', agenteId)
@@ -4861,6 +4891,13 @@ const gcalApi = {
     if (error) throw error;
     if (data?.skip) return null;
     return data.event;
+  },
+  // Calendarios de la cuenta de Google (Ajustes → en qué calendario se crean los eventos).
+  async listCalendars() {
+    const { data, error } = await sb.functions.invoke('gcal-events', { body: { op: 'listCalendars' } });
+    if (error) throw error;
+    if (data?.skip) return [];
+    return data.calendars || [];
   },
   async delete(eventId, calendarId) {
     const { data, error } = await sb.functions.invoke('gcal-events', {
@@ -7207,6 +7244,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     showToast(enabled ? 'Google Calendar vinculado' : 'Google Calendar desvinculado');
   };
 
+  // Ajustes → calendario donde se crean los eventos (null = principal de la cuenta).
+  const handleSetGcalCalendar = async (calendarId) => {
+    if (!agente?.id) return;
+    const { error } = await sb.from('profiles').update({ gcal_calendar_id: calendarId || null }).eq('id', agente.id);
+    if (error) throw error;
+    setAgente(a => a ? { ...a, gcal_calendar_id: calendarId || null } : a);
+    bumpGcal();
+    showToast('Calendario de eventos actualizado');
+  };
+
   // Para users con gmail externo: iniciar OAuth user-level. La edge function
   // gcal-oauth-init genera la URL de consentimiento; el browser redirige a
   // Google. Después del consent, Google llama a gcal-oauth-callback que guarda
@@ -7268,7 +7315,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     if (params.get('gcal_linked') === '1') {
       showToast('Google Calendar vinculado!');
       if (user?.id) {
-        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,compartir_calendario').eq('id', user.id).maybeSingle()
+        sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,gcal_calendar_id,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,compartir_calendario').eq('id', user.id).maybeSingle()
           .then(({ data }) => { if (cancelled) return; if (data) setAgente(data); bumpGcal(); });
       }
       const url = new URL(window.location.href);
@@ -8777,6 +8824,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onCancel={() => setShowSettings(false)}
           onSave={saveSettings}
           onToggleGcal={handleToggleGcal}
+          onSetGcalCalendar={viewAs ? null : handleSetGcalCalendar}
           onLinkOAuth={handleLinkOAuth}
           onUnlinkOAuth={handleUnlinkOAuth}
           onToggleShareCalWithAssistant={handleToggleShareCalWithAssistant}
@@ -8796,6 +8844,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           onDelete={() => setPendingDeleteTarea(tareaEditando)}
           onArchive={() => handleArchiveTarea(tareaEditando, !tareaEditando.archivada)}
           onOpenProspecto={(pid) => { setTareaEditando(null); setSelectedId(pid); }}
+          gcalOn={isPilot}
         />
       )}
 
@@ -16307,7 +16356,49 @@ function AdminTh({ children, right }) {
 // Solo el megaadmin puede borrar usuarios. Cualquier admin puede crear/editar.
 const MEGAADMIN_EMAIL = 'nortiz@ifs-broker.com';
 
-function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd }) {
+// Ajustes → en qué calendario de Google se crean los eventos (profiles.gcal_calendar_id;
+// null = el principal de la cuenta). Solo calendarios donde la cuenta puede escribir.
+function CalendarioDestinoSelect({ agente, onSetGcalCalendar }) {
+  const [cals, setCals] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState(null);
+  const actual = agente?.gcal_calendar_id || '';
+  useEffect(() => {
+    let cancel = false;
+    gcalApi.listCalendars()
+      .then(list => { if (!cancel) setCals((list || []).filter(c => c.accessRole === 'owner' || c.accessRole === 'writer')); })
+      .catch(e => { if (!cancel) { setCals([]); setErr(e?.message || String(e)); } });
+    return () => { cancel = true; };
+  }, [agente?.id]);
+  const opciones = (cals || []).filter(c => !c.primary);
+  const elegir = async (v) => {
+    if (busy || v === actual) return;
+    setErr(null); setBusy(true);
+    try { await onSetGcalCalendar(v || null); }
+    catch (e) { setErr(e?.message || String(e)); }
+    finally { setBusy(false); }
+  };
+  return (
+    <div style={{ marginTop: 16 }}>
+      <div className="field" style={{ marginBottom: 6 }}>
+        <label>Calendario donde se crean los eventos</label>
+        <select value={actual} disabled={busy || cals === null} onChange={e => elegir(e.target.value)}>
+          <option value="">{cals === null ? 'Cargando calendarios…' : 'Principal de la cuenta'}</option>
+          {opciones.map(c => <option key={c.id} value={c.id}>{c.summaryOverride || c.summary || c.id}</option>)}
+          {actual && cals !== null && !opciones.some(c => c.id === actual) && (
+            <option value={actual}>{actual} (sin acceso)</option>
+          )}
+        </select>
+      </div>
+      <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.5 }}>
+        Tareas, recordatorios y reuniones de Abordaje van a ese calendario. Los eventos que ya existen se mueven solos la próxima vez que cambien.
+      </div>
+      {err && <div className="field-error">{err}</div>}
+    </div>
+  );
+}
+
+function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd, onSetGcalCalendar }) {
   const enabled = !!agente?.gcal_enabled;
   const workspace = isWorkspaceUser(agente);
   const canLink = canLinkGoogleCalendar(agente);
@@ -16454,6 +16545,10 @@ function GoogleCalendarSection({ agente, onToggleGcal, onLinkOAuth, onUnlinkOAut
             modo de prueba — click en "Avanzado → Ir a Abordaje (no seguro)".
           </div>
         </div>
+      )}
+
+      {enabled && onSetGcalCalendar && !agente?.assistant_of_id && (
+        <CalendarioDestinoSelect agente={agente} onSetGcalCalendar={onSetGcalCalendar} />
       )}
 
       {hasAssistant && enabled && (
@@ -18182,7 +18277,7 @@ function ErroresSection() {
   );
 }
 
-function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd, onOpenConectarClaude }) {
+function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSave, onToggleGcal, onLinkOAuth, onUnlinkOAuth, onToggleShareCalWithAssistant, onTogglePermitirAsistenteVerProd, onOpenConectarClaude, onSetGcalCalendar }) {
   const [form, setForm] = useState({
     workStart: `${pad2(settings.workStartHour)}:${pad2(settings.workStartMin || 0)}`,
     workEnd: `${pad2(settings.workEndHour)}:${pad2(settings.workEndMin || 0)}`,
@@ -18315,6 +18410,7 @@ function SettingsModal({ settings, agente, currentUser, onViewAs, onCancel, onSa
             onUnlinkOAuth={onUnlinkOAuth}
             onToggleShareCalWithAssistant={onToggleShareCalWithAssistant}
             onTogglePermitirAsistenteVerProd={onTogglePermitirAsistenteVerProd}
+            onSetGcalCalendar={onSetGcalCalendar}
           />
           {onOpenConectarClaude && (
             <section style={adminSectionStyle}>
@@ -19170,7 +19266,7 @@ function EtiquetasInput({ value, onChange, readOnly }) {
   );
 }
 
-function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onOpenProspecto }) {
+function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onArchive, onPersist, onOpenProspecto, gcalOn }) {
   const [form, setForm] = useState({
     titulo: tarea.titulo || '',
     columnaId: tarea.columnaId,
@@ -19179,7 +19275,12 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     observacion: tarea.observacion || '',
     compania: tarea.compania || null,
     etiquetas: tarea.etiquetas || [],
+    tipoEvento: tarea.tipoEvento || 'recordatorio',
+    conMeet: !!tarea.conMeet,
+    invitados: (tarea.invitados || []).join(', '),
+    duracionMin: tarea.duracionMin || 60,
   });
+  const [errEvento, setErrEvento] = useState('');
   const [nuevaEntrada, setNuevaEntrada] = useState('');
   const [crmCliente, setCrmCliente] = useState(null);   // cliente CRM elegido en el typeahead
   // Evita updates duplicados (y doble sync a Google) por doble tap en Guardar.
@@ -19191,6 +19292,18 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     JSON.stringify(form.etiquetas || []) === JSON.stringify(tarea.etiquetas || [])
       ? {} : { etiquetas: form.etiquetas }
   );
+  // Tipo de evento (recordatorio / reunión): mismo criterio, solo viaja lo que cambió
+  // (el MCP también los escribe). El evento lo arma el servidor con lo que queda en la base.
+  const eventoPatch = () => {
+    const p = {};
+    if (form.tipoEvento !== (tarea.tipoEvento || 'recordatorio')) p.tipoEvento = form.tipoEvento;
+    if (form.conMeet !== !!tarea.conMeet) p.conMeet = form.conMeet;
+    const inv = normInvitados(form.invitados).validos;
+    if (JSON.stringify(inv) !== JSON.stringify(tarea.invitados || [])) p.invitados = inv;
+    if (Number(form.duracionMin) !== (tarea.duracionMin || 60)) p.duracionMin = Number(form.duracionMin);
+    return p;
+  };
+  const invitadosInvalidos = normInvitados(form.invitados).invalidos;
   // Atajos de bitácora: agregan una frase al campo de nueva entrada. Si ya hay
   // texto, la concatenan con " · " para poder combinar acciones (ej: mensaje + llamada).
   const agregarAtajo = (txt) => {
@@ -19218,6 +19331,11 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
 
   const guardar = () => {
     if (saving) return;
+    if (form.tipoEvento === 'reunion' && invitadosInvalidos.length) {
+      setErrEvento(`Revisá los invitados: ${invitadosInvalidos.join(', ')} no parece un email.`);
+      return;
+    }
+    setErrEvento('');
     setSaving(true);
     Promise.resolve(onSave({
       titulo: form.titulo.trim(),
@@ -19227,6 +19345,7 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
       observacion: buildObsConBitacora().trim(),
       compania: form.compania || null,
       ...etiquetasPatch(),
+      ...eventoPatch(),
       crmClientId: crmCliente?.id || undefined,
     })).finally(() => setSaving(false));
   };
@@ -19385,6 +19504,52 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
                 </select>
               </div>
             </div>
+            {/* Tipo de evento en Google Calendar: solo con calendario conectado y fecha. */}
+            {gcalOn && form.fechaRecordatorio && (
+              <div className="field" style={{ marginBottom: 0 }}>
+                <label>Evento en el calendario</label>
+                <div className="calpago-toggle" role="radiogroup" aria-label="Tipo de evento">
+                  {[['recordatorio', 'Recordatorio'], ['reunion', 'Reunión']].map(([k, lbl]) => (
+                    <button key={k} type="button" role="radio" aria-checked={form.tipoEvento === k}
+                      className={form.tipoEvento === k ? 'active' : ''} disabled={readOnly}
+                      onClick={() => upd('tipoEvento', k)}>{lbl}</button>
+                  ))}
+                </div>
+                {form.tipoEvento === 'reunion' && (
+                  <div style={{ marginTop: 12 }}>
+                    <div className="field-row">
+                      <div className="field">
+                        <label>Duración</label>
+                        <select value={form.duracionMin} disabled={readOnly}
+                          onChange={e => upd('duracionMin', Number(e.target.value))}>
+                          {DURACIONES_REUNION.concat(DURACIONES_REUNION.includes(Number(form.duracionMin)) ? [] : [Number(form.duracionMin)])
+                            .map(m => <option key={m} value={m}>{etiquetaDuracion(m)}</option>)}
+                        </select>
+                      </div>
+                      <div className="field" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                        <label className="calpago-chk" style={{ marginBottom: 12, textTransform: 'none', letterSpacing: 'normal', fontSize: 13 }}>
+                          <input type="checkbox" checked={form.conMeet} disabled={readOnly}
+                            onChange={e => upd('conMeet', e.target.checked)} />
+                          Con Meet
+                        </label>
+                      </div>
+                    </div>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Invitados</label>
+                      <input type="text" value={form.invitados} readOnly={readOnly}
+                        onChange={e => upd('invitados', e.target.value)}
+                        placeholder="mail@cliente.com, otro@mail.com" />
+                    </div>
+                    {normInvitados(form.invitados).validos.length > 0 && (
+                      <div className="help-callout" style={{ fontSize: '0.8rem', marginBottom: 0 }}>
+                        Los invitados reciben un mail de Google con la invitación (y cada vez que cambie la fecha u hora).
+                      </div>
+                    )}
+                    {errEvento && <div className="field-error">{errEvento}</div>}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ── Sección: Seguimiento (CRM + bitácora) ── */}
@@ -20956,7 +21121,7 @@ function AppShell() {
     // Buscar el profile por id. Si Supabase tiene 'Enable identity linking'
     // activado, el id del user de Google coincide con el id de profiles
     // (mismo email = mismo auth.users.id).
-    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
+    sb.from('profiles').select('id,email,display_name,role,advisor_name_ole,ole_ver_produccion,ole_ver_calendario_pagos,abordaje_settings,gcal_enabled,gcal_calendar_id,assistant_of_id,shares_calendar_with_assistant,permitir_asistente_ver_produccion,is_demo,demo_active,compartir_calendario').eq('id', user.id).maybeSingle()
       .then(async ({ data }) => {
         if (cancel) return;
         if (data) {

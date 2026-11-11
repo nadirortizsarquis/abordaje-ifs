@@ -129,6 +129,52 @@ export async function cargarTarea(supabase: any, event: any, agenteId: string): 
   return data as TareaEvento;
 }
 
+// ── Cambio de calendario (Ajustes → Calendario) ────────────────────────────────
+// Al elegir otro calendario, los eventos que ya existen quedan en el anterior. Las
+// funciones apuntan al calendario nuevo y reciben 404: entonces se busca el evento en
+// los calendarios donde el usuario puede escribir y se lo mueve (o se lo borra allá).
+const CAL_API = "https://www.googleapis.com/calendar/v3";
+
+export function calendarioDeBase(base: string): string | null {
+  const m = String(base).match(/\/calendars\/([^/]+)\/events/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+// Id del calendario (distinto de `excepto`) donde está vivo el evento, o null.
+export async function buscarCalendarioDelEvento(
+  headers: Record<string, string>, eventId: string, excepto: string | null,
+): Promise<string | null> {
+  const r = await fetch(`${CAL_API}/users/me/calendarList?minAccessRole=writer&maxResults=50`, { headers });
+  if (!r.ok) return null;
+  for (const cal of ((await r.json()).items || []) as any[]) {
+    if (!cal?.id || cal.id === excepto || (excepto === "primary" && cal.primary)) continue;
+    const g = await fetch(`${CAL_API}/calendars/${encodeURIComponent(cal.id)}/events/${encodeURIComponent(eventId)}`, { headers });
+    if (!g.ok) continue;
+    const ev = await g.json();
+    if (ev?.status !== "cancelled") return cal.id;
+  }
+  return null;
+}
+
+// Mueve un evento al calendario de `base`. true si quedó movido.
+async function moverEventoA(base: string, headers: Record<string, string>, eventId: string, origen: string): Promise<boolean> {
+  const destino = calendarioDeBase(base);
+  if (!destino) return false;
+  const r = await fetch(`${CAL_API}/calendars/${encodeURIComponent(origen)}/events/${encodeURIComponent(eventId)}/move?destination=${encodeURIComponent(destino)}&sendUpdates=none`, {
+    method: "POST", headers,
+  });
+  return r.ok;
+}
+
+// Borra un evento que no estaba en el calendario de `base` (se cambió de calendario).
+// Devuelve true si lo encontró y lo borró en otro calendario.
+export async function borrarEnOtroCalendario(base: string, headers: Record<string, string>, eventId: string): Promise<boolean> {
+  const origen = await buscarCalendarioDelEvento(headers, eventId, calendarioDeBase(base));
+  if (!origen) return false;
+  const r = await fetch(`${CAL_API}/calendars/${encodeURIComponent(origen)}/events/${encodeURIComponent(eventId)}`, { method: "DELETE", headers });
+  return r.ok || r.status === 404 || r.status === 410;
+}
+
 function urlCon(url: string, params: Record<string, string>): string {
   const u = new URL(url);
   for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
@@ -139,7 +185,11 @@ async function patchEvento(base: string, headers: Record<string, string>, eventI
   const r = await fetch(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), {
     method: "PATCH", headers, body: JSON.stringify(event),
   });
-  if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
+  if (!r.ok) {
+    const err: any = new Error(`update failed: ${r.status} ${await r.text()}`);
+    err.status = r.status;
+    throw err;
+  }
   return await r.json();
 }
 
@@ -190,5 +240,18 @@ export async function actualizarEventoTarea(
     const gr = await fetch(`${base}/${encodeURIComponent(eventId)}`, { headers });
     if (gr.ok) previo = await gr.json();
   }
-  return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo), tarea);
+  try {
+    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo), tarea);
+  } catch (e: any) {
+    // 404: el evento está en el calendario anterior (el agente cambió de calendario).
+    // Se lo mueve al actual y se reintenta una vez.
+    if (e?.status !== 404) throw e;
+    const origen = await buscarCalendarioDelEvento(headers, eventId, calendarioDeBase(base));
+    if (!origen || !(await moverEventoA(base, headers, eventId, origen))) throw e;
+    if (tarea.tipo_evento === "reunion" && !previo) {
+      const gr = await fetch(`${base}/${encodeURIComponent(eventId)}`, { headers });
+      if (gr.ok) previo = await gr.json();
+    }
+    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo), tarea);
+  }
 }

@@ -528,6 +528,16 @@ test('calpagoDerivePagos: mensual da 12 cuotas y anual 1 en la ventana de 12m', 
   assert.equal(g('calpagoDerivePagos')(rd, 1, hoy, hoyMas12, null, null).length, 12);
   assert.equal(g('calpagoDerivePagos')(rd, 12, hoy, hoyMas12, null, null).length, 1);
 });
+// ── Tarjeta como reunión: invitados ──
+test('normInvitados: minúscula, sin duplicados, separa inválidos', () => {
+  const r = g('normInvitados')('Cliente@Mail.com, otro@x.com; cliente@mail.com  no-es-mail');
+  assert.equal(JSON.stringify(r.validos), JSON.stringify(['cliente@mail.com', 'otro@x.com']));
+  assert.equal(JSON.stringify(r.invalidos), JSON.stringify(['no-es-mail']));
+  assert.equal(g('normInvitados')([]).validos.length, 0);
+  assert.equal(g('etiquetaDuracion')(90), '1 h 30 min');
+  assert.equal(g('etiquetaDuracion')(45), '45 min');
+});
+
 // ── Calendario: eventos de día completo de Google (brief calendar-apps, punto 1) ──
 test('día completo de Google cae en su día (no el anterior a las 21:00)', () => {
   const evs = g('extractGcalEventsForCalendar')([
