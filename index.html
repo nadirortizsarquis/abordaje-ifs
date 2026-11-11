@@ -4257,10 +4257,11 @@ function normEtiquetas(valores) {
 }
 
 // Invitados de una reunión: emails separados por coma, espacio o punto y coma. En
-// minúscula, sin duplicados, máx 30. Devuelve también los que no parecen un email
+// minúscula, sin duplicados, máx 20 (tope de la base). Devuelve también los que no parecen un email
 // para avisar en el modal. Pura y testeable.
 const _EMAIL_INVITADO = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 const DURACIONES_REUNION = [15, 30, 45, 60, 90, 120, 180];
+const MAX_INVITADOS = 20; // = abordaje_tareas_invitados_check
 function etiquetaDuracion(m) {
   const h = Math.floor(m / 60), r = m % 60;
   return h === 0 ? `${m} min` : (r ? `${h} h ${r} min` : `${h} h`);
@@ -4274,7 +4275,7 @@ function normInvitados(valores) {
     if (!_EMAIL_INVITADO.test(e)) { if (!invalidos.includes(e)) invalidos.push(e); continue; }
     if (!validos.includes(e)) validos.push(e);
   }
-  return { validos: validos.slice(0, 30), invalidos };
+  return { validos: validos.slice(0, MAX_INVITADOS), invalidos, excedidos: Math.max(0, validos.length - MAX_INVITADOS) };
 }
 
 function mapTareaFromDB(t) {
@@ -8041,8 +8042,7 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
           // Día completo: start/end con date. dateTime en null porque el PATCH de
           // Google mezcla con lo que el evento ya tiene.
           const [y, m, d] = patch.diaCompleto.dia.split('-').map(Number);
-          const fin = new Date(y, m - 1, d + patch.diaCompleto.dias);
-          const finDia = `${fin.getFullYear()}-${pad2(fin.getMonth()+1)}-${pad2(fin.getDate())}`;
+          const finDia = dayKey(new Date(y, m - 1, d + patch.diaCompleto.dias));
           body = { ...body, start: { date: patch.diaCompleto.dia, dateTime: null }, end: { date: finDia, dateTime: null } };
         }
         await gcalApi.update(agendaId, body, gcalCalendarId);
@@ -14794,6 +14794,8 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       label: prospectoNombre || ev.summary || '(sin título)',
       fecha: start,
       allDay: gcalEsDiaCompleto(ev),
+      // Último día (inclusive) de un evento de día completo de varios días.
+      allDayHasta: gcalEsDiaCompleto(ev) && ev.end?.date ? dayKey(new Date(new Date(`${ev.end.date}T00:00:00`).getTime() - 86400000 / 2)) : null,
       tipo: tipoEvento,
       observacion: ev.description || '',
       duracionMin: null,
@@ -14908,13 +14910,25 @@ function addDays(d, n) {
   const x = new Date(d); x.setDate(x.getDate() + n); return x;
 }
 
+// Días (YYYY-MM-DD) que ocupa un evento: uno solo, o todos los de un día completo de
+// varios días (ej. vacaciones del 12 al 14).
+function diasDelEvento(e) {
+  const d = new Date(e.fecha);
+  const out = [dayKey(d)];
+  if (e.allDay && e.allDayHasta) {
+    const x = new Date(d);
+    for (let i = 0; i < 60 && dayKey(x) < e.allDayHasta; i++) { x.setDate(x.getDate() + 1); out.push(dayKey(x)); }
+  }
+  return out;
+}
+
 function eventsByDayKey(events) {
   const m = {};
   for (const e of events) {
-    const d = new Date(e.fecha);
-    const key = `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`;
-    if (!m[key]) m[key] = [];
-    m[key].push(e);
+    for (const key of diasDelEvento(e)) {
+      if (!m[key]) m[key] = [];
+      m[key].push(e);
+    }
   }
   return m;
 }
@@ -15696,7 +15710,7 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
     events.filter(e => !e.allDay && isSameDay(new Date(e.fecha), d))
   );
   const allDayByDay = days.map(d =>
-    events.filter(e => e.allDay && isSameDay(new Date(e.fecha), d))
+    events.filter(e => e.allDay && diasDelEvento(e).includes(dayKey(d)))
   );
   const hayAllDay = allDayByDay.some(arr => arr.length > 0);
 
@@ -16391,7 +16405,7 @@ function CalendarioDestinoSelect({ agente, onSetGcalCalendar }) {
         </select>
       </div>
       <div style={{ fontSize: 11, color: '#6b7280', lineHeight: 1.5 }}>
-        Tareas, recordatorios y reuniones de Abordaje van a ese calendario. Los eventos que ya existen se mueven solos la próxima vez que cambien.
+        Tareas, recordatorios y reuniones de Abordaje van a ese calendario. Los eventos que ya existen pasan al nuevo calendario la próxima vez que edites esa tarjeta.
       </div>
       {err && <div className="field-error">{err}</div>}
     </div>
@@ -19333,6 +19347,10 @@ function TareaModal({ tarea, columnas, readOnly, onClose, onSave, onDelete, onAr
     if (saving) return;
     if (form.tipoEvento === 'reunion' && invitadosInvalidos.length) {
       setErrEvento(`Revisá los invitados: ${invitadosInvalidos.join(', ')} no parece un email.`);
+      return;
+    }
+    if (form.tipoEvento === 'reunion' && normInvitados(form.invitados).excedidos) {
+      setErrEvento(`Máximo ${MAX_INVITADOS} invitados por reunión.`);
       return;
     }
     setErrEvento('');

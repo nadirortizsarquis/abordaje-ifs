@@ -38,6 +38,8 @@ export function tareaIdDelEvento(event: any): string | null {
   return typeof v === "string" && /^[0-9a-f-]{36}$/i.test(v) ? v : null;
 }
 
+// Mismo tope que la base (abordaje_tareas_invitados_check).
+export const MAX_INVITADOS = 20;
 const EMAIL = /^[^\s@<>(),;:"]+@[^\s@<>(),;:"]+\.[^\s@<>(),;:"]+$/;
 
 function sumarMinutos(dateTime: string, min: number): string | null {
@@ -91,7 +93,7 @@ export function aplicarTarea(event: any, tarea: TareaEvento, crear: boolean, pre
     }
   }
   if (tarea.tipo_evento === "reunion") {
-    const invitados = (tarea.invitados || []).map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL.test(x));
+    const invitados = (tarea.invitados || []).map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL.test(x)).slice(0, MAX_INVITADOS);
     if (invitados.length) {
       // Unión con los que ya tiene el evento (PATCH de attendees reemplaza la lista entera).
       const previos: any[] = Array.isArray(previo?.attendees) ? previo.attendees : [];
@@ -140,20 +142,42 @@ export function calendarioDeBase(base: string): string | null {
   return m ? decodeURIComponent(m[1]) : null;
 }
 
-// Id del calendario (distinto de `excepto`) donde está vivo el evento, o null.
+// Calendarios propios del usuario (owner), siguiendo la paginación. Solo los propios:
+// en un calendario compartido por un colega una reunión tiene el MISMO id de evento que
+// en el nuestro, y no hay que tocar esa copia.
+async function calendariosPropios(headers: Record<string, string>): Promise<string[]> {
+  const ids: string[] = [];
+  let pageToken = "";
+  for (let i = 0; i < 5; i++) {
+    const r = await fetch(`${CAL_API}/users/me/calendarList?minAccessRole=owner&maxResults=250${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ""}`, { headers });
+    if (!r.ok) break;
+    const data = await r.json();
+    for (const cal of (data.items || []) as any[]) if (cal?.id) ids.push(cal.primary ? "primary" : cal.id);
+    if (!data.nextPageToken) break;
+    pageToken = data.nextPageToken;
+  }
+  return ids;
+}
+
+// Evento de Abordaje: lo creó o tocó la app/MCP (tarjeta, prospecto o agenda).
+export function esEventoDeAbordaje(ev: any): boolean {
+  const p = ev?.extendedProperties?.private || {};
+  return !!(p.abordaje_tarea_id || p.abordaje_prospect_id || p.abordaje_agente_id);
+}
+
+// Id del calendario propio (distinto de `excepto`) donde está vivo el evento de Abordaje
+// con ese id, o null. Las consultas van en paralelo.
 export async function buscarCalendarioDelEvento(
   headers: Record<string, string>, eventId: string, excepto: string | null,
 ): Promise<string | null> {
-  const r = await fetch(`${CAL_API}/users/me/calendarList?minAccessRole=writer&maxResults=50`, { headers });
-  if (!r.ok) return null;
-  for (const cal of ((await r.json()).items || []) as any[]) {
-    if (!cal?.id || cal.id === excepto || (excepto === "primary" && cal.primary)) continue;
-    const g = await fetch(`${CAL_API}/calendars/${encodeURIComponent(cal.id)}/events/${encodeURIComponent(eventId)}`, { headers });
-    if (!g.ok) continue;
+  const cals = (await calendariosPropios(headers)).filter((c) => c !== excepto);
+  const encontrados = await Promise.all(cals.map(async (cal) => {
+    const g = await fetch(`${CAL_API}/calendars/${encodeURIComponent(cal)}/events/${encodeURIComponent(eventId)}`, { headers });
+    if (!g.ok) return null;
     const ev = await g.json();
-    if (ev?.status !== "cancelled") return cal.id;
-  }
-  return null;
+    return ev?.status !== "cancelled" && esEventoDeAbordaje(ev) ? cal : null;
+  }));
+  return encontrados.find(Boolean) || null;
 }
 
 // Mueve un evento al calendario de `base`. true si quedó movido.
@@ -207,6 +231,20 @@ export async function crearEventoTarea(
     if (vivos.length) {
       const { colorId: _c, ...sinColor } = event; // no pisar el color que ya tiene
       return { event: await patchEvento(base, headers, vivos[0].id, aplicarTarea(sinColor, tarea, false, vivos[0]), tarea), reutilizado: true };
+    }
+  }
+
+  // 1b. El agente eligió otro calendario en Ajustes y el evento quedó en el principal:
+  //     se lo mueve al calendario elegido en vez de crear un segundo evento.
+  const destino = calendarioDeBase(base);
+  if (destino && destino !== "primary") {
+    const enPrincipal = await fetch(urlCon(`${CAL_API}/calendars/primary/events`, { privateExtendedProperty: `abordaje_tarea_id=${tarea.id}`, maxResults: "5", showDeleted: "false" }), { headers });
+    if (enPrincipal.ok) {
+      const viejo = ((await enPrincipal.json()).items || []).find((e: any) => e.status !== "cancelled");
+      if (viejo && await moverEventoA(base, headers, viejo.id, "primary")) {
+        const { colorId: _c, ...sinColor } = event;
+        return { event: await patchEvento(base, headers, viejo.id, aplicarTarea(sinColor, tarea, false, viejo), tarea), reutilizado: true };
+      }
     }
   }
 

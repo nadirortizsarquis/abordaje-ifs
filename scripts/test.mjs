@@ -553,6 +553,18 @@ test('día completo de Google cae en su día (no el anterior a las 21:00)', () =
   assert.equal(evs.find(e => e.id === 'reu').allDay, false);
   assert.equal(evs[0].id, 'cumple');  // arriba del día
 });
+test('día completo de varios días ocupa cada día (12 al 14)', () => {
+  const evs = g('extractGcalEventsForCalendar')([
+    { id: 'vac', summary: 'Vacaciones', start: { date: '2026-11-12' }, end: { date: '2026-11-15' } },
+  ], [], []);
+  const m = g('eventsByDayKey')(evs);
+  assert.equal(Object.keys(m).sort().join(), '2026-11-12,2026-11-13,2026-11-14');
+});
+test('normInvitados: tope 20 (el de la base) y avisa los excedidos', () => {
+  const r = g('normInvitados')(Array.from({ length: 25 }, (_, i) => `p${i}@x.com`).join(','));
+  assert.equal(r.validos.length, 20);
+  assert.equal(r.excedidos, 5);
+});
 test('tarea local sin hora = día completo; con hora = horario', () => {
   const evs = g('extractCalendarEvents')([], { items: [
     { id: 't1', titulo: 'Sin hora', fechaRecordatorio: '2026-11-12', horaRecordatorio: null },

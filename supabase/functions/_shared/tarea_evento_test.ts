@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { aplicarTarea, calendarioDeBase, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -69,5 +69,8 @@ check(aplicarTarea(EV, T(), false).start.date === null, "tarjeta vieja sin fecha
 check(calendarioDeBase("https://www.googleapis.com/calendar/v3/calendars/abc%40group.calendar.google.com/events") === "abc@group.calendar.google.com", "calendario de la URL base");
 check(calendarioDeBase("https://www.googleapis.com/calendar/v3/calendars/primary/events") === "primary", "calendario principal");
 
+check(esEventoDeAbordaje(EV) && !esEventoDeAbordaje({ id: "x" }), "solo se buscan/mueven eventos de Abordaje");
+const muchos = Array.from({ length: 30 }, (_, i) => `p${i}@x.com`);
+check(aplicarTarea(EV, T({ tipo_evento: "reunion", invitados: muchos }), true).attendees.length === MAX_INVITADOS, "tope de invitados = el de la base (20)");
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);
 if (mal) Deno.exit(1);
