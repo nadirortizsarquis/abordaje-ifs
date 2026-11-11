@@ -11,7 +11,7 @@
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario } from "../_shared/tarea_evento.ts";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario, escribirEvento, internosPerezosos, hayExternos, DESCRIPCION_NEUTRA } from "../_shared/tarea_evento.ts";
 
 // Keys validas como credencial del caller: todas las secret nuevas (JSON
 // SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
@@ -223,6 +223,28 @@ Deno.serve(async (req: Request) => {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     };
+    // Toda escritura a Google pasa por escribirEvento (blindaje de invitados externos).
+    const ctx = { internos: internosPerezosos(supabase) };
+
+    // blindar: control periódico del reconciliador del MCP. Si el evento tiene invitados
+    // externos y su descripción no es la neutra (por ejemplo, alguien agregó un invitado
+    // a mano en Google), se la neutraliza sin avisar por mail.
+    if (op === "blindar") {
+      const eid = String(body.eventId || "");
+      if (!/^[A-Za-z0-9_-]{5,1024}$/.test(eid)) return jsonResponse({ error: "eventId inválido" }, 400);
+      const gr = await fetch(`${base}/${encodeURIComponent(eid)}`, { headers: reqHeaders });
+      if (gr.status === 404 || gr.status === 410) return jsonResponse({ ok: true, existe: false, externos: false, corregido: false });
+      if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
+      const ev = await gr.json();
+      const externos = hayExternos(null, ev, await ctx.internos());
+      if (!externos || ev.description === DESCRIPCION_NEUTRA) {
+        return jsonResponse({ ok: true, existe: true, externos, corregido: false });
+      }
+      const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, { description: DESCRIPCION_NEUTRA }, ev, ctx);
+      if (!r.ok) throw new Error(`blindar failed: ${r.status} ${await r.text()}`);
+      console.warn(`blindaje: descripción neutralizada en evento ${eid} (invitados externos)`);
+      return jsonResponse({ ok: true, existe: true, externos, corregido: true });
+    }
 
     const decorate = (event: any) => {
       const prevExt = event?.extendedProperties || {};
@@ -265,26 +287,20 @@ Deno.serve(async (req: Request) => {
       // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const { event: evt, reutilizado } = await crearEventoTarea(base, reqHeaders, decorate(body.event), tarea);
+        const { event: evt, reutilizado } = await crearEventoTarea(base, reqHeaders, decorate(body.event), tarea, ctx);
         return jsonResponse({ ok: true, event: evt, reutilizado, asAssistant });
       }
-      const r = await fetch(base, {
-        method: "POST", headers: reqHeaders,
-        body: JSON.stringify(decorate(body.event)),
-      });
+      const r = await escribirEvento(base, "POST", reqHeaders, decorate(body.event), null, ctx, fetch, false);
       if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
       return jsonResponse({ ok: true, event: await r.json(), asAssistant });
     }
     if (op === "update") {
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const evt = await actualizarEventoTarea(base, reqHeaders, body.eventId, decorate(body.event), tarea);
+        const evt = await actualizarEventoTarea(base, reqHeaders, body.eventId, decorate(body.event), tarea, ctx);
         return jsonResponse({ ok: true, event: evt, asAssistant });
       }
-      const r = await fetch(`${base}/${body.eventId}`, {
-        method: "PATCH", headers: reqHeaders,
-        body: JSON.stringify(decorate(body.event)),
-      });
+      const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", reqHeaders, decorate(body.event), undefined, ctx, fetch, false);
       if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
       return jsonResponse({ ok: true, event: await r.json(), asAssistant });
     }
@@ -298,10 +314,7 @@ Deno.serve(async (req: Request) => {
         }
       } catch (_) { /* */ }
       if (isRecurringInstance) {
-        const r = await fetch(`${base}/${body.eventId}`, {
-          method: "PATCH", headers: reqHeaders,
-          body: JSON.stringify({ status: "cancelled" }),
-        });
+        const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", reqHeaders, { status: "cancelled" }, undefined, ctx, fetch, false);
         if (!r.ok && r.status !== 404 && r.status !== 410) {
           throw new Error(`cancel instance failed: ${r.status} ${await r.text()}`);
         }

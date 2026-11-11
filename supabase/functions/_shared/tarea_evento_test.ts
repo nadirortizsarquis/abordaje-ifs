@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -76,6 +76,77 @@ check(aplicarTarea(EV, T({ tipo_evento: "reunion", invitados: muchos }), true).a
 // reunión que venía de recordatorio: se le saca el lila; un color elegido se respeta
 check(aplicarTarea(EV, reu, false, { colorId: "1" }).colorId === null, "recordatorio→reunión: saca el lila (azul)");
 check(aplicarTarea(EV, reu, false, { colorId: "5" }).colorId === undefined, "reunión con color elegido: se respeta");
+
+// ── Blindaje A1: las notas internas NUNCA van a invitados externos ──
+const INT = new Set(["fede.socio@gmail.com", "nadir@gmail.com"]);
+check(esInterno("x@ifs-broker.com", new Set()) && esInterno("FEDE.socio@gmail.com", INT), "internos: dominio IFS o cuenta de la plataforma");
+check(!esInterno("cliente@gmail.com", INT) && !esInterno("x@ifs-broker.com.evil.com", INT), "externos: gmail ajeno o dominio parecido");
+check(!hayExternos({ attendees: [{ email: "x@ifs-broker.com" }, { email: "nadir@gmail.com" }] }, null, INT), "solo internos → no hay externos");
+check(hayExternos({ attendees: [{ email: "x@ifs-broker.com" }, { email: "cliente@mail.com" }] }, null, INT), "un externo alcanza");
+check(hayExternos({ summary: "PATCH sin attendees" }, { attendees: [{ email: "cliente@mail.com" }] }, INT), "PATCH sin attendees: cuentan los que ya tiene en Google");
+check(hayExternos({}, { attendeesOmitted: true }, INT), "lista de invitados incompleta → se asume externo");
+check(!hayExternos({ attendees: [{ email: "sala@resource.calendar.google.com", resource: true }] }, null, INT), "salas no cuentan");
+const bl = blindarCuerpo({ summary: "S", description: "BITACORA SECRETA" }, true);
+check(bl.description === DESCRIPCION_NEUTRA && bl.summary === "S", "con externos la descripción es la neutra");
+check(blindarCuerpo({ summary: "S" }, true).description === DESCRIPCION_NEUTRA, "con externos se pisa la descripción aunque no venga");
+check(blindarCuerpo({ description: "nota" }, false).description === "nota", "sin externos la nota se conserva");
+check(blindarCuerpo({ start: {} }, true, false).description === undefined, "evento propio de Google: si Abordaje no manda descripción, no se toca la del usuario");
+check(blindarCuerpo({ description: "nota de agenda" }, true, false).description === DESCRIPCION_NEUTRA, "evento propio de Google: la descripción que manda Abordaje se neutraliza igual");
+
+// escribirEvento con fetch simulado: nunca sale la bitácora hacia un evento con externos.
+const fakeFetch = (eventoEnGoogle: any, status = 200) => {
+  const enviados: any[] = [];
+  const f = (async (url: string, init?: any) => {
+    if (!init?.method) return new Response(JSON.stringify(eventoEnGoogle), { status });
+    enviados.push(JSON.parse(init.body));
+    return new Response("{}", { status: 200 });
+  }) as unknown as typeof fetch;
+  return { f, enviados };
+};
+const ctxT = { internos: async () => INT };
+const BIT = "[11/11/26 10:00] hipertension, ofrecer 15% de descuento";
+{
+  const { f, enviados } = fakeFetch(null);
+  await escribirEvento("https://x/events", "POST", {}, { description: BIT, attendees: [{ email: "cliente@mail.com" }] }, null, ctxT, f);
+  check(enviados[0].description === DESCRIPCION_NEUTRA, "alta con invitado externo → sin bitácora");
+}
+{
+  const { f, enviados } = fakeFetch({ attendees: [{ email: "cliente@mail.com" }], description: "vieja" });
+  await escribirEvento("https://x/events/abc?sendUpdates=all", "PATCH", {}, { description: BIT }, undefined, ctxT, f);
+  check(enviados[0].description === DESCRIPCION_NEUTRA, "PATCH de nota sobre evento con externo (invitado agregado en Google) → sin bitácora");
+}
+{
+  const { f, enviados } = fakeFetch(null, 500);
+  await escribirEvento("https://x/events/abc", "PATCH", {}, { description: BIT }, undefined, ctxT, f);
+  check(enviados[0].description === DESCRIPCION_NEUTRA, "no se pudo leer el evento → fail-closed (sin bitácora)");
+}
+{
+  const { f, enviados } = fakeFetch({ attendees: [{ email: "nadir@gmail.com" }] });
+  await escribirEvento("https://x/events/abc", "PATCH", {}, { description: BIT }, undefined, ctxT, f);
+  check(enviados[0].description === BIT, "solo invitados internos → la bitácora se mantiene");
+}
+{
+  const { f, enviados } = fakeFetch(null);
+  await escribirEvento("https://x/events", "POST", {}, { description: BIT, attendees: [{ email: "cliente@mail.com" }] }, null, { internos: async () => new Set() }, f);
+  check(enviados[0].description === DESCRIPCION_NEUTRA, "si falla la lista de cuentas, solo el dominio es interno");
+}
+
+// mails a invitados: solo si cambia algo que les importa (no por cada nota)
+const PV = { summary: "Reunión", start: { dateTime: "2026-11-12T18:00:00-03:00" }, end: { dateTime: "2026-11-12T19:00:00-03:00" }, attendees: [{ email: "c@x.com" }] };
+check(!cambiaParaInvitados({ summary: "Reunión", description: "nota nueva", start: { dateTime: "2026-11-12T18:00:00" }, end: { dateTime: "2026-11-12T19:00:00" } }, PV), "nota nueva sola → no se manda mail");
+check(cambiaParaInvitados({ start: { dateTime: "2026-11-12T19:00:00" } }, PV), "cambio de hora → se avisa");
+check(cambiaParaInvitados({ attendees: [{ email: "c@x.com" }, { email: "d@x.com" }] }, PV), "invitado nuevo → se avisa");
+
+// Guardia estática: ninguna escritura a Google por fuera de escribirEvento.
+for (const f of ["../gcal-events/index.ts", "../gcal-events-admin/index.ts", "./tarea_evento.ts"]) {
+  const lines = (await Deno.readTextFile(new URL(f, import.meta.url))).split("\n");
+  const malas = lines.map((l, i) => [l, i] as const).filter(([l, i]) => {
+    if (!/method:\s*"(POST|PATCH|PUT)"\s*[,}]/.test(l)) return false;
+    const ctx = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
+    return !/oauth2\.googleapis\.com\/token|\/move\?/.test(ctx); // token y move no llevan descripción
+  });
+  check(malas.length === 0, `sin escrituras a Google fuera de escribirEvento en ${f}${malas.length ? " (líneas " + malas.map(([, i]) => i + 1).join(",") + ")" : ""}`);
+}
 
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);
 if (mal) Deno.exit(1);

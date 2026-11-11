@@ -120,6 +120,113 @@ export function sendUpdatesPara(tarea: TareaEvento | null): "all" | "none" {
   return tarea?.tipo_evento === "reunion" && (tarea.invitados || []).length ? "all" : "none";
 }
 
+// ── Blindaje: las notas internas NUNCA van a invitados externos (A1, 11-nov-2026) ──
+// La descripción de un evento de tarjeta es la bitácora interna (observacion). Google
+// se la muestra (y la manda por mail) a todos los invitados. Regla de Nadir: si el evento
+// tiene AL MENOS UN invitado ajeno a la organización, la descripción se reemplaza por un
+// texto neutro, sin excepción. Se aplica acá, en el único punto por donde pasan TODAS las
+// escrituras a Google (escribirEvento), así cubre a Abordaje, Universo, el MCP y el
+// reconciliador sin depender del cliente. Fail-closed: si no se puede saber quiénes son
+// los invitados, se asume que hay externos.
+export const DESCRIPCION_NEUTRA = "Reunión agendada con IFS - Insurance Financial Solution.";
+export const DOMINIOS_INTERNOS = ["ifs-broker.com"];
+
+// Emails de invitados de uno o más eventos (las salas/recursos no cuentan).
+export function emailsInvitados(...eventos: any[]): string[] {
+  const out: string[] = [];
+  for (const ev of eventos) {
+    for (const a of (Array.isArray(ev?.attendees) ? ev.attendees : [])) {
+      if (a?.resource) continue;
+      const e = String(a?.email || "").trim().toLowerCase();
+      if (e) out.push(e);
+    }
+  }
+  return out;
+}
+
+// Interno = dominio de la organización o email de una cuenta de la plataforma (auth.users).
+export function esInterno(email: string, internos: Set<string>): boolean {
+  const e = String(email || "").trim().toLowerCase();
+  const dom = e.split("@")[1] || "";
+  return DOMINIOS_INTERNOS.includes(dom) || internos.has(e);
+}
+
+// ¿El evento (como va a quedar) tiene invitados externos? Se mira la unión de lo que se
+// manda y lo que ya tiene en Google: un PATCH sin attendees conserva los que había.
+export function hayExternos(event: any, previo: any, internos: Set<string>): boolean {
+  if (event?.attendeesOmitted || previo?.attendeesOmitted) return true; // lista incompleta
+  return emailsInvitados(event, previo).some((e) => !esInterno(e, internos));
+}
+
+// Cuerpo listo para mandar. Con externos:
+//  - evento de TARJETA (forzar=true): la descripción SIEMPRE es la neutra, aunque el cliente
+//    no la mande (así se pisa la bitácora que hubiera quedado de antes).
+//  - evento propio del usuario en Google (forzar=false): solo se neutraliza la descripción
+//    que manda Abordaje; si no manda, no se toca la que el usuario escribió en Google.
+export function blindarCuerpo(event: any, externos: boolean, forzar = true): any {
+  if (!externos) return event;
+  if (!forzar && !(event && "description" in event)) return event;
+  return { ...event, description: DESCRIPCION_NEUTRA };
+}
+
+// Emails de las cuentas de la plataforma (auth.users, no profiles.email: esa columna no
+// es la identidad real). Perezoso y memoizado: solo se consulta si el evento tiene
+// invitados. Si falla, queda vacío → solo el dominio cuenta como interno (fail-closed).
+export function internosPerezosos(supabase: any): () => Promise<Set<string>> {
+  let p: Promise<Set<string>> | null = null;
+  return () => p ??= (async () => {
+    const s = new Set<string>();
+    try {
+      for (let page = 1; page <= 10; page++) {
+        const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+        if (error) break;
+        const users = data?.users || [];
+        for (const u of users) if (u?.email) s.add(String(u.email).toLowerCase());
+        if (users.length < 1000) break;
+      }
+    } catch (_) { /* fail-closed */ }
+    return s;
+  })();
+}
+
+export interface CtxEscritura { internos: () => Promise<Set<string>> }
+
+// ÚNICO punto de escritura de eventos a Google (POST/PATCH). Ningún otro código debe
+// hacer fetch con POST/PATCH a /events (lo verifica tarea_evento_test.ts).
+// `previo`: el evento actual en Google; null = alta; undefined = se lee acá (PATCH).
+export async function escribirEvento(
+  url: string, method: "POST" | "PATCH", headers: Record<string, string>, event: any, previo: any, ctx: CtxEscritura,
+  fetcher: typeof fetch = fetch, forzar = true,
+): Promise<Response> {
+  let actual = previo;
+  let externos = false;
+  if (actual === undefined) {
+    actual = null;
+    const g = await fetcher(url.split("?")[0], { headers });
+    if (g.ok) actual = await g.json();
+    else if (g.status !== 404 && g.status !== 410) externos = true; // no se pudo leer → fail-closed
+  }
+  if (!externos) {
+    if (event?.attendeesOmitted || actual?.attendeesOmitted) externos = true;
+    else if (emailsInvitados(event, actual).length) externos = hayExternos(event, actual, await ctx.internos());
+  }
+  if (externos) console.warn(`blindaje: evento con invitados externos, descripción neutra (${method})`);
+  return await fetcher(url, { method, headers, body: JSON.stringify(blindarCuerpo(event, externos, forzar)) });
+}
+
+// ¿El cambio le importa a los invitados? (para no mandarles un mail por cada nota).
+const hm = (x: any) => String(x?.dateTime || x?.date || "").slice(0, 16);
+export function cambiaParaInvitados(body: any, previo: any): boolean {
+  if (!previo) return true;
+  if (body?.conferenceData?.createRequest) return true;
+  if (body?.start && hm(body.start) !== hm(previo.start)) return true;
+  if (body?.end && hm(body.end) !== hm(previo.end)) return true;
+  if (body?.summary !== undefined && body.summary !== previo.summary) return true;
+  if (body?.location !== undefined && (body.location || "") !== (previo.location || "")) return true;
+  const ya = new Set(emailsInvitados(previo));
+  return emailsInvitados(body).some((e) => !ya.has(e));
+}
+
 // ── Con red ────────────────────────────────────────────────────────────────────
 
 // La tarjeta del evento, solo si es del agente dueño del calendario. Si el evento dice
@@ -208,10 +315,9 @@ function urlCon(url: string, params: Record<string, string>): string {
   return u.toString();
 }
 
-async function patchEvento(base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento | null) {
-  const r = await fetch(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), {
-    method: "PATCH", headers, body: JSON.stringify(event),
-  });
+async function patchEvento(base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento | null, previo: any, ctx: CtxEscritura) {
+  const send = sendUpdatesPara(tarea) === "all" && cambiaParaInvitados(event, previo) ? "all" : "none";
+  const r = await escribirEvento(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: send }), "PATCH", headers, event, previo ?? undefined, ctx);
   if (!r.ok) {
     const err: any = new Error(`update failed: ${r.status} ${await r.text()}`);
     err.status = r.status;
@@ -222,7 +328,7 @@ async function patchEvento(base: string, headers: Record<string, string>, eventI
 
 // Crea el evento de una tarjeta sin duplicar. Devuelve { event, reutilizado }.
 export async function crearEventoTarea(
-  base: string, headers: Record<string, string>, event: any, tarea: TareaEvento,
+  base: string, headers: Record<string, string>, event: any, tarea: TareaEvento, ctx: CtxEscritura,
 ): Promise<{ event: any; reutilizado: boolean }> {
   const cuerpo = aplicarTarea(event, tarea, true);
 
@@ -233,7 +339,7 @@ export async function crearEventoTarea(
     const vivos = ((await lr.json()).items || []).filter((e: any) => e.status !== "cancelled");
     if (vivos.length) {
       const { colorId: _c, ...sinColor } = event; // no pisar el color que ya tiene
-      return { event: await patchEvento(base, headers, vivos[0].id, aplicarTarea(sinColor, tarea, false, vivos[0]), tarea), reutilizado: true };
+      return { event: await patchEvento(base, headers, vivos[0].id, aplicarTarea(sinColor, tarea, false, vivos[0]), tarea, vivos[0], ctx), reutilizado: true };
     }
   }
 
@@ -246,16 +352,14 @@ export async function crearEventoTarea(
       const viejo = ((await enPrincipal.json()).items || []).find((e: any) => e.status !== "cancelled");
       if (viejo && await moverEventoA(base, headers, viejo.id, "primary")) {
         const { colorId: _c, ...sinColor } = event;
-        return { event: await patchEvento(base, headers, viejo.id, aplicarTarea(sinColor, tarea, false, viejo), tarea), reutilizado: true };
+        return { event: await patchEvento(base, headers, viejo.id, aplicarTarea(sinColor, tarea, false, viejo), tarea, viejo, ctx), reutilizado: true };
       }
     }
   }
 
   // 2. Alta con id derivado de la tarjeta (anti-carrera).
   const idFijo = idEventoDeTarea(tarea.id);
-  const alta = (cuerpoAlta: any) => fetch(urlCon(base, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), {
-    method: "POST", headers, body: JSON.stringify(cuerpoAlta),
-  });
+  const alta = (cuerpoAlta: any) => escribirEvento(urlCon(base, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "POST", headers, cuerpoAlta, null, ctx);
   let r = await alta(idFijo ? { ...cuerpo, id: idFijo } : cuerpo);
   if (r.status === 409 && idFijo) {
     // Ya existe un evento con ese id: si está vivo, lo creó otro pedido en paralelo → se
@@ -264,7 +368,7 @@ export async function crearEventoTarea(
     const previo = gr.ok ? await gr.json() : null;
     if (previo && previo.status !== "cancelled") {
       const { colorId: _c, ...sinColor } = event;
-      return { event: await patchEvento(base, headers, idFijo, aplicarTarea(sinColor, tarea, false, previo), tarea), reutilizado: true };
+      return { event: await patchEvento(base, headers, idFijo, aplicarTarea(sinColor, tarea, false, previo), tarea, previo, ctx), reutilizado: true };
     }
     r = await alta(cuerpo);
   }
@@ -273,26 +377,24 @@ export async function crearEventoTarea(
 }
 
 export async function actualizarEventoTarea(
-  base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento,
+  base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento, ctx: CtxEscritura,
 ): Promise<any> {
-  // Reuniones: leer el evento actual para no pisar su Meet ni sus invitados.
-  let previo: any = null;
-  if (tarea.tipo_evento === "reunion") {
+  // Se lee SIEMPRE el evento actual: para no pisar el Meet ni los invitados de una reunión,
+  // y para saber si tiene invitados externos (blindaje), aunque la tarjeta sea recordatorio.
+  const leer = async () => {
     const gr = await fetch(`${base}/${encodeURIComponent(eventId)}`, { headers });
-    if (gr.ok) previo = await gr.json();
-  }
+    return gr.ok ? await gr.json() : undefined; // undefined: escribirEvento relee o asume externos
+  };
+  let previo: any = await leer();
   try {
-    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo), tarea);
+    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo ?? null), tarea, previo, ctx);
   } catch (e: any) {
     // 404: el evento está en el calendario anterior (el agente cambió de calendario).
     // Se lo mueve al actual y se reintenta una vez.
     if (e?.status !== 404) throw e;
     const origen = await buscarCalendarioDelEvento(headers, eventId, calendarioDeBase(base));
     if (!origen || !(await moverEventoA(base, headers, eventId, origen))) throw e;
-    if (tarea.tipo_evento === "reunion" && !previo) {
-      const gr = await fetch(`${base}/${encodeURIComponent(eventId)}`, { headers });
-      if (gr.ok) previo = await gr.json();
-    }
-    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo), tarea);
+    previo = await leer();
+    return await patchEvento(base, headers, eventId, aplicarTarea(event, tarea, false, previo ?? null), tarea, previo, ctx);
   }
 }
