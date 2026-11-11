@@ -371,7 +371,8 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ error: "Los asistentes no pueden vincular clientes al CRM." }, 403);
     }
     const isAdmin = profile?.role === "admin";
-    const advisorEmail = (profile?.email || user.email || "").trim();
+    // Email del JWT primero (verificado por Auth); el de profiles solo como respaldo (sec-01/sec-16).
+    const advisorEmail = (user.email || profile?.email || "").trim();
 
     // Habilitación server-side (NO confiar solo en el gating del front): admins
     // siempre; el resto según advisors.crm_sync_enabled (por profiles.advisor_id
@@ -387,7 +388,8 @@ Deno.serve(async (req: Request) => {
         crmEnabled = !!adv?.crm_sync_enabled;
       } else if (prof?.email) {
         const { data: adv } = await supabase.from("advisors")
-          .select("crm_sync_enabled").ilike("email", prof.email).maybeSingle();
+          // Igualdad sin distinguir mayúsculas: se escapan % y _ para que no actúen de comodín (sec-16).
+          .select("crm_sync_enabled").ilike("email", prof.email.replace(/[\\%_]/g, (c: string) => "\\" + c)).maybeSingle();
         crmEnabled = !!adv?.crm_sync_enabled;
       }
     }

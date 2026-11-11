@@ -30,6 +30,13 @@ function envKey(jsonVar: string, legacyVar: string): string {
 const SERVICE_KEY = envKey("SUPABASE_SECRET_KEYS", "SUPABASE_SERVICE_ROLE_KEY");
 
 const WORKSPACE_DOMAIN = "ifs-broker.com";
+
+// Email REAL de un usuario (auth.users), nunca profiles.email: esa columna la podía
+// reescribir un admin y así elegir qué casilla impersonar por DWD (auditoría 05-nov, sec-01).
+async function authEmail(supabase: any, userId: string): Promise<string> {
+  const { data } = await supabase.auth.admin.getUserById(userId);
+  return (data?.user?.email || "").toLowerCase();
+}
 const DEFAULT_CALENDAR = "primary";
 
 const corsHeaders = {
@@ -128,6 +135,7 @@ async function listCalendars(accessToken: string) {
 
 async function listEventsOnCalendar(
   accessToken: string, calendarId: string, timeMin: string, timeMax: string,
+  privProps: string[] = [],
 ) {
   const items: any[] = [];
   let pageToken: string | null = null;
@@ -139,6 +147,9 @@ async function listEventsOnCalendar(
       maxResults: "250",
     });
     if (pageToken) params.set("pageToken", pageToken);
+    // Filtro opcional por propiedad privada ("clave=valor"): Google devuelve solo esos
+    // eventos. Sin él, buscar las citas de un prospecto en ±10 años tardaba 30 s.
+    for (const pp of privProps) params.append("privateExtendedProperty", pp);
     const r = await fetch(
       `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?${params.toString()}`,
       { headers: { "Authorization": `Bearer ${accessToken}` } },
@@ -218,7 +229,7 @@ Deno.serve(async (req: Request) => {
       targetUserId = principal.id;
     }
 
-    const targetEmail = (targetProfile?.email || (asAssistant ? "" : user.email) || "").toLowerCase();
+    const targetEmail = asAssistant ? await authEmail(supabase, targetUserId) : (user.email || "").toLowerCase();
     if (!targetEmail) return jsonResponse({ error: "no email on target" }, 400);
     if (!targetProfile?.gcal_enabled) {
       return jsonResponse({ skip: "gcal not enabled", email: targetEmail });
@@ -264,10 +275,13 @@ Deno.serve(async (req: Request) => {
     if (!op) return jsonResponse({ error: "missing op" }, 400);
 
     if (op === "list") {
+      const privProps: string[] = (Array.isArray(body.privateExtendedProperty) ? body.privateExtendedProperty : [])
+        .filter((x: unknown) => typeof x === "string" && /^abordaje_[a-z_]+=[\w-]+$/.test(x as string))
+        .slice(0, 4);
       const calendars = await listCalendars(accessToken);
       const allEvents: any[] = [];
       const results = await Promise.all(calendars.map(async (cal) => {
-        const items = await listEventsOnCalendar(accessToken, cal.id, body.timeMin, body.timeMax);
+        const items = await listEventsOnCalendar(accessToken, cal.id, body.timeMin, body.timeMax, privProps);
         for (const ev of items) {
           ev._gcalId = cal.id;
           ev._gcalSummary = cal.summary;
