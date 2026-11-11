@@ -35,3 +35,30 @@ export async function clienteEsDelAsesor(crm: CrmFn, clientId: number, advisorEm
   }
   return false;
 }
+
+// ── Prospecto canónico de un ítem (tarea/agendado) ──────────────────────────
+// Solo se toma el prospecto como ancla si es del MISMO dueño que el ítem. La base
+// ya lo garantiza (trigger private.check_prospecto_mismo_agente, migración
+// 20261111113446); esto es defensa en profundidad por si un prospecto se reasigna
+// a otro agente después de creado el ítem. Ítem con prospecto ajeno -> se trata
+// como suelto (no se lee ni se escribe el prospecto de otro).
+export function prospectoDelItem<P extends { agente_id?: string | null }>(
+  item: { agente_id?: string | null },
+  prospecto: P | null | undefined,
+): P | null {
+  if (!prospecto || !item?.agente_id) return null;
+  return prospecto.agente_id === item.agente_id ? prospecto : null;
+}
+
+// `force:true` en op=create saltea el chequeo de DNI duplicado. Solo admin.
+export function puedeForzarCreate(force: unknown, isAdmin: boolean): boolean {
+  return force === true && isAdmin === true;
+}
+
+// Tareas/agendas con crm_client_id: se vuelcan SOLO si no cuelgan de un prospecto
+// ya vinculado al mismo cliente (ese prospecto vuelca sus contactos, que son el
+// registro canónico) -> evita la misma gestión dos veces en la bitácora CRM.
+export function soloSueltas<R extends { prospecto_id?: string | null }>(rows: R[], prospIds: string[]): R[] {
+  const set = new Set(prospIds);
+  return rows.filter((r) => !r.prospecto_id || !set.has(r.prospecto_id));
+}

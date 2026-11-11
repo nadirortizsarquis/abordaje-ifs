@@ -30,3 +30,21 @@ eq(calls.every((c) => /^\/clients\/12\/$/.test(c) || c.includes("advisor_email=a
 let threw = false;
 try { await clienteEsDelAsesor(async () => { throw err(503); }, 10, "a@x.com"); } catch { threw = true; }
 eq(threw, true, "CRM caído → propaga error (el caller no vincula ni vuelca)");
+
+// ── prospectoDelItem / puedeForzarCreate ──
+import { prospectoDelItem, puedeForzarCreate } from "./ownership.ts";
+const pA = { id: "p1", agente_id: "A" };
+eq(prospectoDelItem({ agente_id: "A" }, pA), pA, "prospecto del mismo dueño → ancla al prospecto");
+eq(prospectoDelItem({ agente_id: "B" }, pA), null, "prospecto AJENO → ítem suelto");
+eq(prospectoDelItem({ agente_id: "A" }, null), null, "sin prospecto → null");
+eq(prospectoDelItem({ agente_id: null }, { id: "p2", agente_id: null }), null, "agente nulo no matchea (fail-closed)");
+eq(puedeForzarCreate(true, true), true, "admin + force → saltea dedup");
+eq(puedeForzarCreate(true, false), false, "no-admin + force → NO saltea");
+eq(puedeForzarCreate("true", true), false, "force no booleano → no saltea");
+eq(puedeForzarCreate(undefined, true), false, "sin force → no saltea");
+
+// ── soloSueltas ──
+import { soloSueltas } from "./ownership.ts";
+const rows = [{ id: 1, prospecto_id: null }, { id: 2, prospecto_id: "P" }, { id: 3, prospecto_id: "Q" }];
+eq(soloSueltas(rows, ["P"]).map((r) => r.id).join(","), "1,3", "excluye la que cuelga de un prospecto ya vinculado (no duplica)");
+eq(soloSueltas(rows, []).length, 3, "sin prospectos vinculados -> todas");

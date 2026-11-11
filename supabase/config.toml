@@ -1,0 +1,9 @@
+# Config mínima del CLI, solo para fijar verify_jwt por función.
+# OJO: `supabase functions deploy` SIN nombre sube TODAS las funciones y les
+# aplica estos valores; sin este archivo todas quedan con verify_jwt=true.
+project_id = "abordaje-ifs"
+
+# Vuelta del OAuth de Google: llega sin sesión de Supabase (la valida por `state`).
+# Con verify_jwt=true devuelve 401 y nadie puede conectar Google Calendar.
+[functions.gcal-oauth-callback]
+verify_jwt = false

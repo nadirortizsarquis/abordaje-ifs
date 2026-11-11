@@ -39,7 +39,7 @@
 // candidatos de clientes de SU cartera (clienteEsDelAsesor), aunque el bot vea todo.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { clienteEsDelAsesor } from "./ownership.ts";
+import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } from "./ownership.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -243,7 +243,6 @@ function buildBitacora(
 // escribe/lee el vínculo (linkTarget) y datos de identidad para prefill/lookup.
 interface Anchor {
   agenteId: string;
-  prospectoId: string | null;
   prospecto: any | null;
   effectiveClientId: number | null;
   linkTarget: { table: string; id: string };
@@ -260,7 +259,6 @@ async function resolveAnchor(
     if (!p) throw new HttpError(404, "prospecto no encontrado");
     return {
       agenteId: p.agente_id,
-      prospectoId: p.id,
       prospecto: p,
       effectiveClientId: p.crm_client_id ?? null,
       linkTarget: { table: "abordaje_prospectos", id: p.id },
@@ -281,7 +279,10 @@ async function resolveAnchor(
       const { data: p } = await supabase.from("abordaje_prospectos")
         .select("id, nombre, telefono, documento, observaciones, detalle, referente, agente_id, crm_client_id")
         .eq("id", item.prospecto_id).maybeSingle();
-      prospecto = p || null;
+      // Defensa en profundidad: la base ya exige que el prospecto sea del mismo
+      // agente que el ítem (trigger, migración 20261111113446). Si igual llegara
+      // uno ajeno (ej. prospecto reasignado), el ítem se trata como suelto.
+      prospecto = prospectoDelItem(item, p);
     }
 
     // Si el ítem tiene prospecto, el vínculo canónico vive en el prospecto.
@@ -296,7 +297,6 @@ async function resolveAnchor(
 
     return {
       agenteId: item.agente_id,
-      prospectoId: item.prospecto_id || null,
       prospecto,
       effectiveClientId,
       linkTarget,
@@ -318,7 +318,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   if (prospIds.length) {
     const { data } = await supabase.from("abordaje_prospecto_contactos")
       .select("id, tipo, fecha, hora, observacion, created_at")
-      .in("prospecto_id", prospIds).is("crm_synced_at", null);
+      .in("prospecto_id", prospIds).eq("agente_id", agenteId).is("crm_synced_at", null);
     contactos = data ?? [];
   }
 
@@ -327,16 +327,20 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   // contacto (que es el registro canónico) -> NO se vuelcan, para no duplicar
   // la misma gestión en la bitácora del CRM (recordatorios incluidos).
   const { data: ag } = await supabase.from("abordaje_agendados")
-    .select("id, fecha, nota, created_at")
+    .select("id, prospecto_id, fecha, nota, created_at")
     .eq("agente_id", agenteId).is("crm_synced_at", null)
     .eq("crm_client_id", clientId);
 
   const { data: tr } = await supabase.from("abordaje_tareas")
-    .select("id, titulo, observacion, columna_id, compania, fecha_recordatorio, hora_recordatorio, created_at")
+    .select("id, prospecto_id, titulo, observacion, columna_id, compania, fecha_recordatorio, hora_recordatorio, created_at")
     .eq("agente_id", agenteId).eq("archivada", false).is("crm_synced_at", null)
     .eq("crm_client_id", clientId);
 
-  return { contactos, agendados: ag ?? [], tareas: tr ?? [], prospIds };
+  // Una tarea/agenda con crm_client_id (typeahead) que ADEMÁS cuelga de un
+  // prospecto ya vinculado a este cliente es proyección de sus contactos, que ya
+  // se vuelcan arriba -> se excluye para no duplicar en la bitácora.
+  const sueltas = (rows: any[] | null) => soloSueltas(rows ?? [], prospIds);
+  return { contactos, agendados: sueltas(ag), tareas: sueltas(tr), prospIds };
 }
 
 Deno.serve(async (req: Request) => {
@@ -393,7 +397,12 @@ Deno.serve(async (req: Request) => {
     if (!op) return jsonResponse({ error: "missing op" }, 400);
 
     // Ops que leen/escriben contra el CRM: exigen habilitación server-side.
-    const CRM_OPS = new Set(["search", "lookup", "create", "sync"]);
+    // Nota: crm_client_id también se puede escribir directo en la fila (typeahead
+    // al crear, RLS de la fila propia). Eso NO es la barrera: la barrera real es
+    // `sync`, que exige habilitación + clienteEsDelAsesor antes de volcar nada.
+    // unlink/status no hablan con el CRM pero tocan/leen el vínculo: mismo gate,
+    // así un asesor deshabilitado no puede operar el vínculo por la función.
+    const CRM_OPS = new Set(["search", "lookup", "create", "link", "unlink", "status", "sync"]);
     if (CRM_OPS.has(op) && !crmEnabled) {
       return jsonResponse({ error: "Sincronización con CRM deshabilitada para tu usuario." }, 403);
     }
@@ -499,18 +508,22 @@ Deno.serve(async (req: Request) => {
       // FAIL-CLOSED: solo fijamos el vínculo si el CRM confirmó el cliente (2xx).
       // Un 404 -> no existe; cualquier otro fallo (5xx/timeout) -> NO vinculamos y
       // pedimos reintentar, para no anclar a ciegas sobre un CRM que no respondió.
-      try {
-        await crmClient()(`/clients/${crmClientId}/`);
-      } catch (e) {
-        if ((e as any)?.status === 404) {
-          return jsonResponse({ error: `El cliente #${crmClientId} no existe en el CRM.` }, 404);
+      // No-admin: clienteEsDelAsesor ya lee el detalle (404 -> false), así que no
+      // se pide dos veces; y "no existe" y "es ajeno" dan la misma respuesta, para
+      // no revelar qué ids existen en carteras de otros.
+      if (isAdmin) {
+        try {
+          await crmClient()(`/clients/${crmClientId}/`);
+        } catch (e) {
+          if ((e as any)?.status === 404) {
+            return jsonResponse({ error: `El cliente #${crmClientId} no existe en el CRM.` }, 404);
+          }
+          return jsonResponse({
+            error: "No se pudo validar el cliente en el CRM (no respondió). No se fijó el vínculo; reintentá en un momento.",
+            crm_status: (e as any)?.status || 504,
+          }, 502);
         }
-        return jsonResponse({
-          error: "No se pudo validar el cliente en el CRM (no respondió). No se fijó el vínculo; reintentá en un momento.",
-          crm_status: (e as any)?.status || 504,
-        }, 502);
-      }
-      if (!isAdmin) {
+      } else {
         let propio = false;
         try { propio = await clienteEsDelAsesor(crmClient(), crmClientId, actingEmail); } catch (e) {
           return jsonResponse({
@@ -547,8 +560,12 @@ Deno.serve(async (req: Request) => {
       // Idempotencia: antes de crear, chequeamos que no exista ya un cliente con
       // ese documento. Si existe, NO creamos un duplicado: devolvemos 409 con los
       // candidatos para que el front ofrezca vincular. `force:true` lo saltea (caso
-      // raro de documentos legítimamente repetidos que el asesor confirma).
-      if (!body.force) {
+      // raro de documentos legítimamente repetidos). SOLO admin: un asesor que lo
+      // mandara a mano saltearía la regla "ese DNI es de otro asesor, pedile a un admin".
+      if (body.force && !isAdmin) {
+        return jsonResponse({ error: "force_solo_admin", message: "Solo un administrador puede forzar el alta con un documento repetido." }, 403);
+      }
+      if (!puedeForzarCreate(body.force, isAdmin)) {
         try {
           const dup = await crm(`/clients/?document_number=${encodeURIComponent(doc)}`);
           const cands = dup?.results ?? [];
@@ -557,13 +574,20 @@ Deno.serve(async (req: Request) => {
           if (cands.length && !isAdmin) {
             const own = await crm(`/clients/?document_number=${encodeURIComponent(doc)}&advisor_email=${encodeURIComponent(actingEmail)}`);
             const propios = own?.results ?? [];
+            // El 409 es inevitable (no se puede crear un duplicado), así que revela
+            // que el DNI existe en el CRM. Mitigación: solo asesores habilitados
+            // llegan acá y cada choque contra un DNI ajeno queda en los logs para
+            // detectar enumeración.
+            if (!propios.length) {
+              console.warn(JSON.stringify({ evt: "crm_create_dni_ajeno", user_id: user.id, doc_tail: doc.slice(-3) }));
+            }
             return jsonResponse(propios.length ? {
               error: "duplicate_document",
               message: `Ya tenés un cliente con el documento ${doc} en el CRM. Vinculá en vez de crear uno nuevo.`,
               candidates: propios.slice(0, 10),
             } : {
               error: "duplicate_document",
-              message: `Ya existe un cliente con el documento ${doc} en el CRM, asignado a otro asesor. Pedile a un administrador que lo revise.`,
+              message: `Ya existe un cliente con el documento ${doc} en el CRM. Pedile a un administrador que lo revise.`,
               candidates: [],
             }, 409);
           }
