@@ -2840,6 +2840,28 @@
     gap: 2px;
   }
   .cal-week-day-h:last-child { border-right: none; }
+  /* Fila de eventos de día completo (arriba de la grilla horaria) */
+  .cal-allday-corner {
+    border-right: 1px solid var(--borde);
+    border-top: 1px solid var(--borde);
+    font-size: 0.62rem; font-weight: 700; color: var(--texto-suave);
+    text-transform: uppercase; letter-spacing: 0.3px;
+    padding: 6px 4px; text-align: center; line-height: 1.2;
+  }
+  .cal-allday-cell {
+    border-right: 1px solid var(--borde);
+    border-top: 1px solid var(--borde);
+    padding: 3px; display: flex; flex-direction: column; gap: 2px;
+    min-width: 0; max-height: 84px; overflow-y: auto;
+  }
+  .cal-allday-cell:last-child { border-right: none; }
+  .cal-allday-event {
+    font-size: 0.7rem; font-weight: 600; line-height: 1.3;
+    padding: 2px 6px; border-left: 3px solid; border-radius: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    cursor: pointer;
+  }
+  .cal-allday-event:hover { filter: brightness(0.96); }
   .cal-week-day-h .dow {
     font-size: 0.7rem;
     font-weight: 700;
@@ -5006,6 +5028,22 @@ const GCAL_TZ = 'America/Argentina/Buenos_Aires';
 function dateToGcalLocal(d) {
   return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
 }
+// Eventos de día completo de Google: traen start.date ("2026-11-12") y no dateTime.
+// new Date("2026-11-12") lo toma como medianoche UTC = 21:00 del día ANTERIOR en
+// Argentina; por eso se arma el string en hora local ("2026-11-12T00:00:00").
+function gcalEsDiaCompleto(ev) {
+  return !ev?.start?.dateTime && !!ev?.start?.date;
+}
+function gcalInicioLocalIso(ev) {
+  if (ev?.start?.dateTime) return ev.start.dateTime;
+  if (ev?.start?.date) return `${ev.start.date}T00:00:00`;
+  return null;
+}
+function gcalFinLocalIso(ev) {
+  if (ev?.end?.dateTime) return ev.end.dateTime;
+  if (ev?.end?.date) return `${ev.end.date}T00:00:00`;
+  return null;
+}
 function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + durationMin * 60_000);
@@ -6053,6 +6091,7 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
       if (!haystack.includes(q)) continue;
       const startIso = ev.start?.dateTime || ev.start?.date;
       if (!startIso) continue;
+      // start.date sin hora → formatFechaHora muestra solo la fecha (día completo).
       const fechaTxt = formatFechaHora(startIso);
       const ext = ev.extendedProperties?.private || {};
       resultados.push({
@@ -7802,8 +7841,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       if (isPilot && e.googleEvent) {
         // Piloto: cualquier evento (agenda/tarea/externo) se mueve en Google.
         // Conservamos la duración original calculando desde el end/start originales.
-        const oldStart = new Date(e.googleEvent.start?.dateTime || e.googleEvent.start?.date);
-        const oldEnd = new Date(e.googleEvent.end?.dateTime || e.googleEvent.end?.date);
+        const oldStart = new Date(gcalInicioLocalIso(e.googleEvent));
+        const oldEnd = new Date(gcalFinLocalIso(e.googleEvent));
         const durMs = (oldEnd - oldStart) || 60 * 60_000;
         const newStart = new Date(newStartIso);
         const newEnd = new Date(newStart.getTime() + durMs);
@@ -7946,11 +7985,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
     try {
       const nuevoTitulo = (patch.nota || '').split(/\r?\n+/)[0] || null;
       if (isPilot) {
-        await gcalApi.update(agendaId, buildGoogleEventBody({
+        let body = buildGoogleEventBody({
           startIso: patch.fecha,
           summary: nuevoTitulo || 'Agenda IFS',
           description: patch.nota || '',
-        }), gcalCalendarId);
+        });
+        if (patch.diaCompleto) {
+          // Día completo: start/end con date. dateTime en null porque el PATCH de
+          // Google mezcla con lo que el evento ya tiene.
+          const [y, m, d] = patch.diaCompleto.dia.split('-').map(Number);
+          const fin = new Date(y, m - 1, d + patch.diaCompleto.dias);
+          const finDia = `${fin.getFullYear()}-${pad2(fin.getMonth()+1)}-${pad2(fin.getDate())}`;
+          body = { ...body, start: { date: patch.diaCompleto.dia, dateTime: null }, end: { date: finDia, dateTime: null } };
+        }
+        await gcalApi.update(agendaId, body, gcalCalendarId);
         bumpGcal();
         await storage.updateMeetingBySourceRef(`gcal:${agendaId}`, { startAt: patch.fecha, title: nuevoTitulo });
       } else {
@@ -14570,9 +14618,10 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
   if (tareasState && Array.isArray(tareasState.items)) {
     for (const t of tareasState.items) {
       if (!t.fechaRecordatorio) continue;
+      // Sin hora = día completo (mismo criterio que el evento de Google).
       const fechaIso = t.horaRecordatorio
         ? `${t.fechaRecordatorio}T${t.horaRecordatorio}:00`
-        : `${t.fechaRecordatorio}T09:00:00`;
+        : `${t.fechaRecordatorio}T00:00:00`;
       let tipoContacto = null;
       if (t.prospectoId) {
         const prosp = prospectos.find(x => x.id === t.prospectoId);
@@ -14586,6 +14635,7 @@ function extractCalendarEvents(prospectos, tareasState, agendados) {
         tipo: tipoContacto,
         label: t.titulo || '(tarea sin título)',
         fecha: fechaIso,
+        allDay: !t.horaRecordatorio,
         observacion: t.observacion || '',
         duracionMin: null,
         actorId: t.actorId || null,
@@ -14641,7 +14691,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     if (ev.status === 'cancelled') continue;
     if (seen.has(ev.id)) continue;
     seen.add(ev.id);
-    const start = ev.start?.dateTime || ev.start?.date;
+    const start = gcalInicioLocalIso(ev);
     if (!start) continue;
     const ext = ev.extendedProperties?.private || {};
     const prospectoId = ext.abordaje_prospect_id || null;
@@ -14694,6 +14744,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       isOrphan,
       label: prospectoNombre || ev.summary || '(sin título)',
       fecha: start,
+      allDay: gcalEsDiaCompleto(ev),
       tipo: tipoEvento,
       observacion: ev.description || '',
       duracionMin: null,
@@ -14826,6 +14877,11 @@ function dayKey(date) {
 function formatHHMM(iso) {
   const d = new Date(iso);
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+// Hora de un evento del calendario, o "Todo el día" si es de día completo.
+function horaEventoCal(e) {
+  return e?.allDay ? 'Todo el día' : formatHHMM(e.fecha);
 }
 
 function formatLargeDate(d) {
@@ -15586,9 +15642,14 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
   const gridCols = `var(--cal-hour-col-w, 60px) repeat(${ndays}, minmax(var(--cal-day-min-w, 0px), 1fr))`;
 
   // Eventos por día (solo en rango de horas mostrado)
+  // Los de día completo van en una fila propia arriba de la grilla (sin franja horaria).
   const eventsByDay = days.map(d =>
-    events.filter(e => isSameDay(new Date(e.fecha), d))
+    events.filter(e => !e.allDay && isSameDay(new Date(e.fecha), d))
   );
+  const allDayByDay = days.map(d =>
+    events.filter(e => e.allDay && isSameDay(new Date(e.fecha), d))
+  );
+  const hayAllDay = allDayByDay.some(arr => arr.length > 0);
 
   const now = new Date();
 
@@ -15812,6 +15873,31 @@ function WeekCalendar({ anchorDate, events, settings, onSelectEvent, onSlotClick
               <span className="num">{d.getDate()}</span>
             </div>
           ))}
+          {hayAllDay && (
+            <>
+              <div className="cal-allday-corner">Todo el día</div>
+              {days.map((d, dIdx) => (
+                <div key={'ad' + d.toISOString()} className="cal-allday-cell">
+                  {allDayByDay[dIdx].map(e => {
+                    const cfg = colorCalendarEvento(e, eventColors, ctxCalendarColors);
+                    const evKey = buildEventKey(e);
+                    return (
+                      <div key={e.id} className="cal-allday-event"
+                        style={{ background: cfg.bg, borderLeftColor: cfg.border, color: cfg.color }}
+                        title={`Todo el día · ${e.label}${e.observacion ? ' — ' + e.observacion : ''}${e.gcalCalendarName ? ' (' + e.gcalCalendarName + ')' : ''}`}
+                        onClick={() => onSelectEvent && onSelectEvent(e)}
+                        onContextMenu={evKey ? ((ev) => {
+                          ev.preventDefault(); ev.stopPropagation();
+                          setPicker({ x: ev.clientX, y: ev.clientY, eventKey: evKey, currentColor: eventColors[evKey] || null });
+                        }) : undefined}>
+                        {e.label} <ActorStar item={e} />
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </>
+          )}
         </div>
         <div ref={bodyRef} className="cal-week-body" style={{gridTemplateColumns: gridCols}} onScroll={onBodyHScroll}>
           <div className="cal-hours-col">
@@ -16002,7 +16088,7 @@ function CalDayCell({ date, outOfMonth, events, isSelected, onClick, onSelectEve
             onClick={(ev) => { ev.stopPropagation(); onSelectEvent(e); }}
             onContextMenu={onCtxMenu}
           >
-            <span className="cal-event-time">{formatHHMM(e.fecha)}</span>
+            <span className="cal-event-time">{horaEventoCal(e)}</span>
             {e.label}
             <ActorStar item={e} />
           </div>
@@ -16057,7 +16143,7 @@ function DayDetails({ date, events, onClose, onSelectEvent }) {
                 onClick={() => onSelectEvent(e)}
                 onContextMenu={onCtxMenu}
               >
-                <span className="day-event-time">{formatHHMM(e.fecha)}</span>
+                <span className="day-event-time">{horaEventoCal(e)}</span>
                 <span className="chip" style={{ color: cfg.color, background: cfg.bg }}>
                   {tipoLabel}
                 </span>
@@ -19783,7 +19869,7 @@ function OrphanEventModal({ event, onCancel, onDelete }) {
 
   const fecha = event?.fecha ? new Date(event.fecha) : null;
   const fechaTxt = fecha
-    ? `${formatFechaCorta(fecha.toISOString().slice(0,10))} ${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}`
+    ? `${formatFechaCorta(dayKey(fecha))} ${event?.allDay ? 'Todo el día' : `${pad2(fecha.getHours())}:${pad2(fecha.getMinutes())}`}`
     : '';
   const titulo = event?.googleEvent?.summary || event?.label || '(sin título)';
   const motivo = event?.tareaId
@@ -20331,8 +20417,10 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete, inviteM
   //   - modo piloto: { googleEvent: <calendar.event> } — la fuente es Google.
   //   - non-piloto: { id, fecha, nota } — la fuente es abordaje_agendados.
   const isGoogle = !!agenda.googleEvent;
+  // Evento de Google de día completo: se edita sin hora y se guarda como día completo.
+  const esDiaCompleto = isGoogle && gcalEsDiaCompleto(agenda.googleEvent);
   const initialDate = isGoogle
-    ? new Date(agenda.googleEvent.start?.dateTime || agenda.googleEvent.start?.date)
+    ? new Date(gcalInicioLocalIso(agenda.googleEvent))
     : new Date(agenda.fecha);
   const initialNota = isGoogle
     ? [agenda.googleEvent.summary || '', agenda.googleEvent.description || ''].filter(Boolean).join('\n\n')
@@ -20360,13 +20448,20 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete, inviteM
     setErr('');
     if (!titulo.trim()) { setErr('Falta el título.'); return; }
     const [y, m, d] = fecha.split('-').map(Number);
-    const [hh, mm] = hora.split(':').map(Number);
+    const [hh, mm] = esDiaCompleto ? [0, 0] : hora.split(':').map(Number);
     if (!y || !m || !d || isNaN(hh) || isNaN(mm)) { setErr('Fecha u hora inválida.'); return; }
     const local = new Date(y, m - 1, d, hh, mm, 0);
     const nota = titulo.trim() + (observacion.trim() ? `\n\n${observacion.trim()}` : '');
     if (saving) return;
     setSaving(true);
-    Promise.resolve(onSave({ fecha: local.toISOString(), nota })).finally(() => setSaving(false));
+    const patch = { fecha: local.toISOString(), nota };
+    if (esDiaCompleto) {
+      // Conserva la cantidad de días del evento original (ej. vacaciones de 3 días).
+      const ini = new Date(gcalInicioLocalIso(agenda.googleEvent));
+      const fin = new Date(gcalFinLocalIso(agenda.googleEvent) || gcalInicioLocalIso(agenda.googleEvent));
+      patch.diaCompleto = { dia: fecha, dias: Math.max(1, Math.round((fin - ini) / 86400000)) };
+    }
+    Promise.resolve(onSave(patch)).finally(() => setSaving(false));
   };
 
   return (
@@ -20391,8 +20486,10 @@ function EditAgendaModal({ agenda, readOnly, onCancel, onSave, onDelete, inviteM
             </div>
             <div className="field">
               <label>Hora</label>
-              <input type="time" value={hora} readOnly={readOnly}
-                onChange={e => setHora(e.target.value)} />
+              {esDiaCompleto
+                ? <input type="text" value="Todo el día" readOnly disabled />
+                : <input type="time" value={hora} readOnly={readOnly}
+                    onChange={e => setHora(e.target.value)} />}
             </div>
           </div>
           <div className="field">

@@ -7,7 +7,8 @@
 //     extendedProperties.private.abordaje_tarea_id) actualiza ese evento, no crea otro.
 //  2. Id de evento derivado de la tarjeta ("abt" + uuid sin guiones): si dos pedidos
 //     crean a la vez, el segundo recibe 409 de Google y reutiliza el existente.
-//  3. El tipo de la tarjeta manda: recordatorio (lila, colorId 1) o reunión (color del
+//  3. Tarjeta con fecha y sin hora → evento de día completo (antes: 09:00 a 10:00).
+//  4. El tipo de la tarjeta manda: recordatorio (lila, colorId 1) o reunión (color del
 //     calendario, con Meet e invitados si la tarjeta lo pide). Duración = duracion_min.
 //
 // Las funciones puras (sin red) se exportan para los tests (tarea_evento_test.ts).
@@ -21,6 +22,9 @@ export interface TareaEvento {
   con_meet: boolean;
   invitados: string[];
   duracion_min: number;
+  // Fecha y hora de la tarjeta. Sin hora → evento de día completo (no 09:00 a 10:00).
+  fecha_recordatorio?: string | null;
+  hora_recordatorio?: string | null;
 }
 
 // Id de Google válido: solo a-v y 0-9, entre 5 y 1024 caracteres. El uuid en hex ya cumple.
@@ -46,6 +50,22 @@ function sumarMinutos(dateTime: string, min: number): string | null {
   return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}${m[7] || ""}`;
 }
 
+// "2026-11-12" → "2026-11-13" (fin exclusivo de un evento de día completo).
+export function diaSiguiente(dia: string): string | null {
+  const m = String(dia).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + 1));
+  return d.toISOString().slice(0, 10);
+}
+
+// Día de la tarjeta si no tiene hora (evento de día completo); null si tiene hora o no
+// tiene fecha válida.
+export function diaCompletoDe(tarea: TareaEvento): string | null {
+  const f = String(tarea.fecha_recordatorio || "").slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f)) return null;
+  return tarea.hora_recordatorio ? null : f;
+}
+
 // Aplica la tarjeta al cuerpo del evento. `crear` distingue alta de actualización (el color
 // por defecto solo se pone al crear: si el usuario después lo cambia en Google, se respeta).
 // `previo` = el evento que ya existe en Google (solo al actualizar): de ahí se conservan el
@@ -53,9 +73,22 @@ function sumarMinutos(dateTime: string, min: number): string | null {
 export function aplicarTarea(event: any, tarea: TareaEvento, crear: boolean, previo: any = null): any {
   const ev = { ...event };
   const dur = Math.min(1440, Math.max(5, Number(tarea.duracion_min) || 60));
-  if (ev.start?.dateTime) {
-    const fin = sumarMinutos(ev.start.dateTime, dur);
-    if (fin) ev.end = { ...(ev.end || {}), dateTime: fin, timeZone: ev.start.timeZone || ev.end?.timeZone };
+  const dia = ev.start ? diaCompletoDe(tarea) : null;
+  const fin = dia ? diaSiguiente(dia) : null;
+  if (dia && fin) {
+    // Tarjeta sin hora → día completo, aunque el cliente mande una hora por defecto.
+    // En un PATCH Google mezcla start/end con lo que ya tiene: hay que anular dateTime
+    // explícitamente o queda {date, dateTime} y lo rechaza. En el alta no hace falta.
+    ev.start = crear ? { date: dia } : { date: dia, dateTime: null };
+    ev.end = crear ? { date: fin } : { date: fin, dateTime: null };
+  } else if (ev.start?.dateTime) {
+    const finHora = sumarMinutos(ev.start.dateTime, dur);
+    if (finHora) ev.end = { ...(ev.end || {}), dateTime: finHora, timeZone: ev.start.timeZone || ev.end?.timeZone };
+    // Si el evento era de día completo y ahora tiene hora, anular el date que ya tiene.
+    if (!crear) {
+      ev.start = { ...ev.start, date: null };
+      if (ev.end) ev.end = { ...ev.end, date: null };
+    }
   }
   if (tarea.tipo_evento === "reunion") {
     const invitados = (tarea.invitados || []).map((x) => String(x).trim().toLowerCase()).filter((x) => EMAIL.test(x));
@@ -90,7 +123,7 @@ export async function cargarTarea(supabase: any, event: any, agenteId: string): 
   const id = tareaIdDelEvento(event);
   if (!id) return null;
   const { data } = await supabase.from("abordaje_tareas")
-    .select("id, agente_id, tipo_evento, con_meet, invitados, duracion_min")
+    .select("id, agente_id, tipo_evento, con_meet, invitados, duracion_min, fecha_recordatorio, hora_recordatorio")
     .eq("id", id).maybeSingle();
   if (!data || data.agente_id !== agenteId) return null;
   return data as TareaEvento;

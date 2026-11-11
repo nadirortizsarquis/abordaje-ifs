@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { aplicarTarea, COLOR_RECORDATORIO, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { aplicarTarea, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -47,6 +47,23 @@ const r3 = aplicarTarea(EV, reu, false, previo);
 check(r3.conferenceData === undefined, "reunión con Meet: no pide otro (no cambia el link)");
 check(r3.attendees.map((a: any) => a.email).join() === "otro@x.com,cliente@mail.com", "suma invitados sin sacar los que ya estaban");
 check(aplicarTarea(EV, T({ tipo_evento: "reunion" }), false, previo).attendees === undefined, "sin invitados en la tarjeta: no toca los del evento");
+
+// día completo (tarjeta con fecha y sin hora)
+const SH = T({ fecha_recordatorio: "2026-11-12", hora_recordatorio: null });
+const d1 = aplicarTarea(EV, SH, true);
+check(d1.start.date === "2026-11-12" && d1.start.dateTime === undefined, "sin hora: alta de día completo (sin dateTime)");
+check(d1.end.date === "2026-11-13" && d1.end.dateTime === undefined, "sin hora: fin = día siguiente");
+check(d1.colorId === COLOR_RECORDATORIO, "sin hora: sigue siendo lila");
+const d2 = aplicarTarea(EV, SH, false);
+check(d2.start.date === "2026-11-12" && d2.start.dateTime === null && d2.end.dateTime === null, "sin hora al actualizar: dateTime en null explícito");
+check(diaSiguiente("2026-12-31") === "2027-01-01" && diaSiguiente("2028-02-28") === "2028-02-29", "día siguiente cruza año y bisiesto");
+const CH = T({ fecha_recordatorio: "2026-11-12", hora_recordatorio: "18:00" });
+const d3 = aplicarTarea(EV, CH, false);
+check(d3.start.dateTime === "2026-11-12T18:00:00" && d3.start.date === null && d3.end.date === null, "con hora al actualizar: date en null (de día completo a horario)");
+const d4 = aplicarTarea(EV, CH, true);
+check(d4.start.date === undefined && d4.end.dateTime === "2026-11-12T19:00:00", "con hora al crear: igual que antes");
+check(aplicarTarea({ summary: "solo título" }, SH, false).start === undefined, "update sin start: no toca fechas");
+check(aplicarTarea(EV, T(), false).start.date === null, "tarjeta vieja sin fecha cargada: evento con hora");
 
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);
 if (mal) Deno.exit(1);

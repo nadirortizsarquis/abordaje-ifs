@@ -528,6 +528,32 @@ test('calpagoDerivePagos: mensual da 12 cuotas y anual 1 en la ventana de 12m', 
   assert.equal(g('calpagoDerivePagos')(rd, 1, hoy, hoyMas12, null, null).length, 12);
   assert.equal(g('calpagoDerivePagos')(rd, 12, hoy, hoyMas12, null, null).length, 1);
 });
+// ── Calendario: eventos de día completo de Google (brief calendar-apps, punto 1) ──
+test('día completo de Google cae en su día (no el anterior a las 21:00)', () => {
+  const evs = g('extractGcalEventsForCalendar')([
+    { id: 'cumple', summary: 'Cumple', start: { date: '2026-11-12' }, end: { date: '2026-11-13' } },
+    { id: 'reu', summary: 'Reunión', start: { dateTime: '2026-11-12T10:00:00-03:00' }, end: { dateTime: '2026-11-12T11:00:00-03:00' } },
+  ], [], []);
+  const cumple = evs.find(e => e.id === 'cumple');
+  const d = new Date(cumple.fecha);
+  assert.equal(cumple.allDay, true);
+  assert.equal(d.getDate(), 12);
+  assert.equal(d.getHours(), 0);
+  assert.equal(g('horaEventoCal')(cumple), 'Todo el día');
+  assert.equal(evs.find(e => e.id === 'reu').allDay, false);
+  assert.equal(evs[0].id, 'cumple');  // arriba del día
+});
+test('tarea local sin hora = día completo; con hora = horario', () => {
+  const evs = g('extractCalendarEvents')([], { items: [
+    { id: 't1', titulo: 'Sin hora', fechaRecordatorio: '2026-11-12', horaRecordatorio: null },
+    { id: 't2', titulo: 'Con hora', fechaRecordatorio: '2026-11-12', horaRecordatorio: '15:30' },
+  ] }, []);
+  assert.equal(evs.find(e => e.id === 't1_tarea').allDay, true);
+  assert.equal(new Date(evs.find(e => e.id === 't1_tarea').fecha).getDate(), 12);
+  assert.equal(evs.find(e => e.id === 't2_tarea').allDay, false);
+  assert.equal(g('horaEventoCal')(evs.find(e => e.id === 't2_tarea')), '15:30');
+});
+
 
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
