@@ -198,11 +198,33 @@ for (const f of ["../gcal-events/index.ts", "../gcal-events-admin/index.ts", "./
   try { src = await Deno.readTextFile(new URL(f, import.meta.url)); } catch { continue; } // la copia de este repo no la tiene
   const lines = src.split("\n");
   const malas = lines.map((l, i) => [l, i] as const).filter(([l, i]) => {
-    if (!/method:\s*"(POST|PATCH|PUT)"\s*[,}]/.test(l)) return false;
+    // Cualquier "method:" (comillas simples/dobles, variable) salvo GET y la firma de tipos.
+    if (!/method\s*:/.test(l) || /method\s*:\s*["'](GET|DELETE)["']/.test(l) || /"POST"\s*\|\s*"PATCH"/.test(l)) return false;
     const ctx = lines.slice(Math.max(0, i - 3), i + 1).join("\n");
     return !/oauth2\.googleapis\.com\/token|\/move\?/.test(ctx); // token y move no llevan descripción
   });
   check(malas.length === 0, `sin escrituras a Google fuera de escribirEvento en ${f}${malas.length ? " (líneas " + malas.map(([, i]) => i + 1).join(",") + ")" : ""}`);
+}
+
+// Review 2 del PR #9
+{
+  // Copia vieja del código escribió el título real y una nota sin formato de bitácora: como
+  // son textos de la tarjeta, no cuentan como manuales y se neutralizan.
+  const pisado = { summary: "Juan Perez - hipertension", description: "le ofrezco 15% de descuento", ...PRIV("otro titulo", "otra desc") };
+  const bp = blindarCuerpo({}, true, true, pisado, ["Juan Perez - hipertension", "[11/11/26 10:00] le ofrezco 15% de descuento"]);
+  check(bp.summary === TITULO_NEUTRO && bp.description === DESCRIPCION_NEUTRA, "texto de la tarjeta escrito por código viejo: no es manual, se neutraliza");
+  check(huella("  Juan   Perez ") === huella("Juan Perez"), "la huella ignora espacios que Google recorta");
+  // Evento que dice ser de una tarjeta, aunque la tarjeta no se haya cargado: se blinda igual.
+  const { f, enviados } = fakeFetch(null);
+  await escribirEvento("https://x/events", "POST", {}, { summary: "Juan", description: BIT, attendees: [{ email: "cliente@mail.com" }], extendedProperties: { private: { abordaje_tarea_id: "c229c046-9038-4058-adb2-8b6b2659135a" } } }, null, ctxT, f, false);
+  check(enviados[0].description === DESCRIPCION_NEUTRA && enviados[0].summary === TITULO_NEUTRO, "evento con abordaje_tarea_id sin tarjeta cargada: igual se blinda");
+  // Agenda suelta con propiedades de Abordaje: no se toca y no se lee el evento.
+  let gets = 0;
+  const f2 = (async (_u: string, init?: any) => { if (!init?.method) gets++; return new Response("{}", { status: 200 }); }) as unknown as typeof fetch;
+  await escribirEvento("https://x/events/abc", "PATCH", {}, { description: "nota", extendedProperties: { private: { abordaje_agente_id: "a" } } }, undefined, ctxT, f2, false);
+  check(gets === 0, "agenda suelta: no se lee el evento antes de escribir");
+  // Sacar un invitado también es un cambio para los invitados (le llega la cancelación).
+  check(cambiaParaInvitados({ attendees: [] }, { attendees: [{ email: "c@x.com" }] }), "baja de invitado → se avisa");
 }
 
 // Los textos fijos del servidor tienen que estar en la lista que la app oculta (si cambian acá

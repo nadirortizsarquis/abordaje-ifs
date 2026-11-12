@@ -237,14 +237,26 @@ Deno.serve(async (req: Request) => {
       if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
       const ev = await gr.json();
       // Solo eventos de una tarjeta de este agente: nunca eventos personales ni agendas sueltas.
+      // Solo eventos de una tarjeta o de un prospecto de este agente: nunca eventos personales
+      // ni agendas sueltas.
       const tareaB = await cargarTarea(supabase, ev, targetUserId);
-      if (!tareaB) return jsonResponse({ ok: true, existe: true, externos: false, corregido: false, skip: "no es evento de tarjeta" });
+      let textos: string[] = tareaB ? [tareaB.titulo || "", tareaB.observacion || ""] : [];
+      if (!tareaB) {
+        const pid = ev?.extendedProperties?.private?.abordaje_prospect_id;
+        const { data: pro } = pid && /^[0-9a-f-]{36}$/i.test(String(pid))
+          ? await supabase.from("abordaje_prospectos").select("id, agente_id, nombre").eq("id", pid).maybeSingle()
+          : { data: null };
+        if (!pro || pro.agente_id !== targetUserId) {
+          return jsonResponse({ ok: true, existe: true, externos: false, corregido: false, skip: "no es evento de tarjeta ni de prospecto" });
+        }
+        textos = [pro.nombre || ""];
+      }
       const externos = hayExternos(null, ev, await ctx.internos());
-      const cuerpo = blindarCuerpo({}, externos, true, ev); // (b): nunca notas, con o sin externos
+      const cuerpo = blindarCuerpo({}, externos, true, ev, textos); // (b): nunca notas, con o sin externos
       const cambia = ((cuerpo.description !== undefined && cuerpo.description !== ev.description)
         || (cuerpo.summary !== undefined && cuerpo.summary !== ev.summary));
       if (!cambia) return jsonResponse({ ok: true, existe: true, externos, corregido: false });
-      const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, {}, ev, ctx);
+      const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, {}, ev, { ...ctx, textos });
       if (!r.ok) throw new Error(`blindar failed: ${r.status} ${await r.text()}`);
       console.warn(`blindaje: título/descripción neutralizados en evento ${eid}${externos ? " (invitados externos)" : ""}`);
       return jsonResponse({ ok: true, existe: true, externos, corregido: true });

@@ -25,6 +25,10 @@ export interface TareaEvento {
   // Fecha y hora de la tarjeta. Sin hora → evento de día completo (no 09:00 a 10:00).
   fecha_recordatorio?: string | null;
   hora_recordatorio?: string | null;
+  // Textos internos de la tarjeta: sirven para reconocerlos si aparecen en Google (nunca
+  // se los considera "escritos a mano").
+  titulo?: string | null;
+  observacion?: string | null;
 }
 
 // Id de Google válido: solo a-v y 0-9, entre 5 y 1024 caracteres. El uuid en hex ya cumple.
@@ -145,10 +149,30 @@ const HUELLA = { summary: "abordaje_sum_h", description: "abordaje_desc_h" } as 
 export const DOMINIOS_INTERNOS = ["ifs-broker.com"];
 
 // Huella corta (no es criptográfica: solo detecta si el texto cambió).
+// Se normalizan espacios: si Google recorta o colapsa espacios, la huella no cambia.
+const normTxt = (t: string) => String(t || "").trim().replace(/\s+/g, " ");
 export function huella(txt: string): string {
+  const t = normTxt(txt);
   let h = 5381;
-  for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
   return h.toString(36);
+}
+
+// ¿El texto es (o contiene) un texto interno de la tarjeta? Título igual, o descripción que
+// incluye alguna línea de la bitácora (o es parte de ella).
+export function esTextoInterno(v: string, internos: string[] = []): boolean {
+  const t = normTxt(v);
+  if (!t) return false;
+  for (const x of internos) {
+    const n = normTxt(x || "");
+    if (!n) continue;
+    if (t === n || (t.length >= 12 && n.includes(t))) return true;
+    for (const linea of String(x).split(/\n+/)) {
+      const l = normTxt(linea);
+      if (l.length >= 12 && t.includes(l)) return true;
+    }
+  }
+  return false;
 }
 
 // Formato de la bitácora de Abordaje: "[DD/MM/AA HH:MM] texto".
@@ -156,10 +180,11 @@ const BITACORA = /\[\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}\]/;
 
 // ¿Ese campo del evento lo escribió alguien a mano en Google? Fail-closed: sin huella, con
 // texto fijo o con formato de bitácora (ej. lo escribió una copia vieja del código) → no.
-export function esManual(previo: any, campo: "summary" | "description"): boolean {
+export function esManual(previo: any, campo: "summary" | "description", internos: string[] = []): boolean {
   const v = previo?.[campo];
-  if (!v || TEXTOS_FIJOS.includes(v)) return false;
+  if (!v || TEXTOS_FIJOS.includes(normTxt(v))) return false;
   if (campo === "description" && BITACORA.test(String(v))) return false;
+  if (esTextoInterno(String(v), internos)) return false; // es la tarjeta, no algo escrito a mano
   const h = previo?.extendedProperties?.private?.[HUELLA[campo]];
   return !!h && huella(String(v)) !== h;
 }
@@ -196,14 +221,16 @@ export function hayExternos(event: any, previo: any, internos: Set<string>): boo
 // (deAbordaje=true); el resto vuelve tal cual. La huella se escribe SOLO para lo que
 // Abordaje manda en este cuerpo: lo que queda de antes (manual o no enviado) conserva su
 // huella anterior, así una edición manual sigue siéndolo en las escrituras siguientes.
-export function blindarCuerpo(event: any, externos: boolean, deAbordaje = true, previo: any = null): any {
+export function blindarCuerpo(event: any, externos: boolean, deAbordaje = true, previo: any = null, internos: string[] = []): any {
   const ev = { ...(event || {}) };
   if (!deAbordaje) return ev;
-  if (esManual(previo, "description")) delete ev.description;
+  // Lo que manda el propio cliente también es texto interno (título/nota de la tarjeta).
+  const textos = [...internos, ev.summary, ev.description].filter((x) => typeof x === "string" && x) as string[];
+  if (esManual(previo, "description", textos)) delete ev.description;
   else ev.description = externos ? DESCRIPCION_NEUTRA : DESCRIPCION_SIN_NOTAS;
   if (externos) {
-    if (esManual(previo, "summary")) delete ev.summary; else ev.summary = TITULO_NEUTRO;
-  } else if ("summary" in ev && esManual(previo, "summary")) {
+    if (esManual(previo, "summary", textos)) delete ev.summary; else ev.summary = TITULO_NEUTRO;
+  } else if ("summary" in ev && esManual(previo, "summary", textos)) {
     delete ev.summary; // título editado a mano en Google: se respeta
   }
   const priv: Record<string, string> = { ...(previo?.extendedProperties?.private || {}), ...(ev.extendedProperties?.private || {}) };
@@ -244,7 +271,11 @@ export function internosPerezosos(supabase: any): () => Promise<Set<string>> {
   };
 }
 
-export interface CtxEscritura { internos: () => Promise<Set<string>> }
+export interface CtxEscritura {
+  internos: () => Promise<Set<string>>;
+  // Título y bitácora de la tarjeta que se está escribiendo (para reconocerlos en Google).
+  textos?: string[];
+}
 
 // ÚNICO punto de escritura de eventos a Google (POST/PATCH). Ningún otro código debe
 // hacer fetch con POST/PATCH a /events (lo verifica tarea_evento_test.ts).
@@ -259,6 +290,13 @@ export async function escribirEvento(
   if (claves.length === 1 && claves[0] === "status") {
     return await fetcher(url, { method, headers, body: JSON.stringify(event) });
   }
+  const privBody = event?.extendedProperties?.private;
+  const idsAbordaje = (p: any) => !!(p?.abordaje_tarea_id || p?.abordaje_prospect_id);
+  // Evento genérico cuyo cuerpo trae propiedades de Abordaje sin tarjeta ni prospecto (agenda
+  // suelta): no se blinda, no hace falta leerlo.
+  if (!tarjeta && privBody && !idsAbordaje(privBody)) {
+    return await fetcher(url, { method, headers, body: JSON.stringify(event) });
+  }
   let actual = previo;
   let externos = false;
   if (actual === undefined) {
@@ -267,14 +305,15 @@ export async function escribirEvento(
     if (g.ok) actual = await g.json();
     else if (g.status !== 404 && g.status !== 410) externos = true; // no se pudo leer → fail-closed
   }
-  const dePro = !!(event?.extendedProperties?.private?.abordaje_prospect_id || actual?.extendedProperties?.private?.abordaje_prospect_id);
-  const deAbordaje = tarjeta || dePro;
+  // De Abordaje = tarjeta, o el evento dice ser de una tarjeta o de un prospecto (aunque la
+  // tarjeta no se haya podido cargar: ajena, borrada): mismo trato.
+  const deAbordaje = tarjeta || idsAbordaje(privBody) || idsAbordaje(actual?.extendedProperties?.private);
   if (deAbordaje && !externos) {
     if (event?.attendeesOmitted || actual?.attendeesOmitted) externos = true;
     else if (emailsInvitados(event, actual).length) externos = hayExternos(event, actual, await ctx.internos());
   }
   if (deAbordaje && externos) console.warn(`blindaje: evento con invitados externos, título y descripción neutros (${method})`);
-  const cuerpo = blindarCuerpo(event, externos, deAbordaje, actual);
+  const cuerpo = blindarCuerpo(event, externos, deAbordaje, actual, ctx.textos || []);
   // Mail a invitados solo si cambia algo que les importa (se decide sobre el cuerpo final).
   let destino = url;
   if (actual && /[?&]sendUpdates=all/.test(url) && !cambiaParaInvitados(cuerpo, actual)) destino = url.replace(/sendUpdates=all/, "sendUpdates=none");
@@ -314,8 +353,12 @@ export function cambiaParaInvitados(body: any, previo: any): boolean {
   if (body?.end && !mismoMomento(body.end, previo.end)) return true;
   if (body?.summary !== undefined && body.summary !== previo.summary) return true;
   if (body?.location !== undefined && (body.location || "") !== (previo.location || "")) return true;
-  const ya = new Set(emailsInvitados(previo));
-  return emailsInvitados(body).some((e) => !ya.has(e));
+  if (Array.isArray(body?.attendees)) {
+    const ya = new Set(emailsInvitados(previo));
+    const nuevos = new Set(emailsInvitados(body));
+    if ([...nuevos].some((e) => !ya.has(e)) || [...ya].some((e) => !nuevos.has(e))) return true; // alta o baja
+  }
+  return false;
 }
 
 // ── Con red ────────────────────────────────────────────────────────────────────
@@ -326,7 +369,7 @@ export async function cargarTarea(supabase: any, event: any, agenteId: string): 
   const id = tareaIdDelEvento(event);
   if (!id) return null;
   const { data } = await supabase.from("abordaje_tareas")
-    .select("id, agente_id, tipo_evento, con_meet, invitados, duracion_min, fecha_recordatorio, hora_recordatorio")
+    .select("id, agente_id, tipo_evento, con_meet, invitados, duracion_min, fecha_recordatorio, hora_recordatorio, titulo, observacion")
     .eq("id", id).maybeSingle();
   if (!data || data.agente_id !== agenteId) return null;
   return data as TareaEvento;
@@ -407,7 +450,7 @@ function urlCon(url: string, params: Record<string, string>): string {
 }
 
 async function patchEvento(base: string, headers: Record<string, string>, eventId: string, event: any, tarea: TareaEvento | null, previo: any, ctx: CtxEscritura) {
-  const r = await escribirEvento(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "PATCH", headers, event, previo ?? undefined, ctx);
+  const r = await escribirEvento(urlCon(`${base}/${encodeURIComponent(eventId)}`, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "PATCH", headers, event, previo, { ...ctx, textos: [tarea?.titulo || "", tarea?.observacion || ""] });
   if (!r.ok) {
     const err: any = new Error(`update failed: ${r.status} ${await r.text()}`);
     err.status = r.status;
@@ -449,7 +492,7 @@ export async function crearEventoTarea(
 
   // 2. Alta con id derivado de la tarjeta (anti-carrera).
   const idFijo = idEventoDeTarea(tarea.id);
-  const alta = (cuerpoAlta: any) => escribirEvento(urlCon(base, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "POST", headers, cuerpoAlta, null, ctx);
+  const alta = (cuerpoAlta: any) => escribirEvento(urlCon(base, { conferenceDataVersion: "1", sendUpdates: sendUpdatesPara(tarea) }), "POST", headers, cuerpoAlta, null, { ...ctx, textos: [tarea.titulo || "", tarea.observacion || ""] });
   let r = await alta(idFijo ? { ...cuerpo, id: idFijo } : cuerpo);
   if (r.status === 409 && idFijo) {
     // Ya existe un evento con ese id: si está vivo, lo creó otro pedido en paralelo → se
@@ -473,7 +516,8 @@ export async function actualizarEventoTarea(
   // y para saber si tiene invitados externos (blindaje), aunque la tarjeta sea recordatorio.
   const leer = async () => {
     const gr = await fetch(`${base}/${encodeURIComponent(eventId)}`, { headers });
-    return gr.ok ? await gr.json() : undefined; // undefined: escribirEvento relee o asume externos
+    if (gr.ok) return await gr.json();
+    return gr.status === 404 || gr.status === 410 ? null : undefined; // undefined: escribirEvento relee o asume externos
   };
   let previo: any = await leer();
   try {
