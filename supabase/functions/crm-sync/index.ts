@@ -31,6 +31,13 @@
 //   status                     -> conteo de ítems del cliente pendientes de volcar
 //   sync                       -> vuelca el delta del cliente a la bitácora del CRM
 //
+// Notas agregadas después de un sync (nov 2026): cada ítem guarda en
+// crm_synced_blocks las notas (bloques "[dd/mm/aa hh:mm] ...") que ya llegaron
+// al CRM. El próximo sync manda SOLO las notas nuevas o corregidas (delta.ts)
+// como "actualización". Ítems con crm_synced_blocks NULL no se re-envían.
+// Pendiente conocido: si se re-vincula a OTRO cliente, las notas nuevas de lo ya
+// enviado van al cliente actual (sin el contexto que quedó en el anterior).
+//
 // Seguridad: JWT del caller. Asistentes fuera (403). El ancla tiene que ser del
 // propio asesor (agente_id == caller) salvo admin. advisor_email = SIEMPRE el
 // email del asesor DUEÑO del ítem (si un admin opera sobre un ítem ajeno, la
@@ -40,6 +47,8 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } from "./ownership.ts";
+import { type Nota, type NotesDelta, noteKeys, notesDelta, parseNote, parseNotes } from "./delta.ts";
+import { buildDescription, buildPayload, type ItemEnvio } from "./format.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -181,63 +190,6 @@ function crmClient() {
   };
 }
 
-// ── Armado del texto de bitácora (agrupado por origen, cronológico) ──────────
-function buildBitacora(
-  contactos: any[], agendados: any[], tareas: any[], colName: Map<string, string>,
-): string {
-  const blocks: string[] = [];
-
-  if (contactos.length) {
-    const lines = contactos
-      .slice()
-      .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
-      .map((c) => {
-        const fecha = fmtDate(c.fecha) || fmtDate(c.created_at);
-        const hora = fmtTime(c.hora);
-        const cuando = [fecha, hora].filter(Boolean).join(" ");
-        const tipo = TIPO_LABELS[c.tipo] || (c.tipo || "Contacto");
-        const obs = quote(c.observacion);
-        return `- ${cuando} — ${tipo}.${obs}`;
-      });
-    blocks.push("[Abordaje · Contactos]\n" + lines.join("\n"));
-  }
-
-  if (agendados.length) {
-    const lines = agendados
-      .slice()
-      .sort((a, b) => (a.fecha || "").localeCompare(b.fecha || ""))
-      .map((a) => `- ${fmtTs(a.fecha)} —${quote(a.nota) || " (sin nota)"}`);
-    blocks.push("[Abordaje · Agenda]\n" + lines.join("\n"));
-  }
-
-  if (tareas.length) {
-    const lines = tareas
-      .slice()
-      .sort((a, b) => (a.created_at || "").localeCompare(b.created_at || ""))
-      .map((t) => {
-        const col = colName.get(t.columna_id) || "";
-        const cia = COMPANIA_LABELS[t.compania] || t.compania || "";
-        const meta = [
-          col ? `columna: ${col}` : "",
-          cia ? `compañía: ${cia}` : "",
-        ].filter(Boolean).join(" · ");
-        const head = `- Tarea${quote(t.titulo) || " (sin título)"}${meta ? ` (${meta})` : ""}`;
-        const sub: string[] = [];
-        const creada = fmtDate(t.created_at);
-        const rec = t.fecha_recordatorio
-          ? `recordatorio ${fmtDate(t.fecha_recordatorio)}${t.hora_recordatorio ? " " + fmtTime(t.hora_recordatorio) : ""}`
-          : "";
-        const linea2 = [creada ? `creada ${creada}` : "", rec].filter(Boolean).join(" · ");
-        if (linea2) sub.push(`    ${linea2}`);
-        if ((t.observacion || "").trim()) sub.push(`    Nota:${quote(t.observacion)}`);
-        return [head, ...sub].join("\n");
-      });
-    blocks.push("[Abordaje · Tareas]\n" + lines.join("\n"));
-  }
-
-  return blocks.join("\n\n");
-}
-
 // ── Resolución del ancla ─────────────────────────────────────────────────────
 // Devuelve el prospecto (si hay), el cliente CRM efectivo, la fila donde se
 // escribe/lee el vínculo (linkTarget) y datos de identidad para prefill/lookup.
@@ -307,40 +259,273 @@ async function resolveAnchor(
   throw new HttpError(400, `anchor_type inválido: ${type}`);
 }
 
-// ── Junta todos los ítems de gestión (pendientes) que apuntan a un cliente ───
-async function gatherByClient(supabase: any, clientId: number, agenteId: string) {
-  const { data: prosp } = await supabase.from("abordaje_prospectos")
-    .select("id").eq("crm_client_id", clientId).eq("agente_id", agenteId);
-  const prospIds: string[] = (prosp ?? []).map((r: any) => r.id);
+// ── Qué se manda al CRM (ver format.ts para la forma del texto) ──────────────
+type SyncTable = "abordaje_prospecto_contactos" | "abordaje_agendados" | "abordaje_tareas";
+interface StampItem { t: SyncTable; id: string; keys: string[]; c: number; col: string | null }
 
-  // Contactos: solo cuelgan de un prospecto.
-  let contactos: any[] = [];
-  if (prospIds.length) {
-    const { data } = await supabase.from("abordaje_prospecto_contactos")
-      .select("id, tipo, fecha, hora, observacion, created_at")
-      .in("prospecto_id", prospIds).eq("agente_id", agenteId).is("crm_synced_at", null);
-    contactos = data ?? [];
+const TZ_PARTS = (iso: string) => {
+  const p = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(new Date(iso));
+  const g = (t: string) => p.find((x) => x.type === t)?.value || "";
+  return { fecha: `${g("year")}-${g("month")}-${g("day")}`, hora: `${g("hour")}:${g("minute")}`.replace(/^24/, "00") };
+};
+const hoyYear = () => Number(TZ_PARTS(new Date().toISOString()).fecha.slice(0, 4));
+const dm = (iso: string | null | undefined) => (iso && iso.length >= 10 ? `${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "");
+
+function notaContacto(c: any): Nota {
+  const tipo = TIPO_LABELS[c.tipo] || (c.tipo || "Contacto");
+  const obs = (c.observacion ?? "").trim();
+  const fecha = c.fecha ? String(c.fecha).slice(0, 10) : (c.created_at ? TZ_PARTS(c.created_at).fecha : null);
+  return { raw: "", fecha, hora: c.hora ? fmtTime(c.hora) : null, tipo: null, texto: obs ? `${tipo}: ${obs}` : tipo };
+}
+function notaAgenda(a: any): Nota {
+  const p = a.fecha ? TZ_PARTS(a.fecha) : null;
+  const nota = (a.nota ?? "").trim();
+  return { raw: "", fecha: p?.fecha ?? null, hora: p?.hora ?? null, tipo: null, texto: nota || "(sin nota)" };
+}
+const porFechaDesc = (a: Nota, b: Nota) => `${b.fecha ?? ""}${b.hora ?? ""}`.localeCompare(`${a.fecha ?? ""}${a.hora ?? ""}`);
+
+// Junta lo que hay que volcar de un cliente: lo nunca enviado (o enviado a OTRO
+// cliente: re-vínculo -> se manda completo al nuevo) y las notas nuevas o
+// corregidas de lo ya enviado. Una consulta por tabla, en paralelo; cualquier
+// error corta ANTES de escribir en el CRM.
+//  - Contactos: cuelgan de un prospecto vinculado a este cliente.
+//  - Agendas y tareas: SOLO las sueltas vinculadas directo al cliente (las de un
+//    prospecto vinculado son proyecciones de sus contactos -> no se duplican).
+//  - Tareas archivadas: no se mandan como nuevas, pero sí sus notas posteriores.
+//  - Un cambio de columna sin notas nuevas no dispara envío; viaja con la próxima.
+async function gatherByClient(supabase: any, clientId: number, agenteId: string) {
+  const { data: prosp, error: prospErr } = await supabase.from("abordaje_prospectos")
+    .select("id, nombre").eq("crm_client_id", clientId).eq("agente_id", agenteId);
+  if (prospErr) throw new HttpError(500, `No se pudieron leer los prospectos: ${prospErr.message}`);
+  const prospIds: string[] = (prosp ?? []).map((r: any) => r.id);
+  const nombreProsp = new Map<string, string>((prosp ?? []).map((r: any) => [r.id, r.nombre || ""]));
+
+  const TRACK = "crm_synced_at, crm_synced_blocks, crm_synced_client_id";
+  const none = Promise.resolve({ data: [], error: null });
+  const [rc, ra, rt] = await Promise.all([
+    prospIds.length
+      ? supabase.from("abordaje_prospecto_contactos")
+        .select(`id, prospecto_id, tipo, fecha, hora, observacion, created_at, ${TRACK}`)
+        .in("prospecto_id", prospIds).eq("agente_id", agenteId)
+      : none,
+    supabase.from("abordaje_agendados")
+      .select(`id, prospecto_id, fecha, nota, created_at, ${TRACK}`)
+      .eq("agente_id", agenteId).eq("crm_client_id", clientId),
+    supabase.from("abordaje_tareas")
+      .select(`id, prospecto_id, titulo, observacion, columna_id, compania, fecha_recordatorio, hora_recordatorio, created_at, archivada, crm_synced_columna_id, ${TRACK}`)
+      .eq("agente_id", agenteId).eq("crm_client_id", clientId),
+  ]);
+  for (const r of [rc, ra, rt]) {
+    if (r.error) throw new HttpError(500, `No se pudo leer la gestión del cliente: ${r.error.message}`);
+  }
+  const contactosAll: any[] = rc.data ?? [];
+  const agendadosAll: any[] = soloSueltas(ra.data ?? [], prospIds);
+  const tareasAll: any[] = soloSueltas(rt.data ?? [], prospIds);
+
+  const colIds = [...new Set(tareasAll.flatMap((t) => [t.columna_id, t.crm_synced_columna_id]).filter(Boolean))];
+  const colName = new Map<string, string>();
+  if (colIds.length) {
+    const { data: cols, error } = await supabase.from("abordaje_tareas_columnas").select("id, titulo").in("id", colIds);
+    if (error) throw new HttpError(500, `No se pudieron leer las columnas: ${error.message}`);
+    for (const col of cols ?? []) colName.set(col.id, col.titulo);
   }
 
-  // Agendas y tareas: SOLO las SUELTAS vinculadas directo a un cliente
-  // (crm_client_id). Las que cuelgan de un prospecto son proyecciones del
-  // contacto (que es el registro canónico) -> NO se vuelcan, para no duplicar
-  // la misma gestión en la bitácora del CRM (recordatorios incluidos).
-  const { data: ag } = await supabase.from("abordaje_agendados")
-    .select("id, prospecto_id, fecha, nota, created_at")
-    .eq("agente_id", agenteId).is("crm_synced_at", null)
-    .eq("crm_client_id", clientId);
+  // Pendiente = nunca enviado, o enviado a otro cliente (re-vínculo).
+  const pendiente = (r: any) => !r.crm_synced_at || (r.crm_synced_client_id != null && Number(r.crm_synced_client_id) !== clientId);
+  const yaEnEste = (r: any) => !!r.crm_synced_at && !!r.crm_synced_blocks && !pendiente(r);
 
-  const { data: tr } = await supabase.from("abordaje_tareas")
-    .select("id, prospecto_id, titulo, observacion, columna_id, compania, fecha_recordatorio, hora_recordatorio, created_at")
-    .eq("agente_id", agenteId).eq("archivada", false).is("crm_synced_at", null)
-    .eq("crm_client_id", clientId);
+  const items: ItemEnvio[] = [];
+  const stamps: StampItem[] = [];
+  const cnt = { contactos: 0, agendados: 0, tareas: 0, actualizaciones: 0 };
+  const stamp = (t: SyncTable, id: string, text: string | null, col: string | null = null) =>
+    stamps.push({ t, id, keys: noteKeys(text), c: clientId, col });
 
-  // Una tarea/agenda con crm_client_id (typeahead) que ADEMÁS cuelga de un
-  // prospecto ya vinculado a este cliente es proyección de sus contactos, que ya
-  // se vuelcan arriba -> se excluye para no duplicar en la bitácora.
-  const sueltas = (rows: any[] | null) => soloSueltas(rows ?? [], prospIds);
-  return { contactos, agendados: sueltas(ag), tareas: sueltas(tr), prospIds };
+  // Contactos nuevos: un bloque por prospecto.
+  const porProsp = new Map<string, any[]>();
+  for (const c of contactosAll.filter(pendiente)) {
+    (porProsp.get(c.prospecto_id) ?? porProsp.set(c.prospecto_id, []).get(c.prospecto_id)!).push(c);
+  }
+  for (const [pid, cs] of porProsp) {
+    items.push({ kind: "contactos", actualizacion: false, titulo: nombreProsp.get(pid) || "", notas: cs.map(notaContacto).sort(porFechaDesc) });
+    for (const c of cs) stamp("abordaje_prospecto_contactos", c.id, c.observacion);
+    cnt.contactos += cs.length;
+  }
+  // Agendas nuevas: un bloque.
+  const agNuevas = agendadosAll.filter(pendiente);
+  if (agNuevas.length) {
+    items.push({ kind: "agenda", actualizacion: false, titulo: "", notas: agNuevas.map(notaAgenda).sort(porFechaDesc) });
+    for (const a of agNuevas) stamp("abordaje_agendados", a.id, a.nota);
+    cnt.agendados += agNuevas.length;
+  }
+  // Tareas nuevas: un bloque cada una.
+  const metaTarea = (t: any) => ({
+    columna: colName.get(t.columna_id) || "",
+    compania: COMPANIA_LABELS[t.compania] || t.compania || "",
+    recordatorio: t.fecha_recordatorio ? [dm(String(t.fecha_recordatorio)), t.hora_recordatorio ? fmtTime(t.hora_recordatorio) : ""].filter(Boolean).join(" ") : "",
+  });
+  for (const t of tareasAll.filter((t) => pendiente(t) && !t.archivada)) {
+    items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: parseNotes(t.observacion) });
+    stamp("abordaje_tareas", t.id, t.observacion, t.columna_id ?? null);
+    cnt.tareas++;
+  }
+
+  // Actualizaciones de lo ya enviado a ESTE cliente.
+  const upd = (r: any, text: string | null, mk: (d: NotesDelta) => ItemEnvio, t: SyncTable, col: string | null = null) => {
+    if (!yaEnEste(r)) return;
+    const d = notesDelta(r.crm_synced_blocks, text);
+    if (!d) return;
+    items.push(mk(d));
+    stamp(t, r.id, text, col);
+    cnt.actualizaciones++;
+  };
+  const notas = (d: NotesDelta) => ({ notas: d.nuevas.map(parseNote), corregidas: d.editadas.map(parseNote) });
+  for (const c of contactosAll) {
+    const n = notaContacto({ ...c, observacion: "" });
+    upd(c, c.observacion, (d) => ({ kind: "contacto", actualizacion: true,
+      titulo: `${dm(n.fecha)} ${n.texto} · ${nombreProsp.get(c.prospecto_id) || ""}`.trim(), ...notas(d) }), "abordaje_prospecto_contactos");
+  }
+  for (const a of agendadosAll) {
+    const n = notaAgenda(a);
+    upd(a, a.nota, (d) => ({ kind: "agenda", actualizacion: true, titulo: `${dm(n.fecha)} ${n.hora ?? ""}`.trim(), ...notas(d) }), "abordaje_agendados");
+  }
+  for (const t of tareasAll) {
+    const m = metaTarea(t);
+    const anterior = t.crm_synced_columna_id && t.crm_synced_columna_id !== t.columna_id ? colName.get(t.crm_synced_columna_id) || "" : "";
+    upd(t, t.observacion, (d) => ({ kind: "tarea", actualizacion: true, titulo: t.titulo || "",
+      columna: m.columna, columnaAnterior: anterior || undefined, compania: m.compania, ...notas(d) }),
+      "abordaje_tareas", t.columna_id ?? null);
+  }
+
+  return { items, stamps, cnt, prospIds };
+}
+
+// Identificador estable del envío: mismo cliente + mismas notas = mismo id. El CRM
+// lo usa como llave (source + source_id): si un reintento manda lo mismo, devuelve
+// la entrada existente en vez de duplicarla.
+async function sourceIdDe(clientId: number, stamps: StampItem[]): Promise<string> {
+  const canon = JSON.stringify({ c: clientId, s: stamps.map((s) => [s.t, s.id, [...s.keys].sort()]).sort((a, b) => String(a[1]).localeCompare(String(b[1]))) });
+  const dig = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon)));
+  return "u1:" + [...dig].map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 48);
+}
+
+// Vuelca a la bitácora del CRM todo lo pendiente de un cliente y lo marca.
+async function syncCliente(
+  supabase: any, crm: (p: string, i?: RequestInit) => Promise<any>,
+  o: { clientId: number; agenteId: string; actingEmail: string; isAdmin: boolean },
+): Promise<{ status: number; body: Record<string, any> }> {
+  // Barrera real: crm_client_id puede venir del typeahead o setearse directo en la
+  // fila (RLS deja editar la propia), sin pasar por `link`. Re-verificar SIEMPRE.
+  // (Se chequea después de juntar: sin nada pendiente no hace falta consultar el CRM.)
+  const { items, stamps, cnt, prospIds } = await gatherByClient(supabase, o.clientId, o.agenteId);
+  const extra = { multi_prospecto: (prospIds?.length || 0) > 1, prospecto_count: prospIds?.length || 0 };
+  if (!stamps.length) {
+    return { status: 200, body: { ok: true, action: "noop", synced: 0, message: "No hay gestión nueva para volcar.", ...extra } };
+  }
+  if (!o.isAdmin && !(await clienteEsDelAsesor(crm, o.clientId, o.actingEmail))) {
+    return { status: 403, body: { error: "client_not_owned", message: "El cliente vinculado no está en tu cartera del CRM. No se volcó nada; desvinculalo o pedile a un administrador." } };
+  }
+  const log = await crm(`/clients/${o.clientId}/log/`, {
+    method: "POST",
+    body: JSON.stringify({
+      description: buildDescription(items, hoyYear()),
+      payload: buildPayload(items),
+      advisor_email: o.actingEmail,
+      source: "abordaje",
+      source_id: await sourceIdDe(o.clientId, stamps),
+    }),
+  });
+  const logId = log?.id ?? null;
+  // Marcado atómico (RPC crm_sync_stamp): suma las notas enviadas a
+  // crm_synced_blocks y guarda cliente y columna del envío. Si falla, el
+  // reintento es seguro: el CRM reconoce el mismo source_id y no duplica.
+  const { data: stamped, error: stampErr } = await supabase.rpc("crm_sync_stamp", {
+    p_log_id: logId, p_now: new Date().toISOString(), p_items: stamps,
+  });
+  if (stampErr) console.error("crm-sync stamp falló:", stampErr.message);
+  const synced = cnt.contactos + cnt.agendados + cnt.tareas + cnt.actualizaciones;
+  if (stampErr || stamped !== stamps.length) {
+    return { status: 200, body: { ok: true, action: "synced_unmarked", retry_safe: true, crm_log_id: logId, synced, detalle: cnt,
+      warning: "Se volcó al CRM pero no se pudo marcar todo. Podés reintentar: no se duplica.", ...extra } };
+  }
+  return { status: 200, body: { ok: true, action: "synced", crm_log_id: logId, synced, detalle: cnt, ...extra } };
+}
+
+// Clientes del CRM con gestión vinculada de un asesor (para el sync nocturno).
+async function clientesDe(supabase: any, agenteId: string): Promise<number[]> {
+  const ids = new Set<number>();
+  for (const t of ["abordaje_prospectos", "abordaje_tareas", "abordaje_agendados"]) {
+    const { data, error } = await supabase.from(t).select("crm_client_id").eq("agente_id", agenteId).not("crm_client_id", "is", null);
+    if (error) throw new HttpError(500, `No se pudieron leer los vínculos: ${error.message}`);
+    for (const r of data ?? []) ids.add(Number(r.crm_client_id));
+  }
+  return [...ids];
+}
+
+// ── Auth interna (MCP) ───────────────────────────────────────────────────────
+// Secret keys del proyecto (sb_secret_*) + la legacy service_role mientras siga
+// activa. Mismo criterio que gcal-events-admin.
+function serviceKeys(): string[] {
+  const out: string[] = [];
+  try {
+    const m = JSON.parse(Deno.env.get("SUPABASE_SECRET_KEYS") ?? "");
+    for (const v of Object.values(m ?? {})) if (typeof v === "string" && v) out.push(v);
+  } catch { /* sin keys nuevas */ }
+  const legacy = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+  if (legacy) out.push(legacy);
+  return out;
+}
+function timingSafeEqualStr(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a), eb = new TextEncoder().encode(b);
+  let diff = ea.length ^ eb.length;
+  for (let i = 0; i < Math.max(ea.length, eb.length); i++) diff |= (ea[i] ?? 0) ^ (eb[i] ?? 0);
+  return diff === 0;
+}
+
+// advisors.crm_sync_enabled del usuario (por profiles.advisor_id o, en fallback, por email).
+async function crmHabilitado(supabase: any, userId: string): Promise<boolean> {
+  const { data: prof } = await supabase.from("profiles").select("advisor_id, email").eq("id", userId).maybeSingle();
+  if (prof?.advisor_id) {
+    const { data: adv } = await supabase.from("advisors").select("crm_sync_enabled").eq("id", prof.advisor_id).maybeSingle();
+    return !!adv?.crm_sync_enabled;
+  }
+  if (prof?.email) {
+    const { data: adv } = await supabase.from("advisors")
+      // Igualdad sin distinguir mayúsculas: se escapan % y _ para que no actúen de comodín (sec-16).
+      .select("crm_sync_enabled").ilike("email", prof.email.replace(/[\\%_]/g, (c: string) => "\\" + c)).maybeSingle();
+    return !!adv?.crm_sync_enabled;
+  }
+  return false;
+}
+
+// ── sync_all ── sync nocturno (lo dispara el MCP): todos los clientes vinculados
+// de cada asesor habilitado. Mismos chequeos que el botón. Corta a los ~110 s
+// (lo que queda sale la noche siguiente o con el botón).
+async function syncAll(supabase: any) {
+  const t0 = Date.now();
+  const crm = crmClient();
+  const { data: profs, error } = await supabase.from("profiles").select("id, email, role, assistant_of_id");
+  if (error) throw new HttpError(500, `No se pudieron leer los usuarios: ${error.message}`);
+  const results: any[] = [];
+  let truncated = false;
+  for (const p of profs ?? []) {
+    if (p.assistant_of_id || !p.email) continue;
+    const isAdmin = p.role === "admin";
+    if (!isAdmin && !(await crmHabilitado(supabase, p.id))) continue;
+    for (const clientId of await clientesDe(supabase, p.id)) {
+      if (Date.now() - t0 > 110_000) { truncated = true; break; }
+      try {
+        const r = await syncCliente(supabase, crm, { clientId, agenteId: p.id, actingEmail: p.email.trim(), isAdmin });
+        if (r.body.action !== "noop") results.push({ user_id: p.id, client_id: clientId, status: r.status, action: r.body.action ?? r.body.error, synced: r.body.synced ?? 0 });
+      } catch (e) {
+        results.push({ user_id: p.id, client_id: clientId, error: String((e as any)?.message || e) });
+      }
+    }
+    if (truncated) break;
+  }
+  return jsonResponse({ ok: true, results, truncated });
 }
 
 Deno.serve(async (req: Request) => {
@@ -356,11 +541,36 @@ Deno.serve(async (req: Request) => {
       { auth: { persistSession: false } },
     );
 
-    // 1) Auth del caller.
+    const body = await req.json().catch(() => ({}));
+    const op: string = body?.op || "";
+    if (!op) return jsonResponse({ error: "missing op" }, 400);
+
+    // 1) Auth del caller. Dos caminos:
+    //  - Usuario: JWT de Supabase Auth (front de Universo / Abordaje).
+    //  - Interno: Authorization = secret key del proyecto (MCP en Railway: tool
+    //    sincronizar_crm y sync nocturno). Solo status/sync (con body.user_id, que
+    //    actúa como ese usuario con TODOS sus chequeos) y sync_all.
     const authHeader = req.headers.get("Authorization") || "";
     const jwt = authHeader.replace(/^Bearer\s+/i, "");
-    const { data: { user }, error: userErr } = await supabase.auth.getUser(jwt);
-    if (userErr || !user) return jsonResponse({ error: "unauthorized" }, 401);
+    const internal = !!jwt && serviceKeys().some((k) => timingSafeEqualStr(jwt, k));
+    const INTERNAL_OPS = new Set(["status", "sync", "sync_all"]);
+    if (internal && !INTERNAL_OPS.has(op)) return jsonResponse({ error: `op no permitida por la vía interna: ${op}` }, 403);
+    if (!internal && op === "sync_all") return jsonResponse({ error: "solo vía interna" }, 403);
+
+    if (op === "sync_all") return await syncAll(supabase);
+
+    let user: { id: string; email: string | null };
+    if (internal) {
+      const uid = String(body?.user_id || "");
+      if (!/^[0-9a-f-]{36}$/i.test(uid)) return jsonResponse({ error: "missing user_id" }, 400);
+      const { data: p } = await supabase.from("profiles").select("id, email").eq("id", uid).maybeSingle();
+      if (!p) return jsonResponse({ error: "usuario inexistente" }, 404);
+      user = { id: p.id, email: p.email ?? null };
+    } else {
+      const { data: { user: u }, error: userErr } = await supabase.auth.getUser(jwt);
+      if (userErr || !u) return jsonResponse({ error: "unauthorized" }, 401);
+      user = { id: u.id, email: u.email ?? null };
+    }
 
     const { data: profile } = await supabase.from("profiles")
       .select("id, email, role, assistant_of_id")
@@ -374,29 +584,8 @@ Deno.serve(async (req: Request) => {
     // Email del JWT primero (verificado por Auth); el de profiles solo como respaldo (sec-01/sec-16).
     const advisorEmail = (user.email || profile?.email || "").trim();
 
-    // Habilitación server-side (NO confiar solo en el gating del front): admins
-    // siempre; el resto según advisors.crm_sync_enabled (por profiles.advisor_id
-    // o, en fallback, por email). Las ops que tocan el CRM se bloquean si está
-    // deshabilitado — así el gating de UI no se puede saltear llamando la función.
-    let crmEnabled = isAdmin;
-    if (!crmEnabled) {
-      const { data: prof } = await supabase.from("profiles")
-        .select("advisor_id, email").eq("id", user.id).maybeSingle();
-      if (prof?.advisor_id) {
-        const { data: adv } = await supabase.from("advisors")
-          .select("crm_sync_enabled").eq("id", prof.advisor_id).maybeSingle();
-        crmEnabled = !!adv?.crm_sync_enabled;
-      } else if (prof?.email) {
-        const { data: adv } = await supabase.from("advisors")
-          // Igualdad sin distinguir mayúsculas: se escapan % y _ para que no actúen de comodín (sec-16).
-          .select("crm_sync_enabled").ilike("email", prof.email.replace(/[\\%_]/g, (c: string) => "\\" + c)).maybeSingle();
-        crmEnabled = !!adv?.crm_sync_enabled;
-      }
-    }
-
-    const body = await req.json().catch(() => ({}));
-    const op: string = body?.op || "";
-    if (!op) return jsonResponse({ error: "missing op" }, 400);
+    // Habilitación server-side (NO confiar solo en el gating del front).
+    const crmEnabled = isAdmin || await crmHabilitado(supabase, user.id);
 
     // Ops que leen/escriben contra el CRM: exigen habilitación server-side.
     // Nota: crm_client_id también se puede escribir directo en la fila (typeahead
@@ -642,15 +831,14 @@ Deno.serve(async (req: Request) => {
     // ── status ── conteo de ítems del cliente pendientes de volcar ───────────
     if (op === "status") {
       if (!anchor.effectiveClientId) {
-        return jsonResponse({ ok: true, crm_client_id: null, pendientes: 0, detalle: { contactos: 0, agendados: 0, tareas: 0 } });
+        return jsonResponse({ ok: true, crm_client_id: null, pendientes: 0, detalle: { contactos: 0, agendados: 0, tareas: 0, actualizaciones: 0 } });
       }
-      const { contactos, agendados, tareas, prospIds } =
-        await gatherByClient(supabase, anchor.effectiveClientId, anchor.agenteId);
+      const { cnt, prospIds } = await gatherByClient(supabase, anchor.effectiveClientId, anchor.agenteId);
       return jsonResponse({
         ok: true,
         crm_client_id: anchor.effectiveClientId,
-        pendientes: contactos.length + agendados.length + tareas.length,
-        detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
+        pendientes: cnt.contactos + cnt.agendados + cnt.tareas + cnt.actualizaciones,
+        detalle: cnt,
         // Aviso: si varios prospectos apuntan al mismo cliente CRM, al sincronizar
         // se vuelca la gestión de TODOS. El front lo muestra para que no sorprenda.
         multi_prospecto: (prospIds?.length || 0) > 1,
@@ -663,76 +851,10 @@ Deno.serve(async (req: Request) => {
       if (!anchor.effectiveClientId) {
         return jsonResponse({ error: "El ítem no está vinculado a un cliente del CRM." }, 400);
       }
-      const crm = crmClient();
-      const clientId = anchor.effectiveClientId;
-      // Barrera real: crm_client_id puede venir del typeahead o setearse directo en
-      // la fila (RLS deja editar la propia), sin pasar por `link`. Re-verificar SIEMPRE.
-      if (!isAdmin && !(await clienteEsDelAsesor(crm, clientId, actingEmail))) {
-        return jsonResponse({ error: "client_not_owned", message: "El cliente vinculado no está en tu cartera del CRM. No se volcó nada; desvinculalo o pedile a un administrador." }, 403);
-      }
-      const { contactos, agendados, tareas, prospIds } =
-        await gatherByClient(supabase, clientId, anchor.agenteId);
-      const multiProspecto = (prospIds?.length || 0) > 1;
-
-      if (!contactos.length && !agendados.length && !tareas.length) {
-        return jsonResponse({ ok: true, action: "noop", synced: 0, message: "No hay gestión nueva para volcar." });
-      }
-
-      const colName = new Map<string, string>();
-      const colIds = [...new Set(tareas.map((t) => t.columna_id).filter(Boolean))];
-      if (colIds.length) {
-        const { data: cols } = await supabase.from("abordaje_tareas_columnas")
-          .select("id, titulo").in("id", colIds);
-        for (const col of cols ?? []) colName.set(col.id, col.titulo);
-      }
-
-      const description = buildBitacora(contactos, agendados, tareas, colName);
-      const log = await crm(`/clients/${clientId}/log/`, {
-        method: "POST",
-        body: JSON.stringify({ description, advisor_email: actingEmail, source: "abordaje" }),
+      const r = await syncCliente(supabase, crmClient(), {
+        clientId: anchor.effectiveClientId, agenteId: anchor.agenteId, actingEmail, isAdmin,
       });
-
-      const now = nowIso();
-      const logId = log?.id ?? null;
-      // El log YA se creó en el CRM. Marcamos las filas como sincronizadas; si el
-      // marcado falla, NO respondemos "synced" limpio: avisamos, porque re-enviar
-      // volcaría de nuevo esas gestiones (duplicado en la bitácora del CRM).
-      const stamp = async (table: string, ids: string[]) => {
-        if (!ids.length) return null;
-        const { error } = await supabase.from(table)
-          .update({ crm_log_id: logId, crm_synced_at: now }).in("id", ids);
-        if (error) { console.error(`crm-sync stamp ${table} falló:`, error.message); return { table, error: error.message }; }
-        return null;
-      };
-      const stampResults = await Promise.all([
-        stamp("abordaje_prospecto_contactos", contactos.map((x) => x.id)),
-        stamp("abordaje_agendados", agendados.map((x) => x.id)),
-        stamp("abordaje_tareas", tareas.map((x) => x.id)),
-      ]);
-      const stampErrors = stampResults.filter(Boolean);
-      const synced = contactos.length + agendados.length + tareas.length;
-
-      if (stampErrors.length) {
-        return jsonResponse({
-          ok: true,
-          action: "synced_unmarked",
-          crm_log_id: logId,
-          synced,
-          detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
-          warning: "El log se creó en el CRM pero no se pudo marcar todo como sincronizado. NO vuelvas a sincronizar (podría duplicar la gestión en el CRM); avisá a soporte para reintentar el marcado.",
-          stampErrors,
-        });
-      }
-
-      return jsonResponse({
-        ok: true,
-        action: "synced",
-        crm_log_id: logId,
-        synced,
-        detalle: { contactos: contactos.length, agendados: agendados.length, tareas: tareas.length },
-        multi_prospecto: multiProspecto,
-        prospecto_count: prospIds?.length || 0,
-      });
+      return jsonResponse(r.body, r.status);
     }
 
     return jsonResponse({ error: `unknown op: ${op}` }, 400);
