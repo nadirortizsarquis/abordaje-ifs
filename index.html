@@ -10482,7 +10482,7 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
       else {
         const d = r.detalle || {};
         const extra = r.multi_prospecto ? ` Nota: este cliente está vinculado a ${r.prospecto_count} prospectos; se volcó la gestión de todos.` : '';
-        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas).${extra}`);
+        setNotice(`Sincronizado con el CRM: ${r.synced} ítem(s) volcados a la bitácora (${d.contactos||0} contactos, ${d.agendados||0} agendas, ${d.tareas||0} tareas${d.actualizaciones ? `, ${d.actualizaciones} con notas nuevas o corregidas` : ''}).${extra}`);
       }
       await fetchStatus();
     });
@@ -10564,7 +10564,7 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
                   ? 'Consultando gestión pendiente…'
                   : status
                     ? (status.pendientes > 0
-                        ? <><strong>{status.pendientes}</strong> ítem(s) de gestión sin volcar a la bitácora del CRM ({status.detalle?.contactos||0} contactos, {status.detalle?.agendados||0} agendas, {status.detalle?.tareas||0} tareas).</>
+                        ? <><strong>{status.pendientes}</strong> ítem(s) de gestión sin volcar a la bitácora del CRM ({status.detalle?.contactos||0} contactos, {status.detalle?.agendados||0} agendas, {status.detalle?.tareas||0} tareas{status.detalle?.actualizaciones ? `, ${status.detalle.actualizaciones} con notas nuevas o corregidas` : ''}).</>
                         : 'Toda la gestión ya está volcada a la bitácora del CRM.')
                     : 'La sincronización vuelca a la bitácora del CRM todo lo que apunta a este cliente (contactos, agendas y tareas).'}
               </p>
@@ -10580,7 +10580,7 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
               <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:10, lineHeight:1.5 }}>
                 {syncBlocked
                   ? 'Sincronización pausada por seguridad tras un marcado incompleto. Cerrá y volvé a abrir para reintentar, o avisá a soporte.'
-                  : <>Se vuelca como una foto del momento. Editar una gestión que ya fue sincronizada <strong>no</strong> la re-envía al CRM.</>}
+                  : <>Si a una gestión ya sincronizada le agregás o corregís notas, el próximo sync manda <strong>solo esas notas</strong>. Borrar notas no las borra del CRM.</>}
               </div>
             </div>
           ) : creating ? (
