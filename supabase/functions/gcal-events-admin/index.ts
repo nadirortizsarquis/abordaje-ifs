@@ -236,6 +236,9 @@ Deno.serve(async (req: Request) => {
       if (gr.status === 404 || gr.status === 410) return jsonResponse({ ok: true, existe: false, externos: false, corregido: false });
       if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
       const ev = await gr.json();
+      // Solo eventos de una tarjeta de este agente: nunca eventos personales ni agendas sueltas.
+      const tareaB = await cargarTarea(supabase, ev, targetUserId);
+      if (!tareaB) return jsonResponse({ ok: true, existe: true, externos: false, corregido: false, skip: "no es evento de tarjeta" });
       const externos = hayExternos(null, ev, await ctx.internos());
       const cuerpo = blindarCuerpo({}, externos, true, ev); // (b): nunca notas, con o sin externos
       const cambia = ((cuerpo.description !== undefined && cuerpo.description !== ev.description)

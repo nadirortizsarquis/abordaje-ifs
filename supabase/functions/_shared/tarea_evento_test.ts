@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { DESCRIPCION_SIN_NOTAS, blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { TEXTOS_FIJOS, DESCRIPCION_SIN_NOTAS, blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -110,7 +110,7 @@ check(sinExt.extendedProperties.private.abordaje_desc_h === huella(DESCRIPCION_S
 check(!("description" in blindarCuerpo({ description: "BIT" }, false, true, manual)), "(b) descripción escrita a mano en Google: se respeta");
 
 check(blindarCuerpo({ start: {} }, true, false).description === undefined, "evento propio de Google: si Abordaje no manda descripción, no se toca la del usuario");
-check(blindarCuerpo({ description: "nota de agenda" }, true, false).description === DESCRIPCION_NEUTRA, "evento propio de Google: la descripción que manda Abordaje se neutraliza igual");
+check(blindarCuerpo({ description: "nota de agenda" }, true, false).description === "nota de agenda", "evento que no es de tarjeta/prospecto: no se toca (su nota puede vivir solo en Google)");
 
 // escribirEvento con fetch simulado: nunca sale la bitácora hacia un evento con externos.
 const fakeFetch = (eventoEnGoogle: any, status = 200) => {
@@ -171,7 +171,24 @@ const BIT = "[11/11/26 10:00] hipertension, ofrecer 15% de descuento";
 
 // mails a invitados: solo si cambia algo que les importa (no por cada nota)
 const PV = { summary: "Reunión", start: { dateTime: "2026-11-12T18:00:00-03:00" }, end: { dateTime: "2026-11-12T19:00:00-03:00" }, attendees: [{ email: "c@x.com" }] };
-check(!cambiaParaInvitados({ summary: "Reunión", description: "nota nueva", start: { dateTime: "2026-11-12T18:00:00" }, end: { dateTime: "2026-11-12T19:00:00" } }, PV), "nota nueva sola → no se manda mail");
+const TZ = "America/Argentina/Buenos_Aires";
+check(!cambiaParaInvitados({ summary: "Reunión", description: "nota nueva", start: { dateTime: "2026-11-12T18:00:00", timeZone: TZ }, end: { dateTime: "2026-11-12T19:00:00", timeZone: TZ } }, PV), "nota nueva sola → no se manda mail");
+check(cambiaParaInvitados({ start: { dateTime: "2026-11-12T16:00:00", timeZone: TZ } }, { start: { dateTime: "2026-11-12T16:00:00-05:00" } }), "misma hora de pared en otra zona = otro momento → se avisa");
+check(cambiaParaInvitados({ start: { dateTime: "2026-11-12T18:00:00" } }, PV), "sin zona para comparar → ante la duda se avisa");
+
+// Review PR #9
+{
+  // 1) Una edición manual sigue siéndolo en las escrituras siguientes (la huella no se pisa).
+  const g1 = { summary: "Juan Perez", description: "Agenda: revisar póliza", ...PRIV("Juan Perez", "BITACORA vieja") };
+  const w1 = blindarCuerpo({ summary: "Juan Perez", description: "BIT" }, false, true, g1);
+  const g2 = { ...g1, extendedProperties: { private: { ...g1.extendedProperties.private, ...w1.extendedProperties.private } } };
+  check(esManual(g2, "description") && !("description" in blindarCuerpo({ description: "BIT 2" }, false, true, g2)), "manual se respeta también en la 2da escritura");
+  // 6) Texto con formato de bitácora nunca cuenta como manual (copia vieja del código).
+  const viejo = { description: "[11/11/26 10:00] hipertension", ...PRIV("x", "otra cosa") };
+  check(!esManual(viejo, "description") && blindarCuerpo({}, true, true, viejo).description === DESCRIPCION_NEUTRA, "bitácora escrita por código viejo: no es manual, se neutraliza");
+  // 5) El dueño del calendario (self) no cuenta como invitado.
+  check(!hayExternos({ attendees: [{ email: "nadir.ortiz@gmail.com", self: true }, { email: "x@ifs-broker.com" }] }, null, new Set()), "el dueño (self) no cuenta como externo");
+}
 check(cambiaParaInvitados({ start: { dateTime: "2026-11-12T19:00:00" } }, PV), "cambio de hora → se avisa");
 check(cambiaParaInvitados({ attendees: [{ email: "c@x.com" }, { email: "d@x.com" }] }, PV), "invitado nuevo → se avisa");
 
@@ -186,6 +203,15 @@ for (const f of ["../gcal-events/index.ts", "../gcal-events-admin/index.ts", "./
     return !/oauth2\.googleapis\.com\/token|\/move\?/.test(ctx); // token y move no llevan descripción
   });
   check(malas.length === 0, `sin escrituras a Google fuera de escribirEvento en ${f}${malas.length ? " (líneas " + malas.map(([, i]) => i + 1).join(",") + ")" : ""}`);
+}
+
+// Los textos fijos del servidor tienen que estar en la lista que la app oculta (si cambian acá
+// y no allá, el texto fijo aparecería adentro de la plataforma).
+for (const f of ["../../../index.html", "../../../apps/shell/src/abordaje/calColors.js"]) {
+  let src: string;
+  try { src = await Deno.readTextFile(new URL(f, import.meta.url)); } catch { continue; }
+  const faltan = [DESCRIPCION_SIN_NOTAS, DESCRIPCION_NEUTRA].filter((x) => !src.includes(x));
+  check(faltan.length === 0, `la app reconoce los textos fijos (${f})`);
 }
 
 console.log(`\n${mal ? "X" : "✓"} tarea_evento: ${ok}/${ok + mal} OK`);

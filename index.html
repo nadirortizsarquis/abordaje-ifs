@@ -5086,6 +5086,18 @@ function gcalFinLocalIso(ev) {
 // adentro de la plataforma no se muestran (la nota real se lee de la base).
 const GCAL_TEXTOS_FIJOS = new Set(['Agendado desde IFS. El detalle está en Abordaje / Universo IFS.', 'Reunión agendada con IFS - Insurance Financial Solution.']);
 const gcalNotaVisible = (d) => (d && !GCAL_TEXTOS_FIJOS.has(String(d).trim()) ? d : '');
+// Nota de una cita de prospecto, de la base (en Google ya no va la nota, A1 opción b): el
+// contacto cuya fecha agendada coincide con el inicio del evento; si no hay, el último con fecha.
+function notaDeCitaProspecto(contactos, ev) {
+  const lista = contactos || [];
+  const p2 = (n) => String(n).padStart(2, '0');
+  let clave = null;
+  if (ev?.start?.dateTime) { const d = new Date(ev.start.dateTime); if (!isNaN(d)) clave = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; }
+  else if (ev?.start?.date) clave = ev.start.date;
+  const c = (clave && [...lista].reverse().find((x) => x.agendadoPara && (x.agendadoPara === clave || String(x.agendadoPara).slice(0, 10) === clave)))
+    || [...lista].reverse().find((x) => x.agendadoPara);
+  return c?.observacion || '';
+}
 function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + durationMin * 60_000);
@@ -14805,7 +14817,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       // Último día (inclusive) de un evento de día completo de varios días.
       allDayHasta: gcalEsDiaCompleto(ev) && ev.end?.date ? dayKey(new Date(new Date(`${ev.end.date}T00:00:00`).getTime() - 86400000 / 2)) : null,
       tipo: tipoEvento,
-      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : gcalNotaVisible(ev.description),
+      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : (prospectoId && prospectoNombre && !isOrphan ? notaDeCitaProspecto(prospectos.find(x => x.id === prospectoId)?.contactos, ev) : '') || gcalNotaVisible(ev.description),
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,

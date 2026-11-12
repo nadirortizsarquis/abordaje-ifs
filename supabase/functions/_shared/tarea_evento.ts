@@ -120,25 +120,29 @@ export function sendUpdatesPara(tarea: TareaEvento | null): "all" | "none" {
   return tarea?.tipo_evento === "reunion" && (tarea.invitados || []).length ? "all" : "none";
 }
 
-// ── Blindaje: las notas internas NUNCA van a invitados externos (A1, 11-nov-2026) ──
-// La descripción de un evento de tarjeta es la bitácora interna (observacion). Google
-// se la muestra (y la manda por mail) a todos los invitados. Regla de Nadir: si el evento
-// tiene AL MENOS UN invitado ajeno a la organización, la descripción se reemplaza por un
-// texto neutro, y el título también (decisión de Nadir, 11-nov). Excepción: lo que el agente
-// escribió A MANO en Google (lo revisó él) se respeta. Para distinguirlo, cada escritura de
-// Abordaje deja en las propiedades privadas del evento (no las ven los invitados) una huella
-// del título y la descripción que escribió; si en Google ya no coinciden, los editó alguien
-// a mano. Sin huella (evento viejo) se asume que es de Abordaje (fail-closed). Se aplica acá, en el único punto por donde pasan TODAS las
-// escrituras a Google (escribirEvento), así cubre a Abordaje, Universo, el MCP y el
-// reconciliador sin depender del cliente. Fail-closed: si no se puede saber quiénes son
-// los invitados, se asume que hay externos.
+// ── Blindaje: las notas internas NUNCA van a Google (A1 + opción b, 11-nov-2026) ──
+// Decisiones de Nadir:
+//  - La bitácora de una tarjeta o de una cita de prospecto NUNCA va a Google, haya o no
+//    invitados (si alguien agrega un invitado a mano en Google, Google manda la invitación
+//    en el acto: sin notas en Google no hay nada que se filtre). Las notas se ven en
+//    Abordaje / Universo, que las leen de la base.
+//  - Si el evento tiene AL MENOS UN invitado ajeno a la organización, también el título es
+//    neutro.
+//  - Lo que el agente escribió A MANO en Google se respeta (lo revisó él). Para distinguirlo,
+//    cada vez que Abordaje escribe un título o descripción deja una huella en las
+//    propiedades privadas del evento (no las ven los invitados); si en Google ya no
+//    coincide, lo editó alguien a mano. Sin huella (evento viejo) o con formato de bitácora
+//    se asume que es de Abordaje (fail-closed).
+//  - Eventos que no son de tarjeta ni de prospecto (agenda suelta, eventos personales de
+//    Google): no se tocan. Su texto es del usuario y en muchos casos vive solo en Google.
+// Se aplica en escribirEvento, el único punto por donde pasan TODAS las escrituras a Google,
+// así cubre a Abordaje, Universo, el MCP y el reconciliador sin depender del cliente.
 export const DESCRIPCION_NEUTRA = "Reunión agendada con IFS - Insurance Financial Solution.";
 export const TITULO_NEUTRO = "Reunión con IFS";
-// Opción (b) de Nadir (11-nov): la bitácora NUNCA va a Google, en ningún evento de tarjeta o
-// de prospecto (haya o no invitados). La nota se ve en Abordaje / Universo, que la leen de
-// la base. Así, si alguien agrega un invitado a mano en Google, no hay notas que se filtren.
 export const DESCRIPCION_SIN_NOTAS = "Agendado desde IFS. El detalle está en Abordaje / Universo IFS.";
+export const TEXTOS_FIJOS = [DESCRIPCION_NEUTRA, DESCRIPCION_SIN_NOTAS, TITULO_NEUTRO];
 const HUELLA = { summary: "abordaje_sum_h", description: "abordaje_desc_h" } as const;
+export const DOMINIOS_INTERNOS = ["ifs-broker.com"];
 
 // Huella corta (no es criptográfica: solo detecta si el texto cambió).
 export function huella(txt: string): string {
@@ -147,21 +151,26 @@ export function huella(txt: string): string {
   return h.toString(36);
 }
 
-// ¿Ese campo del evento lo escribió alguien a mano en Google?
+// Formato de la bitácora de Abordaje: "[DD/MM/AA HH:MM] texto".
+const BITACORA = /\[\d{1,2}\/\d{1,2}\/\d{2,4}\s+\d{1,2}:\d{2}\]/;
+
+// ¿Ese campo del evento lo escribió alguien a mano en Google? Fail-closed: sin huella, con
+// texto fijo o con formato de bitácora (ej. lo escribió una copia vieja del código) → no.
 export function esManual(previo: any, campo: "summary" | "description"): boolean {
   const v = previo?.[campo];
-  if (!v || v === DESCRIPCION_NEUTRA || v === DESCRIPCION_SIN_NOTAS || v === TITULO_NEUTRO) return false;
+  if (!v || TEXTOS_FIJOS.includes(v)) return false;
+  if (campo === "description" && BITACORA.test(String(v))) return false;
   const h = previo?.extendedProperties?.private?.[HUELLA[campo]];
   return !!h && huella(String(v)) !== h;
 }
-export const DOMINIOS_INTERNOS = ["ifs-broker.com"];
 
-// Emails de invitados de uno o más eventos (las salas/recursos no cuentan).
+// Emails de invitados de uno o más eventos. No cuentan las salas ni el propio dueño del
+// calendario (self): su email de Google puede no coincidir con el de la plataforma.
 export function emailsInvitados(...eventos: any[]): string[] {
   const out: string[] = [];
   for (const ev of eventos) {
     for (const a of (Array.isArray(ev?.attendees) ? ev.attendees : [])) {
-      if (a?.resource) continue;
+      if (a?.resource || a?.self) continue;
       const e = String(a?.email || "").trim().toLowerCase();
       if (e) out.push(e);
     }
@@ -169,7 +178,7 @@ export function emailsInvitados(...eventos: any[]): string[] {
   return out;
 }
 
-// Interno = dominio de la organización o email de una cuenta de la plataforma (auth.users).
+// Interno = dominio de la organización o email de una cuenta activa de la plataforma.
 export function esInterno(email: string, internos: Set<string>): boolean {
   const e = String(email || "").trim().toLowerCase();
   const dom = e.split("@")[1] || "";
@@ -183,52 +192,56 @@ export function hayExternos(event: any, previo: any, internos: Set<string>): boo
   return emailsInvitados(event, previo).some((e) => !esInterno(e, internos));
 }
 
-// Cuerpo listo para mandar.
-//  - Evento de TARJETA o de PROSPECTO (deAbordaje=true): la descripción nunca lleva la nota
-//    de Abordaje: con invitados externos va la neutra; sin externos, un aviso de que el
-//    detalle está en la plataforma. Con externos además el título es neutro. Lo que el
-//    agente escribió A MANO en Google se respeta (no se manda). Siempre deja la huella.
-//  - Evento propio del usuario en Google o agenda suelta (deAbordaje=false): con externos
-//    solo se neutraliza la descripción que manda Abordaje; el resto no se toca (la nota de
-//    una agenda suelta vive solo en Google).
+// Cuerpo listo para mandar. Solo actúa sobre eventos de tarjeta o de prospecto
+// (deAbordaje=true); el resto vuelve tal cual. La huella se escribe SOLO para lo que
+// Abordaje manda en este cuerpo: lo que queda de antes (manual o no enviado) conserva su
+// huella anterior, así una edición manual sigue siéndolo en las escrituras siguientes.
 export function blindarCuerpo(event: any, externos: boolean, deAbordaje = true, previo: any = null): any {
   const ev = { ...(event || {}) };
-  if (!deAbordaje) {
-    if (externos && "description" in ev) ev.description = DESCRIPCION_NEUTRA;
-    return ev;
-  }
+  if (!deAbordaje) return ev;
   if (esManual(previo, "description")) delete ev.description;
   else ev.description = externos ? DESCRIPCION_NEUTRA : DESCRIPCION_SIN_NOTAS;
   if (externos) {
     if (esManual(previo, "summary")) delete ev.summary; else ev.summary = TITULO_NEUTRO;
+  } else if ("summary" in ev && esManual(previo, "summary")) {
+    delete ev.summary; // título editado a mano en Google: se respeta
   }
   const priv: Record<string, string> = { ...(previo?.extendedProperties?.private || {}), ...(ev.extendedProperties?.private || {}) };
   for (const campo of ["summary", "description"] as const) {
-    const final = campo in ev ? ev[campo] : previo?.[campo];
-    if (typeof final === "string" && final) priv[HUELLA[campo]] = huella(final);
+    if (campo in ev && typeof ev[campo] === "string" && ev[campo]) priv[HUELLA[campo]] = huella(ev[campo]);
   }
   ev.extendedProperties = { ...(ev.extendedProperties || {}), private: priv };
   return ev;
 }
 
-// Emails de las cuentas de la plataforma (auth.users, no profiles.email: esa columna no
-// es la identidad real). Perezoso y memoizado: solo se consulta si el evento tiene
-// invitados. Si falla, queda vacío → solo el dominio cuenta como interno (fail-closed).
+// Emails de las cuentas activas de la plataforma: perfil con rol admin/agent y sin baneo
+// (no cualquier fila de auth.users). El email sale de auth.users (identidad real), no de
+// profiles.email. Cache de 5 min por instancia. Si falla, vacío → solo el dominio cuenta
+// como interno (fail-closed) y no se cachea.
+let cacheInternos: { at: number; set: Set<string> } | null = null;
 export function internosPerezosos(supabase: any): () => Promise<Set<string>> {
-  let p: Promise<Set<string>> | null = null;
-  return () => p ??= (async () => {
+  return async () => {
+    if (cacheInternos && Date.now() - cacheInternos.at < 5 * 60_000) return cacheInternos.set;
     const s = new Set<string>();
     try {
+      const { data: perf, error: e1 } = await supabase.from("profiles").select("id").in("role", ["admin", "agent"]);
+      if (e1 || !perf) return s;
+      const ids = new Set(perf.map((p: any) => p.id));
+      const ahora = Date.now();
       for (let page = 1; page <= 10; page++) {
         const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
-        if (error) break;
+        if (error) return new Set<string>();
         const users = data?.users || [];
-        for (const u of users) if (u?.email) s.add(String(u.email).toLowerCase());
+        for (const u of users) {
+          const baneado = u?.banned_until && new Date(u.banned_until).getTime() > ahora;
+          if (u?.email && ids.has(u.id) && !baneado) s.add(String(u.email).toLowerCase());
+        }
         if (users.length < 1000) break;
       }
-    } catch (_) { /* fail-closed */ }
+    } catch (_) { return new Set<string>(); }
+    cacheInternos = { at: Date.now(), set: s };
     return s;
-  })();
+  };
 }
 
 export interface CtxEscritura { internos: () => Promise<Set<string>> }
@@ -236,10 +249,16 @@ export interface CtxEscritura { internos: () => Promise<Set<string>> }
 // ÚNICO punto de escritura de eventos a Google (POST/PATCH). Ningún otro código debe
 // hacer fetch con POST/PATCH a /events (lo verifica tarea_evento_test.ts).
 // `previo`: el evento actual en Google; null = alta; undefined = se lee acá (PATCH).
+// `tarjeta`: evento de tarjeta (las citas de prospecto se detectan solas por su propiedad).
 export async function escribirEvento(
   url: string, method: "POST" | "PATCH", headers: Record<string, string>, event: any, previo: any, ctx: CtxEscritura,
   fetcher: typeof fetch = fetch, tarjeta = true,
 ): Promise<Response> {
+  // Cancelar una instancia ({status}) no escribe texto: no hace falta blindar.
+  const claves = Object.keys(event || {});
+  if (claves.length === 1 && claves[0] === "status") {
+    return await fetcher(url, { method, headers, body: JSON.stringify(event) });
+  }
   let actual = previo;
   let externos = false;
   if (actual === undefined) {
@@ -248,27 +267,51 @@ export async function escribirEvento(
     if (g.ok) actual = await g.json();
     else if (g.status !== 404 && g.status !== 410) externos = true; // no se pudo leer → fail-closed
   }
-  if (!externos) {
+  const dePro = !!(event?.extendedProperties?.private?.abordaje_prospect_id || actual?.extendedProperties?.private?.abordaje_prospect_id);
+  const deAbordaje = tarjeta || dePro;
+  if (deAbordaje && !externos) {
     if (event?.attendeesOmitted || actual?.attendeesOmitted) externos = true;
     else if (emailsInvitados(event, actual).length) externos = hayExternos(event, actual, await ctx.internos());
   }
-  if (externos) console.warn(`blindaje: evento con invitados externos, título y descripción neutros (${method})`);
-  // Las citas de prospecto (no son tarjeta) también llevan notas de la base: mismo trato.
-  const dePro = !!(event?.extendedProperties?.private?.abordaje_prospect_id || actual?.extendedProperties?.private?.abordaje_prospect_id);
-  const cuerpo = blindarCuerpo(event, externos, tarjeta || dePro, actual);
+  if (deAbordaje && externos) console.warn(`blindaje: evento con invitados externos, título y descripción neutros (${method})`);
+  const cuerpo = blindarCuerpo(event, externos, deAbordaje, actual);
   // Mail a invitados solo si cambia algo que les importa (se decide sobre el cuerpo final).
   let destino = url;
   if (actual && /[?&]sendUpdates=all/.test(url) && !cambiaParaInvitados(cuerpo, actual)) destino = url.replace(/sendUpdates=all/, "sendUpdates=none");
   return await fetcher(destino, { method, headers, body: JSON.stringify(cuerpo) });
 }
 
+// Hora de pared "YYYY-MM-DDTHH:MM" de un start/end. Si el dateTime trae offset y se pide
+// otra zona, se convierte a esa zona. null = no se puede determinar con certeza.
+function horaPared(x: any, zona?: string): string | null {
+  if (!x) return null;
+  if (x.date && !x.dateTime) return String(x.date);
+  const dt = String(x.dateTime || "");
+  const conOffset = /(Z|[+-]\d{2}:\d{2})$/.test(dt);
+  if (!conOffset) return dt.slice(0, 16);
+  const tz = zona || x.timeZone;
+  if (!tz) return null;
+  try {
+    const parts = Object.fromEntries(new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
+      .formatToParts(new Date(dt)).map((p) => [p.type, p.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  } catch (_) { return null; }
+}
+function mismoMomento(a: any, b: any): boolean {
+  const da = String(a?.dateTime || ""), db = String(b?.dateTime || "");
+  const off = /(Z|[+-]\d{2}:\d{2})$/;
+  if (off.test(da) && off.test(db)) return new Date(da).getTime() === new Date(db).getTime();
+  const zona = a?.timeZone || b?.timeZone;
+  const ha = horaPared(a, zona), hb = horaPared(b, zona);
+  return ha !== null && hb !== null && ha === hb; // sin certeza → se considera distinto (se avisa)
+}
+
 // ¿El cambio le importa a los invitados? (para no mandarles un mail por cada nota).
-const hm = (x: any) => String(x?.dateTime || x?.date || "").slice(0, 16);
 export function cambiaParaInvitados(body: any, previo: any): boolean {
   if (!previo) return true;
   if (body?.conferenceData?.createRequest) return true;
-  if (body?.start && hm(body.start) !== hm(previo.start)) return true;
-  if (body?.end && hm(body.end) !== hm(previo.end)) return true;
+  if (body?.start && !mismoMomento(body.start, previo.start)) return true;
+  if (body?.end && !mismoMomento(body.end, previo.end)) return true;
   if (body?.summary !== undefined && body.summary !== previo.summary) return true;
   if (body?.location !== undefined && (body.location || "") !== (previo.location || "")) return true;
   const ya = new Set(emailsInvitados(previo));
