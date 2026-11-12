@@ -577,6 +577,104 @@ test('tarea local sin hora = día completo; con hora = horario', () => {
 });
 
 
+// ── Concurrencia de tarjetas (auditoría N1): diff de campos + rebase del form ──
+const TAREA_BASE = {
+  id: 't1', columnaId: 'c1', titulo: 'Cotización Pérez', fechaRecordatorio: '2026-11-12', horaRecordatorio: '10:00',
+  observacion: '[11/11/26 09:00] Llamé', compania: 'ole', etiquetas: ['VIP'], tipoEvento: 'recordatorio',
+  conMeet: false, invitados: [], duracionMin: 60, updatedAt: '2026-11-11T12:00:00.123456+00:00',
+};
+test('diffTareaPatch: form sin tocar = patch vacío (no reescribe nada)', () => {
+  const form = g('tareaFormDesde')(TAREA_BASE);
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form) }, {});
+});
+test('diffTareaPatch: cambiar solo el título manda solo el título (no observacion ni fecha)', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), titulo: '  Cotización Pérez II ' };
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form) }, { titulo: 'Cotización Pérez II' });
+});
+test('diffTareaPatch: entrada nueva de bitácora manda observacion; columna y fecha solo si cambian', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), columnaId: 'c2', fechaRecordatorio: '' };
+  const p = g('diffTareaPatch')(TAREA_BASE, form, { observacionFinal: '[11/11/26 10:00] Nueva\n\n[11/11/26 09:00] Llamé' });
+  assert.deepEqual(Object.keys(p).sort(), ['columnaId', 'fechaRecordatorio', 'observacion']);
+  assert.equal(p.fechaRecordatorio, null);
+});
+test('diffTareaPatch: evento:false ignora tipo/Meet/invitados; invitados se comparan normalizados', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), tipoEvento: 'reunion', invitados: 'A@x.com' };
+  assert.deepEqual({ ...g('diffTareaPatch')(TAREA_BASE, form, { evento: false }) }, {});
+  const p = g('diffTareaPatch')(TAREA_BASE, form);
+  assert.equal(p.tipoEvento, 'reunion');
+  assert.deepEqual([...p.invitados], ['a@x.com']);
+  const base2 = { ...TAREA_BASE, invitados: ['a@x.com'] };
+  assert.equal('invitados' in g('diffTareaPatch')(base2, { ...g('tareaFormDesde')(base2), invitados: 'A@X.com,' }), false);
+});
+test('tareaCambiosVisibles: lo mecánico (google_event_id, orden, updated_at) no es conflicto', () => {
+  const mec = { ...TAREA_BASE, googleEventId: 'g1', orden: 3, fijadaAt: 'x', actorId: 'u2', updatedAt: 'otro' };
+  assert.equal(g('tareaCambiosVisibles')(TAREA_BASE, mec).length, 0);
+  const mcp = { ...TAREA_BASE, observacion: '[11/11/26 11:00] Nota del MCP\n\n' + TAREA_BASE.observacion, columnaId: 'c3' };
+  assert.deepEqual([...g('tareaCambiosVisibles')(TAREA_BASE, mcp)].sort(), ['columnaId', 'observacion']);
+  assert.ok(g('tareaCambiosVisibles')(TAREA_BASE, null).length > 0);
+});
+test('rebaseTareaForm: conserva lo que tocó el usuario y adopta lo nuevo de la base en lo demás', () => {
+  const form = { ...g('tareaFormDesde')(TAREA_BASE), titulo: 'Título del usuario' };
+  const fresh = { ...TAREA_BASE, titulo: 'Título del MCP', observacion: '[11/11/26 11:00] MCP\n\n' + TAREA_BASE.observacion, columnaId: 'c3' };
+  const r = g('rebaseTareaForm')(form, TAREA_BASE, fresh);
+  assert.equal(r.titulo, 'Título del usuario');
+  assert.equal(r.observacion, fresh.observacion);
+  assert.equal(r.columnaId, 'c3');
+  // Tras el rebase, guardar manda solo el título (no pisa la nota ni la columna del MCP).
+  assert.deepEqual({ ...g('diffTareaPatch')(fresh, r) }, { titulo: 'Título del usuario' });
+});
+
+test('diffTareaPatch: invitados ajenos sin normalizar (ej. del MCP) no se reescriben si no se tocaron', () => {
+  const base = { ...TAREA_BASE, tipoEvento: 'reunion', invitados: ['Ana@X.com', 'ana@x.com'] };
+  assert.equal('invitados' in g('diffTareaPatch')(base, g('tareaFormDesde')(base)), false);
+});
+test('resolverConflictoTarea: cambio ajeno en otro campo no bloquea (el patch no lo pisa)', () => {
+  const fresh = { ...TAREA_BASE, columnaId: 'c9', updatedAt: 'v2' };
+  const r = g('resolverConflictoTarea')(TAREA_BASE, fresh, { titulo: 'Nuevo' });
+  assert.equal(r.estado, 'ok');
+  assert.deepEqual({ ...r.patch }, { titulo: 'Nuevo' });
+});
+test('resolverConflictoTarea: entrada nueva de los dos lados se combina sobre la bitácora nueva', () => {
+  const mcp = '[11/11/26 11:00] Nota MCP\n\n' + TAREA_BASE.observacion;
+  const fresh = { ...TAREA_BASE, observacion: mcp, updatedAt: 'v2' };
+  const r = g('resolverConflictoTarea')(TAREA_BASE, fresh, { observacion: '[11/11/26 11:05] Mía\n\n' + TAREA_BASE.observacion });
+  assert.equal(r.estado, 'ok');
+  assert.equal(r.patch.observacion, '[11/11/26 11:05] Mía\n\n' + mcp);
+});
+test('resolverConflictoTarea: el mismo campo editado de los dos lados es conflicto', () => {
+  const fresh = { ...TAREA_BASE, observacion: 'texto reescrito por otro', updatedAt: 'v2' };
+  const r = g('resolverConflictoTarea')(TAREA_BASE, fresh, { observacion: 'corregí la entrada vieja' });
+  assert.equal(r.estado, 'conflicto');
+  assert.deepEqual([...r.campos], ['observacion']);
+  // Fecha del usuario + hora del otro = choque (grupo fecha/hora).
+  const f2 = { ...TAREA_BASE, horaRecordatorio: '18:00', updatedAt: 'v2' };
+  assert.equal(g('resolverConflictoTarea')(TAREA_BASE, f2, { fechaRecordatorio: '2026-11-20' }).estado, 'conflicto');
+  // Mismo valor de los dos lados: no es choque.
+  const f3 = { ...TAREA_BASE, columnaId: 'c2', updatedAt: 'v2' };
+  assert.equal(g('resolverConflictoTarea')(TAREA_BASE, f3, { columnaId: 'c2' }).estado, 'ok');
+});
+test('resolverConflictoTarea: borrada y archivada en otro lado', () => {
+  assert.equal(g('resolverConflictoTarea')(TAREA_BASE, null, { titulo: 'x' }).estado, 'borrada');
+  const arch = { ...TAREA_BASE, archivada: true, updatedAt: 'v2' };
+  assert.equal(g('resolverConflictoTarea')(TAREA_BASE, arch, { titulo: 'x' }).estado, 'archivada');
+});
+test('resolverConflictoTarea: solo cambios mecánicos = ok sin tocar el patch', () => {
+  const fresh = { ...TAREA_BASE, googleEventId: 'g1', orden: 4, updatedAt: 'v2' };
+  const r = g('resolverConflictoTarea')(TAREA_BASE, fresh, { titulo: 'x', observacion: 'y' });
+  assert.equal(r.estado, 'ok');
+  assert.deepEqual({ ...r.patch }, { titulo: 'x', observacion: 'y' });
+});
+test('tareaVersionPosterior: adopta solo versiones más nuevas', () => {
+  const v = (s) => ({ updatedAt: s });
+  const f = g('tareaVersionPosterior');
+  assert.equal(f(v('2026-11-11T12:00:01.000000+00:00'), v('2026-11-11T12:00:00.000000+00:00')), true);
+  assert.equal(f(v('2026-11-11T12:00:00.000000+00:00'), v('2026-11-11T12:00:01.000000+00:00')), false);
+  assert.equal(f(v('2026-11-11T12:00:00.000200+00:00'), v('2026-11-11T12:00:00.000100+00:00')), true);
+  assert.equal(f(v('2026-11-11T12:00:00.000100+00:00'), v('2026-11-11T12:00:00.000100+00:00')), false);
+  assert.equal(f(v('2026-11-11T12:00:00+00:00'), {}), true);
+});
+
+
 // ── Correr ───────────────────────────────────────────────────────────────────
 let failed = 0;
 for (const [name, fn] of cases) {
