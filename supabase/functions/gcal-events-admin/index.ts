@@ -11,7 +11,7 @@
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario } from "../_shared/tarea_evento.ts";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario, escribirEvento, internosPerezosos, hayExternos, blindarCuerpo } from "../_shared/tarea_evento.ts";
 
 // Keys validas como credencial del caller: todas las secret nuevas (JSON
 // SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
@@ -223,6 +223,44 @@ Deno.serve(async (req: Request) => {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     };
+    // Toda escritura a Google pasa por escribirEvento (blindaje de invitados externos).
+    const ctx = { internos: internosPerezosos(supabase) };
+
+    // blindar: control del reconciliador del MCP (y del barrido inicial). Saca la bitácora
+    // que haya quedado en el evento de una tarjeta (opción b) y, con invitados externos,
+    // neutraliza título y descripción. Lo escrito a mano en Google se respeta. Sin mails.
+    if (op === "blindar") {
+      const eid = String(body.eventId || "");
+      if (!/^[A-Za-z0-9_-]{5,1024}$/.test(eid)) return jsonResponse({ error: "eventId inválido" }, 400);
+      const gr = await fetch(`${base}/${encodeURIComponent(eid)}`, { headers: reqHeaders });
+      if (gr.status === 404 || gr.status === 410) return jsonResponse({ ok: true, existe: false, externos: false, corregido: false });
+      if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
+      const ev = await gr.json();
+      // Solo eventos de una tarjeta de este agente: nunca eventos personales ni agendas sueltas.
+      // Solo eventos de una tarjeta o de un prospecto de este agente: nunca eventos personales
+      // ni agendas sueltas.
+      const tareaB = await cargarTarea(supabase, ev, targetUserId);
+      let textos: string[] = tareaB ? [tareaB.titulo || "", tareaB.observacion || ""] : [];
+      if (!tareaB) {
+        const pid = ev?.extendedProperties?.private?.abordaje_prospect_id;
+        const { data: pro } = pid && /^[0-9a-f-]{36}$/i.test(String(pid))
+          ? await supabase.from("abordaje_prospectos").select("id, agente_id, nombre").eq("id", pid).maybeSingle()
+          : { data: null };
+        if (!pro || pro.agente_id !== targetUserId) {
+          return jsonResponse({ ok: true, existe: true, externos: false, corregido: false, skip: "no es evento de tarjeta ni de prospecto" });
+        }
+        textos = [pro.nombre || ""];
+      }
+      const externos = hayExternos(null, ev, await ctx.internos());
+      const cuerpo = blindarCuerpo({}, externos, true, ev, textos); // (b): nunca notas, con o sin externos
+      const cambia = ((cuerpo.description !== undefined && cuerpo.description !== ev.description)
+        || (cuerpo.summary !== undefined && cuerpo.summary !== ev.summary));
+      if (!cambia) return jsonResponse({ ok: true, existe: true, externos, corregido: false });
+      const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, {}, ev, { ...ctx, textos });
+      if (!r.ok) throw new Error(`blindar failed: ${r.status} ${await r.text()}`);
+      console.warn(`blindaje: título/descripción neutralizados en evento ${eid}${externos ? " (invitados externos)" : ""}`);
+      return jsonResponse({ ok: true, existe: true, externos, corregido: true });
+    }
 
     const decorate = (event: any) => {
       const prevExt = event?.extendedProperties || {};
@@ -265,26 +303,20 @@ Deno.serve(async (req: Request) => {
       // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const { event: evt, reutilizado } = await crearEventoTarea(base, reqHeaders, decorate(body.event), tarea);
+        const { event: evt, reutilizado } = await crearEventoTarea(base, reqHeaders, decorate(body.event), tarea, ctx);
         return jsonResponse({ ok: true, event: evt, reutilizado, asAssistant });
       }
-      const r = await fetch(base, {
-        method: "POST", headers: reqHeaders,
-        body: JSON.stringify(decorate(body.event)),
-      });
+      const r = await escribirEvento(base, "POST", reqHeaders, decorate(body.event), null, ctx, fetch, false);
       if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
       return jsonResponse({ ok: true, event: await r.json(), asAssistant });
     }
     if (op === "update") {
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const evt = await actualizarEventoTarea(base, reqHeaders, body.eventId, decorate(body.event), tarea);
+        const evt = await actualizarEventoTarea(base, reqHeaders, body.eventId, decorate(body.event), tarea, ctx);
         return jsonResponse({ ok: true, event: evt, asAssistant });
       }
-      const r = await fetch(`${base}/${body.eventId}`, {
-        method: "PATCH", headers: reqHeaders,
-        body: JSON.stringify(decorate(body.event)),
-      });
+      const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", reqHeaders, decorate(body.event), undefined, ctx, fetch, false);
       if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
       return jsonResponse({ ok: true, event: await r.json(), asAssistant });
     }
@@ -298,10 +330,7 @@ Deno.serve(async (req: Request) => {
         }
       } catch (_) { /* */ }
       if (isRecurringInstance) {
-        const r = await fetch(`${base}/${body.eventId}`, {
-          method: "PATCH", headers: reqHeaders,
-          body: JSON.stringify({ status: "cancelled" }),
-        });
+        const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", reqHeaders, { status: "cancelled" }, undefined, ctx, fetch, false);
         if (!r.ok && r.status !== 404 && r.status !== 410) {
           throw new Error(`cancel instance failed: ${r.status} ${await r.text()}`);
         }

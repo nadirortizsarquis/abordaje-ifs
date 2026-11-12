@@ -14,7 +14,7 @@
 // acá con service_role.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario } from "../_shared/tarea_evento.ts";
+import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario, escribirEvento, internosPerezosos } from "../_shared/tarea_evento.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -307,17 +307,17 @@ Deno.serve(async (req: Request) => {
       "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     };
+    // Toda escritura a Google pasa por escribirEvento (blindaje de invitados externos).
+    const ctx = { internos: internosPerezosos(supabase) };
 
     if (op === "create") {
       // Evento de una tarjeta: uno solo por tarjeta (ver _shared/tarea_evento.ts).
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const { event: evt, reutilizado } = await crearEventoTarea(base, headers, body.event, tarea);
+        const { event: evt, reutilizado } = await crearEventoTarea(base, headers, body.event, tarea, ctx);
         return jsonResponse({ ok: true, event: evt, reutilizado, asAssistant });
       }
-      const r = await fetch(base, {
-        method: "POST", headers, body: JSON.stringify(body.event),
-      });
+      const r = await escribirEvento(base, "POST", headers, body.event, null, ctx, fetch, false);
       if (!r.ok) throw new Error(`create failed: ${r.status} ${await r.text()}`);
       const evt = await r.json();
       return jsonResponse({ ok: true, event: evt, asAssistant });
@@ -325,12 +325,10 @@ Deno.serve(async (req: Request) => {
     if (op === "update") {
       const tarea = await cargarTarea(supabase, body.event, targetUserId);
       if (tarea) {
-        const evt = await actualizarEventoTarea(base, headers, body.eventId, body.event, tarea);
+        const evt = await actualizarEventoTarea(base, headers, body.eventId, body.event, tarea, ctx);
         return jsonResponse({ ok: true, event: evt, asAssistant });
       }
-      const r = await fetch(`${base}/${body.eventId}`, {
-        method: "PATCH", headers, body: JSON.stringify(body.event),
-      });
+      const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", headers, body.event, undefined, ctx, fetch, false);
       if (!r.ok) throw new Error(`update failed: ${r.status} ${await r.text()}`);
       const evt = await r.json();
       return jsonResponse({ ok: true, event: evt, asAssistant });
@@ -345,10 +343,7 @@ Deno.serve(async (req: Request) => {
         }
       } catch (_) { /* */ }
       if (isRecurringInstance) {
-        const r = await fetch(`${base}/${body.eventId}`, {
-          method: "PATCH", headers,
-          body: JSON.stringify({ status: "cancelled" }),
-        });
+        const r = await escribirEvento(`${base}/${encodeURIComponent(String(body.eventId))}`, "PATCH", headers, { status: "cancelled" }, undefined, ctx, fetch, false);
         if (!r.ok && r.status !== 404 && r.status !== 410) {
           throw new Error(`cancel instance failed: ${r.status} ${await r.text()}`);
         }

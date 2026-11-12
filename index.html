@@ -5082,6 +5082,23 @@ function gcalFinLocalIso(ev) {
   if (ev?.end?.date) return `${ev.end.date}T00:00:00`;
   return null;
 }
+// Textos fijos que las edge functions ponen en Google en lugar de la nota (A1, opción b):
+// adentro de la plataforma no se muestran (la nota real se lee de la base).
+const GCAL_TEXTOS_FIJOS = new Set(['Agendado desde IFS. El detalle está en Abordaje / Universo IFS.', 'Reunión agendada con IFS - Insurance Financial Solution.']);
+const gcalNotaVisible = (d) => (d && !GCAL_TEXTOS_FIJOS.has(String(d).trim()) ? d : '');
+// Nota de una cita de prospecto, de la base (en Google ya no va la nota, A1 opción b): el
+// contacto cuya fecha agendada coincide con el inicio del evento.
+function notaDeCitaProspecto(contactos, ev) {
+  const lista = contactos || [];
+  const p2 = (n) => String(n).padStart(2, '0');
+  let clave = null;
+  if (ev?.start?.dateTime) { const d = new Date(ev.start.dateTime); if (!isNaN(d)) clave = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}T${p2(d.getHours())}:${p2(d.getMinutes())}`; }
+  else if (ev?.start?.date) clave = ev.start.date;
+  // Solo el contacto de ESA cita (misma fecha y hora, o mismo día si es de día completo): sin
+  // coincidencia no se muestra nota (mejor nada que la nota de otra cita).
+  const c = clave && [...lista].reverse().find((x) => x.agendadoPara && (x.agendadoPara === clave || (clave.length === 10 && String(x.agendadoPara).slice(0, 10) === clave)));
+  return c?.observacion || '';
+}
 function buildGoogleEventBody({ startIso, durationMin = 60, summary, description, prospectId, tareaId }) {
   const start = new Date(startIso);
   const end = new Date(start.getTime() + durationMin * 60_000);
@@ -6124,7 +6141,7 @@ function buscarGlobal(state, query, gcalSearchEvents = null, tareasArchivadas = 
       if (!ev || ev.status === 'cancelled' || seenIds.has(ev.id)) continue;
       seenIds.add(ev.id);
       const summary = ev.summary || '';
-      const description = ev.description || '';
+      const description = gcalNotaVisible(ev.description); // sin los textos fijos de Google (A1)
       const haystack = (summary + ' ' + description).toLowerCase();
       if (!haystack.includes(q)) continue;
       const startIso = ev.start?.dateTime || ev.start?.date;
@@ -14747,6 +14764,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     const tareaId = ext.abordaje_tarea_id || null;
     let kind = 'agenda';
     let prospectoNombre = null;
+    let tareaDeEv = null;
     let isOrphan = false;
     // Tipo del evento para colorear (coherente con la Lista). Por defecto
     // 'agendado' (citas/agendas/externos → verde). Para eventos de TAREA se
@@ -14768,6 +14786,7 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
     } else if (tareaId) {
       kind = 'tarea';
       const tarea = tareasById.get(tareaId);
+      tareaDeEv = tarea || null;
       // Huérfano si: la tarea ya no existe, O existe pero apunta a otro evento
       // (duplicación de sync histórica antes del fix de googleEventId).
       if (!tarea || (tarea.googleEventId && tarea.googleEventId !== ev.id)) {
@@ -14791,13 +14810,15 @@ function extractGcalEventsForCalendar(gcalEvents, prospectos, tareasItems) {
       tareaId,
       prospectoNombre,
       isOrphan,
-      label: prospectoNombre || ev.summary || '(sin título)',
+      // Eventos de TARJETA: título y nota salen de la tarjeta (base), no de Google. Con invitados
+      // externos Google tiene título/descripción neutros (A1) y acá se tiene que seguir viendo todo.
+      label: prospectoNombre || tareaDeEv?.titulo || ev.summary || '(sin título)',
       fecha: start,
       allDay: gcalEsDiaCompleto(ev),
       // Último día (inclusive) de un evento de día completo de varios días.
       allDayHasta: gcalEsDiaCompleto(ev) && ev.end?.date ? dayKey(new Date(new Date(`${ev.end.date}T00:00:00`).getTime() - 86400000 / 2)) : null,
       tipo: tipoEvento,
-      observacion: ev.description || '',
+      observacion: tareaDeEv ? (tareaDeEv.observacion || '') : (prospectoId && prospectoNombre && !isOrphan ? notaDeCitaProspecto(prospectos.find(x => x.id === prospectoId)?.contactos, ev) : '') || gcalNotaVisible(ev.description),
       duracionMin: null,
       gcalColor: ev._gcalColor || null,
       gcalCalendarName: ev._gcalSummary || null,
