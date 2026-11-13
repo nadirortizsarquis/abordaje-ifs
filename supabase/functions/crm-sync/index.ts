@@ -495,9 +495,12 @@ async function crmHabilitado(supabase: any, userId: string): Promise<boolean> {
 }
 
 // ── sync_all ── sync nocturno (lo dispara el MCP): todos los clientes vinculados
-// de cada asesor habilitado. Mismos chequeos que el botón. Corta a los ~110 s
+// de cada asesor habilitado. Mismos chequeos que el botón. Corta a los ~90 s
 // (lo que queda sale la noche siguiente o con el botón).
 const CONCURRENCIA = 4;
+// Deja de tomar clientes a los 90 s: lo que está en curso (lecturas + GET/POST al CRM)
+// termina antes del tope de 150 s de la edge y el MCP recibe la respuesta.
+const CORTE_MS = 90_000;
 async function syncAll(supabase: any) {
   const t0 = Date.now();
   const crm = crmClient();
@@ -514,7 +517,7 @@ async function syncAll(supabase: any) {
     const pendientes = await clientesDe(supabase, p.id);
     const worker = async () => {
       for (let clientId = pendientes.shift(); clientId !== undefined; clientId = pendientes.shift()) {
-        if (Date.now() - t0 > 110_000) { truncated = true; return; }
+        if (Date.now() - t0 > CORTE_MS) { truncated = true; return; }
         try {
           const r = await syncCliente(supabase, crm, { clientId, agenteId: p.id, actingEmail: p.email.trim(), isAdmin });
           if (r.body.action !== "noop") results.push({ user_id: p.id, client_id: clientId, status: r.status, action: r.body.action ?? r.body.error, synced: r.body.synced ?? 0 });
@@ -850,7 +853,7 @@ Deno.serve(async (req: Request) => {
     // ── sync ── vuelca el delta del cliente a la bitácora del CRM ────────────
     if (op === "sync") {
       if (!anchor.effectiveClientId) {
-        return jsonResponse({ error: "El ítem no está vinculado a un cliente del CRM." }, 400);
+        return jsonResponse({ error: "El ítem no está vinculado a un cliente del CRM.", code: "not_linked" }, 400);
       }
       const r = await syncCliente(supabase, crmClient(), {
         clientId: anchor.effectiveClientId, agenteId: anchor.agenteId, actingEmail, isAdmin,
