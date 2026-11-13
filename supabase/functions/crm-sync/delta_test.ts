@@ -41,4 +41,13 @@ eq(notesDelta(noteKeys("[12/11/26 16:02] firmó"), "[12/11/26 16:02 · Hito] fir
   { nuevas: [], editadas: ["[12/11/26 16:02 · Hito] firmó"] }, "agregar tipo a una enviada -> corregida");
 eq(notesDelta(noteKeys("[12/11/26 16:02 · Hito] firmó"), "[13/11/26 09:00 · Llamado] x\n\n[12/11/26 16:02 · Hito] firmó"),
   { nuevas: ["[13/11/26 09:00 · Llamado] x"], editadas: [] }, "nueva con tipo -> nueva");
+// Misma marca (mismo minuto) que una nota enviada que sigue intacta -> NUEVA, no corregida.
+eq(notesDelta(noteKeys("[12/11/26 16:02 · Hito] firmó"), "[12/11/26 16:02 · Llamado] avisé\n\n[12/11/26 16:02 · Hito] firmó"),
+  { nuevas: ["[12/11/26 16:02 · Llamado] avisé"], editadas: [] }, "mismo minuto que una enviada intacta -> nueva");
+eq(notesDelta(noteKeys("[12/11/26] a"), "[12/11/26] b\n\n[12/11/26] a"),
+  { nuevas: ["[12/11/26] b"], editadas: [] }, "sin hora, mismo día, la enviada sigue -> nueva");
+// Después de mandar una corrección, quedan las dos versiones en lo enviado: una nota
+// nueva en ese minuto sigue siendo nueva.
+eq(notesDelta([...noteKeys("[12/11/26 16:02] v1"), ...noteKeys("[12/11/26 16:02] v2")], "[12/11/26 16:02] otra\n\n[12/11/26 16:02] v2"),
+  { nuevas: ["[12/11/26 16:02] otra"], editadas: [] }, "corrección ya enviada + nueva mismo minuto -> nueva");
 console.log("delta_test: todo ok");

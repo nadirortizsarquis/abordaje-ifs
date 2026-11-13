@@ -10474,7 +10474,7 @@ function CrmModal({ anchor, onClose, onLinked, onSaveDni }) {
     await run('sync', {}, async (r) => {
       if (r.action === 'noop') { setNotice('Ya está todo sincronizado — no hay gestión nueva para volcar.'); }
       else if (r.action === 'synced_unmarked' && r.retry_safe) {
-        setError(r.warning || 'Se volcó al CRM pero no se pudo marcar todo. Podés reintentar: no se duplica.');
+        setError(r.warning || 'Se volcó al CRM pero no se pudo marcar todo. Reintentá ahora, antes de cargar notas nuevas en este cliente.');
       }
       else if (r.action === 'synced_unmarked') {
         // El log entró al CRM pero el marcado de "ya sincronizado" falló. Reintentar

@@ -91,31 +91,11 @@ class HttpError extends Error {
 }
 
 // ── Formateo de fechas (hora Argentina) ──────────────────────────────────────
-function fmtDate(d: string | null | undefined): string {
-  if (!d) return "";
-  const m = String(d).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d);
-}
 function fmtTime(t: string | null | undefined): string {
   if (!t) return "";
   const m = String(t).match(/^(\d{2}):(\d{2})/);
   return m ? `${m[1]}:${m[2]}` : String(t);
 }
-function fmtTs(iso: string | null | undefined): string {
-  if (!iso) return "";
-  try {
-    const parts = new Intl.DateTimeFormat("es-AR", {
-      timeZone: TZ,
-      day: "2-digit", month: "2-digit", year: "numeric",
-      hour: "2-digit", minute: "2-digit", hour12: false,
-    }).formatToParts(new Date(iso));
-    const g = (t: string) => parts.find((p) => p.type === t)?.value || "";
-    return `${g("day")}/${g("month")}/${g("year")} ${g("hour")}:${g("minute")}`;
-  } catch {
-    return String(iso);
-  }
-}
-
 const TIPO_LABELS: Record<string, string> = {
   agendado: "Agendado",
   contestador: "Contestador",
@@ -137,11 +117,6 @@ const COMPANIA_LABELS: Record<string, string> = {
   "best-doctors": "Best Doctors",
   "patrimonial": "Patrimonial",
 };
-
-function quote(s: string | null | undefined): string {
-  const t = (s ?? "").trim();
-  return t ? ` "${t}"` : "";
-}
 
 // Normaliza el documento para dedup/lookup/create: saca puntos, espacios y
 // separadores comunes. "12.345.678" y "12345678" tienen que matchear el mismo
@@ -263,11 +238,12 @@ async function resolveAnchor(
 type SyncTable = "abordaje_prospecto_contactos" | "abordaje_agendados" | "abordaje_tareas";
 interface StampItem { t: SyncTable; id: string; keys: string[]; c: number; col: string | null }
 
+const FMT_AR = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hour12: false,
+});
 const TZ_PARTS = (iso: string) => {
-  const p = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit",
-    hour: "2-digit", minute: "2-digit", hour12: false,
-  }).formatToParts(new Date(iso));
+  const p = FMT_AR.formatToParts(new Date(iso));
   const g = (t: string) => p.find((x) => x.type === t)?.value || "";
   return { fecha: `${g("year")}-${g("month")}-${g("day")}`, hora: `${g("hour")}:${g("minute")}`.replace(/^24/, "00") };
 };
@@ -294,7 +270,8 @@ const porFechaDesc = (a: Nota, b: Nota) => `${b.fecha ?? ""}${b.hora ?? ""}`.loc
 //  - Contactos: cuelgan de un prospecto vinculado a este cliente.
 //  - Agendas y tareas: SOLO las sueltas vinculadas directo al cliente (las de un
 //    prospecto vinculado son proyecciones de sus contactos -> no se duplican).
-//  - Tareas archivadas: no se mandan como nuevas, pero sí sus notas posteriores.
+//  - Tareas archivadas: también se mandan (si nunca se enviaron o tienen notas
+//    nuevas). Así un sync que falló al archivar lo levanta el nocturno.
 //  - Un cambio de columna sin notas nuevas no dispara envío; viaja con la próxima.
 async function gatherByClient(supabase: any, clientId: number, agenteId: string) {
   const { data: prosp, error: prospErr } = await supabase.from("abordaje_prospectos")
@@ -366,7 +343,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     compania: COMPANIA_LABELS[t.compania] || t.compania || "",
     recordatorio: t.fecha_recordatorio ? [dm(String(t.fecha_recordatorio)), t.hora_recordatorio ? fmtTime(t.hora_recordatorio) : ""].filter(Boolean).join(" ") : "",
   });
-  for (const t of tareasAll.filter((t) => pendiente(t) && !t.archivada)) {
+  for (const t of tareasAll.filter(pendiente)) {
     items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: parseNotes(t.observacion) });
     stamp("abordaje_tareas", t.id, t.observacion, t.columna_id ?? null);
     cnt.tareas++;
@@ -404,7 +381,8 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
 
 // Identificador estable del envío: mismo cliente + mismas notas = mismo id. El CRM
 // lo usa como llave (source + source_id): si un reintento manda lo mismo, devuelve
-// la entrada existente en vez de duplicarla.
+// la entrada existente en vez de duplicarla. OJO: si entre el intento y el
+// reintento cambió algo de ese cliente, el id cambia y el CRM crea otra entrada.
 async function sourceIdDe(clientId: number, stamps: StampItem[]): Promise<string> {
   const canon = JSON.stringify({ c: clientId, s: stamps.map((s) => [s.t, s.id, [...s.keys].sort()]).sort((a, b) => String(a[1]).localeCompare(String(b[1]))) });
   const dig = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canon)));
@@ -439,29 +417,45 @@ async function syncCliente(
   });
   const logId = log?.id ?? null;
   // Marcado atómico (RPC crm_sync_stamp): suma las notas enviadas a
-  // crm_synced_blocks y guarda cliente y columna del envío. Si falla, el
-  // reintento es seguro: el CRM reconoce el mismo source_id y no duplica.
-  const { data: stamped, error: stampErr } = await supabase.rpc("crm_sync_stamp", {
-    p_log_id: logId, p_now: new Date().toISOString(), p_items: stamps,
-  });
-  if (stampErr) console.error("crm-sync stamp falló:", stampErr.message);
+  // crm_synced_blocks y guarda cliente y columna del envío.
+  // El POST ya entró: se insiste con el marcado acá mismo (2 reintentos) antes de
+  // devolver synced_unmarked, porque el reintento del usuario solo es idempotente si
+  // nada cambió en el medio (source_id = hash del contenido).
+  let stamped: number | null = null;
+  let stampErr: any = null;
+  for (let intento = 0; intento < 3; intento++) {
+    if (intento) await new Promise((r) => setTimeout(r, 400 * intento));
+    ({ data: stamped, error: stampErr } = await supabase.rpc("crm_sync_stamp", {
+      p_log_id: logId, p_now: new Date().toISOString(), p_items: stamps,
+    }));
+    if (!stampErr && stamped === stamps.length) break;
+    console.error(`crm-sync stamp falló (intento ${intento + 1}):`, stampErr?.message ?? `${stamped}/${stamps.length}`);
+  }
   const synced = cnt.contactos + cnt.agendados + cnt.tareas + cnt.actualizaciones;
   if (stampErr || stamped !== stamps.length) {
     return { status: 200, body: { ok: true, action: "synced_unmarked", retry_safe: true, crm_log_id: logId, synced, detalle: cnt,
-      warning: "Se volcó al CRM pero no se pudo marcar todo. Podés reintentar: no se duplica.", ...extra } };
+      warning: "Se volcó al CRM pero no se pudo marcar como enviado. Reintentá ahora, antes de cargar notas nuevas en este cliente: así no se repite.", ...extra } };
   }
   return { status: 200, body: { ok: true, action: "synced", crm_log_id: logId, synced, detalle: cnt, ...extra } };
 }
 
 // Clientes del CRM con gestión vinculada de un asesor (para el sync nocturno).
+// Las tres tablas en paralelo y paginadas (PostgREST corta en 1000 filas).
 async function clientesDe(supabase: any, agenteId: string): Promise<number[]> {
-  const ids = new Set<number>();
-  for (const t of ["abordaje_prospectos", "abordaje_tareas", "abordaje_agendados"]) {
-    const { data, error } = await supabase.from(t).select("crm_client_id").eq("agente_id", agenteId).not("crm_client_id", "is", null);
-    if (error) throw new HttpError(500, `No se pudieron leer los vínculos: ${error.message}`);
-    for (const r of data ?? []) ids.add(Number(r.crm_client_id));
-  }
-  return [...ids];
+  const PAGE = 1000;
+  const deTabla = async (t: string) => {
+    const out: number[] = [];
+    for (let desde = 0; ; desde += PAGE) {
+      const { data, error } = await supabase.from(t).select("crm_client_id")
+        .eq("agente_id", agenteId).not("crm_client_id", "is", null)
+        .order("id").range(desde, desde + PAGE - 1);
+      if (error) throw new HttpError(500, `No se pudieron leer los vínculos: ${error.message}`);
+      for (const r of data ?? []) out.push(Number(r.crm_client_id));
+      if ((data ?? []).length < PAGE) return out;
+    }
+  };
+  const listas = await Promise.all(["abordaje_prospectos", "abordaje_tareas", "abordaje_agendados"].map(deTabla));
+  return [...new Set(listas.flat())];
 }
 
 // ── Auth interna (MCP) ───────────────────────────────────────────────────────
@@ -503,6 +497,7 @@ async function crmHabilitado(supabase: any, userId: string): Promise<boolean> {
 // ── sync_all ── sync nocturno (lo dispara el MCP): todos los clientes vinculados
 // de cada asesor habilitado. Mismos chequeos que el botón. Corta a los ~110 s
 // (lo que queda sale la noche siguiente o con el botón).
+const CONCURRENCIA = 4;
 async function syncAll(supabase: any) {
   const t0 = Date.now();
   const crm = crmClient();
@@ -514,15 +509,21 @@ async function syncAll(supabase: any) {
     if (p.assistant_of_id || !p.email) continue;
     const isAdmin = p.role === "admin";
     if (!isAdmin && !(await crmHabilitado(supabase, p.id))) continue;
-    for (const clientId of await clientesDe(supabase, p.id)) {
-      if (Date.now() - t0 > 110_000) { truncated = true; break; }
-      try {
-        const r = await syncCliente(supabase, crm, { clientId, agenteId: p.id, actingEmail: p.email.trim(), isAdmin });
-        if (r.body.action !== "noop") results.push({ user_id: p.id, client_id: clientId, status: r.status, action: r.body.action ?? r.body.error, synced: r.body.synced ?? 0 });
-      } catch (e) {
-        results.push({ user_id: p.id, client_id: clientId, error: String((e as any)?.message || e) });
+    // Clientes de a CONCURRENCIA a la vez (cada uno: lecturas + GET y POST al CRM).
+    // Un mismo cliente nunca se procesa dos veces en paralelo (ids únicos).
+    const pendientes = await clientesDe(supabase, p.id);
+    const worker = async () => {
+      for (let clientId = pendientes.shift(); clientId !== undefined; clientId = pendientes.shift()) {
+        if (Date.now() - t0 > 110_000) { truncated = true; return; }
+        try {
+          const r = await syncCliente(supabase, crm, { clientId, agenteId: p.id, actingEmail: p.email.trim(), isAdmin });
+          if (r.body.action !== "noop") results.push({ user_id: p.id, client_id: clientId, status: r.status, action: r.body.action ?? r.body.error, synced: r.body.synced ?? 0 });
+        } catch (e) {
+          results.push({ user_id: p.id, client_id: clientId, error: String((e as any)?.message || e) });
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCIA }, worker));
     if (truncated) break;
   }
   return jsonResponse({ ok: true, results, truncated });

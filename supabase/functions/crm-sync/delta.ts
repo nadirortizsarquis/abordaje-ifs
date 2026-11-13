@@ -82,11 +82,17 @@ export type NotesDelta = { nuevas: string[]; editadas: string[] };
 export function notesDelta(sent: string[] | null | undefined, cur: string | null | undefined): NotesDelta | null {
   const sentSet = new Set(sent ?? []);
   const sentMomentos = new Set([...sentSet].map(momento));
+  const blocks = splitNotes(cur);
+  // Momentos que siguen teniendo su nota enviada intacta en el texto actual: otra
+  // nota con ese mismo momento es NUEVA (ej. un Hito y un Llamado en el mismo minuto),
+  // no una corrección. Corregida = su momento se envió y esa versión ya no está.
+  const intactos = new Set(blocks.filter((b) => sentSet.has(noteKey(b))).map(momento));
   const nuevas: string[] = [];
   const editadas: string[] = [];
-  for (const b of splitNotes(cur)) {
+  for (const b of blocks) {
     if (sentSet.has(noteKey(b))) continue;
-    (sentMomentos.has(momento(b)) ? editadas : nuevas).push(b);
+    const m = momento(b);
+    (sentMomentos.has(m) && !intactos.has(m) ? editadas : nuevas).push(b);
   }
   return nuevas.length || editadas.length ? { nuevas, editadas } : null;
 }
