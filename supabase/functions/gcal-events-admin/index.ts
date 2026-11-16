@@ -11,7 +11,7 @@
 // Si no, 401. verify_jwt=false en la function — la auth la manejamos manualmente.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { cargarTarea, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario, escribirEvento, internosPerezosos, hayExternos, blindarCuerpo } from "../_shared/tarea_evento.ts";
+import { cargarTarea, colorParaEvento, crearEventoTarea, actualizarEventoTarea, borrarEnOtroCalendario, escribirEvento, internosPerezosos, hayExternos, blindarCuerpo } from "../_shared/tarea_evento.ts";
 
 // Keys validas como credencial del caller: todas las secret nuevas (JSON
 // SUPABASE_SECRET_KEYS) + la legacy service_role mientras siga activa (PM #111).
@@ -262,6 +262,31 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true, existe: true, externos, corregido: true });
     }
 
+    // color: pone el color que corresponde al tipo de la tarjeta (backfill del MCP). Solo
+    // toca colorId, sin mails. dryRun=true solo informa. Respeta un color elegido a mano.
+    if (op === "color") {
+      const eid = String(body.eventId || "");
+      const tid = String(body.tareaId || "");
+      if (!/^[A-Za-z0-9_-]{5,1024}$/.test(eid)) return jsonResponse({ error: "eventId inválido" }, 400);
+      if (!/^[0-9a-f-]{36}$/i.test(tid)) return jsonResponse({ error: "tareaId inválido" }, 400);
+      const tarea = await cargarTarea(supabase, { extendedProperties: { private: { abordaje_tarea_id: tid } } }, targetUserId);
+      if (!tarea) return jsonResponse({ ok: true, skip: "tarjeta no encontrada para este agente" });
+      const gr = await fetch(`${base}/${encodeURIComponent(eid)}`, { headers: reqHeaders });
+      if (gr.status === 404 || gr.status === 410) return jsonResponse({ ok: true, existe: false });
+      if (!gr.ok) throw new Error(`get failed: ${gr.status} ${await gr.text()}`);
+      const ev = await gr.json();
+      if (ev.status === "cancelled") return jsonResponse({ ok: true, existe: false });
+      const ref = ev?.extendedProperties?.private?.abordaje_tarea_id;
+      if (ref && ref !== tid) return jsonResponse({ ok: true, skip: "el evento es de otra tarjeta" });
+      const color = colorParaEvento(tarea.tipo_evento, false, undefined, ev);
+      const res = { ok: true, existe: true, tipo: tarea.tipo_evento, antes: ev.colorId || null, despues: color ?? (ev.colorId || null), cambia: color !== undefined };
+      if (!res.cambia || body.dryRun) return jsonResponse(res);
+      const r = await escribirEvento(`${base}/${encodeURIComponent(eid)}?sendUpdates=none`, "PATCH", reqHeaders, { colorId: color }, ev,
+        { ...ctx, textos: [tarea.titulo || "", tarea.observacion || ""] });
+      if (!r.ok) throw new Error(`color failed: ${r.status} ${await r.text()}`);
+      return jsonResponse(res);
+    }
+
     const decorate = (event: any) => {
       const prevExt = event?.extendedProperties || {};
       const prevPriv = prevExt.private || {};
@@ -336,7 +361,8 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse({ ok: true, action: "instance_cancelled", asAssistant });
       }
-      const r = await fetch(`${base}/${body.eventId}`, { method: "DELETE", headers: reqHeaders });
+      // sendUpdates=none: borrar desde el MCP (archivar/borrar tarjeta) nunca manda mail de cancelación.
+      const r = await fetch(`${base}/${encodeURIComponent(String(body.eventId))}?sendUpdates=none`, { method: "DELETE", headers: reqHeaders });
       if (!r.ok && r.status !== 404 && r.status !== 410) {
         throw new Error(`delete failed: ${r.status} ${await r.text()}`);
       }

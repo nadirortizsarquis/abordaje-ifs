@@ -8,12 +8,36 @@
 //  2. Id de evento derivado de la tarjeta ("abt" + uuid sin guiones): si dos pedidos
 //     crean a la vez, el segundo recibe 409 de Google y reutiliza el existente.
 //  3. Tarjeta con fecha y sin hora → evento de día completo (antes: 09:00 a 10:00).
-//  4. El tipo de la tarjeta manda: recordatorio (lila, colorId 1) o reunión (color del
-//     calendario, con Meet e invitados si la tarjeta lo pide). Duración = duracion_min.
+//  4. El tipo de la tarjeta manda: recordatorio (lila, colorId 3 Uva) o reunión (azul,
+//     colorId 9 Arándano, con Meet e invitados si la tarjeta lo pide). Duración = duracion_min.
+//     El color se aplica al crear y al actualizar (16-nov-2026, decisión de Nadir); un color
+//     que el usuario eligió a mano en Google (fuera de los de Abordaje) se respeta.
 //
 // Las funciones puras (sin red) se exportan para los tests (tarea_evento_test.ts).
 
-export const COLOR_RECORDATORIO = "1"; // Lavanda
+export const COLOR_RECORDATORIO = "3"; // Uva (lila)
+export const COLOR_REUNION = "9"; // Arándano (azul)
+// Colores que puso Abordaje (el 1 = Lavanda era el lila hasta el 16-nov-2026). Un evento
+// con uno de estos, o sin color, sigue al tipo de la tarjeta; cualquier otro lo eligió el
+// usuario a mano y se respeta.
+export const COLORES_ABORDAJE = ["1", COLOR_RECORDATORIO, COLOR_REUNION];
+
+export function colorDeTipo(tipo: string | null | undefined): string {
+  return tipo === "reunion" ? COLOR_REUNION : COLOR_RECORDATORIO;
+}
+
+// colorId que hay que mandar: undefined = no tocar el color.
+//  - Alta: el del tipo, salvo que el cliente mande un color propio (no de Abordaje).
+//  - Actualización: el del tipo si el evento no tiene color o tiene uno de Abordaje; si no se
+//    pudo leer el evento (previo null/undefined), no se toca.
+export function colorParaEvento(tipo: string | null | undefined, crear: boolean, pedido: any, previo: any): string | undefined {
+  const deseado = colorDeTipo(tipo);
+  if (crear) return pedido && !COLORES_ABORDAJE.includes(String(pedido)) ? String(pedido) : deseado;
+  if (!previo) return undefined;
+  const actual = previo.colorId ? String(previo.colorId) : "";
+  if (actual && !COLORES_ABORDAJE.includes(actual)) return undefined; // elegido a mano
+  return actual === deseado ? undefined : deseado;
+}
 
 export interface TareaEvento {
   id: string;
@@ -73,7 +97,7 @@ export function diaCompletoDe(tarea: TareaEvento): string | null {
 }
 
 // Aplica la tarjeta al cuerpo del evento. `crear` distingue alta de actualización (el color
-// por defecto solo se pone al crear: si el usuario después lo cambia en Google, se respeta).
+// sigue al tipo en los dos casos; ver colorParaEvento).
 // `previo` = el evento que ya existe en Google (solo al actualizar): de ahí se conservan el
 // Meet que ya tenga (pedir otro cambiaría el link) y los invitados agregados a mano.
 export function aplicarTarea(event: any, tarea: TareaEvento, crear: boolean, previo: any = null): any {
@@ -109,13 +133,9 @@ export function aplicarTarea(event: any, tarea: TareaEvento, crear: boolean, pre
       ev.conferenceData = { createRequest: { requestId: `abt-${tarea.id}`, conferenceSolutionKey: { type: "hangoutsMeet" } } };
     }
     if (yaTieneMeet) delete ev.conferenceData; // nunca tocar un Meet existente
-    if (crear) delete ev.colorId; // azul = color del calendario
-    // Pasó de recordatorio a reunión: se le saca el lila que le puso Abordaje (un color que
-    // eligió el usuario se respeta). null en un PATCH vuelve al color del calendario.
-    else if (previo?.colorId === COLOR_RECORDATORIO) ev.colorId = null;
-  } else if (crear && !ev.colorId) {
-    ev.colorId = COLOR_RECORDATORIO;
   }
+  const color = colorParaEvento(tarea.tipo_evento, crear, event?.colorId, previo);
+  if (color === undefined) delete ev.colorId; else ev.colorId = color;
   return ev;
 }
 

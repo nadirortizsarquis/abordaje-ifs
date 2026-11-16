@@ -1,5 +1,5 @@
 // deno run tarea_evento_test.ts — lógica pura de "un evento por tarjeta".
-import { TEXTOS_FIJOS, DESCRIPCION_SIN_NOTAS, blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
+import { TEXTOS_FIJOS, DESCRIPCION_SIN_NOTAS, blindarCuerpo, cambiaParaInvitados, DESCRIPCION_NEUTRA, TITULO_NEUTRO, huella, esManual, esInterno, escribirEvento, hayExternos, aplicarTarea, calendarioDeBase, esEventoDeAbordaje, MAX_INVITADOS, COLOR_RECORDATORIO, COLOR_REUNION, colorParaEvento, diaSiguiente, idEventoDeTarea, sendUpdatesPara, tareaIdDelEvento, type TareaEvento } from "./tarea_evento.ts";
 
 let ok = 0, mal = 0;
 const check = (cond: boolean, msg: string) => { if (cond) { ok++; console.log("ok ", msg); } else { mal++; console.log("MAL", msg); } };
@@ -23,7 +23,13 @@ check(tareaIdDelEvento({ extendedProperties: { private: { abordaje_tarea_id: "x'
 const r1 = aplicarTarea(EV, T(), true);
 check(r1.colorId === COLOR_RECORDATORIO, "recordatorio nuevo → lila");
 check(aplicarTarea({ ...EV, colorId: "5" }, T(), true).colorId === "5", "si el cliente manda color, se respeta");
-check(aplicarTarea(EV, T(), false).colorId === undefined, "al actualizar no se toca el color");
+check(COLOR_RECORDATORIO === "3" && COLOR_REUNION === "9", "lila = 3 (Uva), azul = 9 (Arándano)");
+check(aplicarTarea({ ...EV, colorId: "1" }, T(), true).colorId === COLOR_RECORDATORIO, "alta con el lila viejo (1) → 3");
+check(aplicarTarea(EV, T(), false).colorId === undefined, "al actualizar sin leer el evento no se toca el color");
+check(aplicarTarea(EV, T(), false, { colorId: "1" }).colorId === "3", "recordatorio con el lila viejo (1) → 3");
+check(aplicarTarea(EV, T(), false, {}).colorId === "3", "recordatorio sin color → 3");
+check(aplicarTarea(EV, T(), false, { colorId: "3" }).colorId === undefined, "recordatorio que ya es 3: no se manda color");
+check(aplicarTarea(EV, T(), false, { colorId: "11" }).colorId === undefined, "recordatorio con color elegido a mano: se respeta");
 check(!r1.attendees && !r1.conferenceData, "recordatorio sin invitados ni Meet");
 check(sendUpdatesPara(T()) === "none", "recordatorio no manda mails");
 
@@ -35,7 +41,7 @@ check(aplicarTarea({ ...EV, start: { dateTime: "2026-11-12T18:00:00-03:00" } }, 
 // reunión
 const reu = T({ tipo_evento: "reunion", con_meet: true, invitados: ["Cliente@Mail.com", "no-es-mail"] });
 const r2 = aplicarTarea({ ...EV, colorId: "3" }, reu, true);
-check(r2.colorId === undefined, "reunión nueva → color del calendario (azul)");
+check(r2.colorId === COLOR_REUNION, "reunión nueva → azul (9), aunque el cliente mande el lila");
 check(r2.attendees?.length === 1 && r2.attendees[0].email === "cliente@mail.com", "invitados válidos, en minúscula");
 check(r2.conferenceData?.createRequest?.conferenceSolutionKey?.type === "hangoutsMeet", "pide Meet");
 check(sendUpdatesPara(reu) === "all", "reunión con invitados avisa por mail");
@@ -74,7 +80,11 @@ const muchos = Array.from({ length: 30 }, (_, i) => `p${i}@x.com`);
 check(aplicarTarea(EV, T({ tipo_evento: "reunion", invitados: muchos }), true).attendees.length === MAX_INVITADOS, "tope de invitados = el de la base (20)");
 
 // reunión que venía de recordatorio: se le saca el lila; un color elegido se respeta
-check(aplicarTarea(EV, reu, false, { colorId: "1" }).colorId === null, "recordatorio→reunión: saca el lila (azul)");
+check(aplicarTarea(EV, reu, false, { colorId: "1" }).colorId === "9", "recordatorio→reunión (lila viejo 1) → 9");
+check(aplicarTarea(EV, reu, false, { colorId: "3" }).colorId === "9", "recordatorio→reunión (lila 3) → 9");
+check(aplicarTarea(EV, reu, false, {}).colorId === "9", "reunión sin color → 9");
+check(aplicarTarea(EV, T(), false, { colorId: "9" }).colorId === "3", "reunión→recordatorio → 3");
+check(colorParaEvento("reunion", false, undefined, null) === undefined, "sin evento leído no se decide color");
 check(aplicarTarea(EV, reu, false, { colorId: "5" }).colorId === undefined, "reunión con color elegido: se respeta");
 
 // ── Blindaje A1: las notas internas NUNCA van a invitados externos ──

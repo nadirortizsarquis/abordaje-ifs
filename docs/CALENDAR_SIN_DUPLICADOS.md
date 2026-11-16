@@ -62,8 +62,8 @@ Condiciones técnicas:
 
 | Tipo | Color | `colorId` |
 | --- | --- | --- |
-| Recordatorio de Abordaje | Lila (Lavanda) | 1 |
-| Reunión propia del agente | Azul (por defecto del calendario) | sin `colorId` |
+| Recordatorio de Abordaje | Lila (Uva) | 3 |
+| Reunión propia del agente | Azul (Arándano) | 9 |
 | Reuniones de Soda | Verde; Abordaje no las crea ni las toca | — |
 
 ## Herramienta nueva: `reconciliar_calendar`
@@ -115,7 +115,7 @@ Calendar pasa a ser un módulo compartido de Universo (Abordaje, PM personal, CR
 - `supabase/functions/_shared/tarea_evento.ts`, usado por `gcal-events` (app y Universo) y `gcal-events-admin` (MCP). Todo evento con `abordaje_tarea_id`:
   - un "create" de una tarjeta que ya tiene evento actualiza ese evento (`reutilizado: true`);
   - id derivado `abt<uuid sin guiones>`: dos altas simultáneas dan un solo evento (409 → reutiliza); si ese id fue borrado, alta con id aleatorio;
-  - recordatorio = colorId 1 (lila) al crear; reunión = color del calendario + Meet e invitados según la tarjeta; duración = `duracion_min`;
+  - recordatorio = colorId 3 (lila), reunión = colorId 9 (azul), al crear y al actualizar (un color elegido a mano fuera de 1, 3 y 9 se respeta) + Meet e invitados según la tarjeta; duración = `duracion_min`;
   - al actualizar una reunión no se toca un Meet existente ni se sacan invitados agregados a mano; mails solo para reuniones con invitados.
 - `gcal-events-admin`: email de impersonación desde `auth.users` (sec-01).
 - Prueba en producción (cuenta de Nadir, tarjeta de prueba borrada): 11/11 comprobaciones + 4 altas simultáneas → 1 evento.
