@@ -8575,6 +8575,16 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
   // Al desarchivar:
   //   - Vuelve al state principal.
   //   - Si tenía fecha y no tiene evento Google, se recrea (solo piloto).
+  // ¿El evento de la tarjeta ya pasó? Hora de Córdoba (UTC-3), igual que ya_paso del MCP.
+  // Con hora: pasó si ya empezó. Sin hora (todo el día): cuando terminó el día.
+  const eventoYaPaso = (fecha, hora) => {
+    if (!fecha) return false;
+    const f = String(fecha).slice(0, 10);
+    const h = hora ? String(hora).slice(0, 5) : null;
+    const t = h ? Date.parse(`${f}T${h}:00-03:00`) : Date.parse(`${f}T00:00:00-03:00`) + 86400000;
+    return Number.isFinite(t) && t <= Date.now();
+  };
+
   const handleArchiveTarea = async (tareaObjOrId, archivar) => {
     if (guardReadOnly()) return;
     // Aceptamos tanto un objeto tarea (caso desarchivar desde buscador) como
@@ -8586,7 +8596,9 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       // Optimistic: la sacamos del kanban.
       setState(s => ({ ...s, tareas: { ...s.tareas, items: s.tareas.items.filter(t => t.id !== id) } }));
       try {
-        if (isPilot && tarea?.googleEventId) {
+        // Un evento que ya pasó queda en Google como historial (y la tarjeta conserva su id);
+        // uno futuro se borra sin mail a los invitados (16/11/2026, igual que el MCP).
+        if (isPilot && tarea?.googleEventId && !eventoYaPaso(tarea.fechaRecordatorio, tarea.horaRecordatorio)) {
           try { await gcalApi.delete(tarea.googleEventId); }
           catch (e) { console.warn('gcal sync (archivar tarea):', e?.message || e); }
           await storage.updateTarea(id, { googleEventId: null });
@@ -8609,11 +8621,8 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
       try {
         await storage.updateTarea(id, { archivada: false });
         const tareaActualizada = { ...(tarea || {}), archivada: false, updatedAt: new Date().toISOString() };
-        // Si el objeto trae un googleEventId, puede estar stale (al archivar
-        // borramos el evento de Google, pero si veníamos de una sesión vieja
-        // el `tarea` parameter conserva el id). Lo limpiamos por las dudas —
-        // un delete a un evento ya borrado tira 404 que silenciamos.
-        if (isPilot && tareaActualizada.googleEventId) {
+        // Sin fecha no lleva evento: si quedó uno (era pasado al archivar), se borra.
+        if (isPilot && tareaActualizada.googleEventId && !tareaActualizada.fechaRecordatorio) {
           try { await gcalApi.delete(tareaActualizada.googleEventId); } catch (_) {}
           tareaActualizada.googleEventId = null;
           try { await storage.updateTarea(id, { googleEventId: null }); } catch (_) {}
@@ -8630,13 +8639,20 @@ function App({ user, agente, setAgente, viewAs, onViewAs, onExitViewAs, onLogout
         if (isPilot && tareaActualizada.fechaRecordatorio) {
           try {
             const fechaIso = new Date(`${tareaActualizada.fechaRecordatorio}T${(tareaActualizada.horaRecordatorio || '09:00')}:00`).toISOString();
-            const evt = await gcalApi.create(buildGoogleEventBody({
+            const body = buildGoogleEventBody({
               startIso: fechaIso,
               summary: tareaActualizada.titulo?.trim() || 'Tarea',
               description: tareaActualizada.observacion || '',
               tareaId: id,
-            }));
-            if (evt?.id) {
+            });
+            // Si quedó el evento (era pasado al archivar), se actualiza ese; si no está o
+            // falla, se crea (la edge reutiliza el id de la tarjeta, no duplica).
+            let evt = null;
+            if (tareaActualizada.googleEventId) {
+              try { evt = await gcalApi.update(tareaActualizada.googleEventId, body); } catch (_) { evt = null; }
+            }
+            if (!evt) evt = await gcalApi.create(body);
+            if (evt?.id && evt.id !== tareaActualizada.googleEventId) {
               await storage.updateTarea(id, { googleEventId: evt.id });
               // Sincronizamos el state local con el nuevo googleEventId
               // — si no, una edición posterior podría volver a crear evento

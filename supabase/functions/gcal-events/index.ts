@@ -40,11 +40,14 @@ async function authEmail(supabase: any, userId: string): Promise<string> {
 }
 const DEFAULT_CALENDAR = "primary";
 
+// Lista de headers que manda el SDK de Supabase (supabase-js/cors). Faltaban x-retry-count
+// y los de trazas (traceparent/tracestate/baggage): si el navegador los agrega, el preflight
+// fallaba y la consola mostraba error CORS en cada carga del calendario.
+const ALLOW_HEADERS = "authorization, x-client-info, apikey, content-type, x-retry-count, x-region, traceparent, tracestate, baggage";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": ALLOW_HEADERS,
 };
 
 interface ServiceAccountKey {
@@ -349,7 +352,8 @@ Deno.serve(async (req: Request) => {
         }
         return jsonResponse({ ok: true, action: "instance_cancelled", asAssistant });
       }
-      const r = await fetch(`${base}/${body.eventId}`, { method: "DELETE", headers });
+      // sendUpdates=none: borrar (ej. al archivar) no manda mail de cancelación a los invitados.
+      const r = await fetch(`${base}/${encodeURIComponent(String(body.eventId))}?sendUpdates=none`, { method: "DELETE", headers });
       if (!r.ok && r.status !== 404 && r.status !== 410) {
         throw new Error(`delete failed: ${r.status} ${await r.text()}`);
       }
