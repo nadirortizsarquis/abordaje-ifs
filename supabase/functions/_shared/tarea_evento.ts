@@ -459,7 +459,7 @@ async function moverEventoA(base: string, headers: Record<string, string>, event
 export async function borrarEnOtroCalendario(base: string, headers: Record<string, string>, eventId: string): Promise<boolean> {
   const origen = await buscarCalendarioDelEvento(headers, eventId, calendarioDeBase(base));
   if (!origen) return false;
-  const r = await fetch(`${CAL_API}/calendars/${encodeURIComponent(origen)}/events/${encodeURIComponent(eventId)}`, { method: "DELETE", headers });
+  const r = await fetch(`${CAL_API}/calendars/${encodeURIComponent(origen)}/events/${encodeURIComponent(eventId)}?sendUpdates=none`, { method: "DELETE", headers });
   return r.ok || r.status === 404 || r.status === 410;
 }
 
