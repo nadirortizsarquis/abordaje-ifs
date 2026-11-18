@@ -49,6 +49,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } from "./ownership.ts";
 import { type Nota, type NotesDelta, noteKeys, notesDelta, parseNote, parseNotes } from "./delta.ts";
 import { buildDescription, buildPayload, type ItemEnvio } from "./format.ts";
+import { conResumenes, type ReunionAprobada } from "./reuniones.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -310,6 +311,19 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     for (const col of cols ?? []) colName.set(col.id, col.titulo);
   }
 
+  // Reuniones grabadas: la línea "Reunión #N — título" de la Bitácora viaja al CRM con el
+  // resumen completo debajo (reuniones.ts).
+  const resumenes = new Map<string, ReunionAprobada[]>();
+  if (tareasAll.length) {
+    const { data: reus, error } = await supabase.from("reunion_transcripciones")
+      .select("tarea_id, numero, titulo, resumen").in("tarea_id", tareasAll.map((t) => t.id))
+      .eq("estado", "aprobada").not("numero", "is", null);
+    if (error) throw new HttpError(500, `No se pudieron leer las reuniones: ${error.message}`);
+    for (const r of reus ?? []) {
+      (resumenes.get(r.tarea_id) ?? resumenes.set(r.tarea_id, []).get(r.tarea_id)!).push(r);
+    }
+  }
+
   // Pendiente = nunca enviado, o enviado a otro cliente (re-vínculo).
   const pendiente = (r: any) => !r.crm_synced_at || (r.crm_synced_client_id != null && Number(r.crm_synced_client_id) !== clientId);
   const yaEnEste = (r: any) => !!r.crm_synced_at && !!r.crm_synced_blocks && !pendiente(r);
@@ -344,7 +358,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     recordatorio: t.fecha_recordatorio ? [dm(String(t.fecha_recordatorio)), t.hora_recordatorio ? fmtTime(t.hora_recordatorio) : ""].filter(Boolean).join(" ") : "",
   });
   for (const t of tareasAll.filter(pendiente)) {
-    items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: parseNotes(t.observacion) });
+    items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: conResumenes(parseNotes(t.observacion), resumenes.get(t.id)) });
     stamp("abordaje_tareas", t.id, t.observacion, t.columna_id ?? null);
     cnt.tareas++;
   }
@@ -371,8 +385,13 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   for (const t of tareasAll) {
     const m = metaTarea(t);
     const anterior = t.crm_synced_columna_id && t.crm_synced_columna_id !== t.columna_id ? colName.get(t.crm_synced_columna_id) || "" : "";
-    upd(t, t.observacion, (d) => ({ kind: "tarea", actualizacion: true, titulo: t.titulo || "",
-      columna: m.columna, columnaAnterior: anterior || undefined, compania: m.compania, ...notas(d) }),
+    const rs = resumenes.get(t.id);
+    upd(t, t.observacion, (d) => {
+      const n = notas(d);
+      return { kind: "tarea", actualizacion: true, titulo: t.titulo || "",
+        columna: m.columna, columnaAnterior: anterior || undefined, compania: m.compania,
+        notas: conResumenes(n.notas, rs), corregidas: conResumenes(n.corregidas, rs) };
+    },
       "abordaje_tareas", t.columna_id ?? null);
   }
 
