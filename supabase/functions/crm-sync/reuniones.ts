@@ -4,17 +4,23 @@
 // sección de Reuniones, al CRM viajan juntas: la línea y, debajo, el resumen completo.
 import type { Nota } from "./delta.ts";
 
-export const NUM_REUNION = /^Reunión #(\d+)\b/;
+export interface ReunionAprobada { numero: number; titulo: string | null; resumen: string | null }
 
-// resumenes: número de reunión → resumen, de UNA tarjeta. En el CRM el tipo ya se lee
-// ("Reunión: …"), así que la línea va como "#N — título" para no repetir la palabra.
-export function conResumenes(notas: Nota[], resumenes: Map<number, string> | undefined): Nota[] {
+// La línea tiene que coincidir con número Y título de una reunión aprobada de ESTA tarjeta
+// (mismo criterio que la solapa en TareaModal.jsx): una nota manual "Reunión #3 con el
+// gerente", o una que vino de otra tarjeta al unificar, no se toca.
+export const lineaDe = (r: ReunionAprobada) => `Reunión #${r.numero} — ${(r.titulo || "").trim()}`;
+
+// En el CRM el tipo ya se lee ("Reunión: …"), así que va como "#N — título" + el resumen.
+export function conResumenes(notas: Nota[], reuniones: ReunionAprobada[] | undefined): Nota[] {
+  if (!reuniones?.length) return notas;
+  const porLinea = new Map(reuniones.map((r) => [lineaDe(r), r]));
   return notas.map((n) => {
     if (n.tipo !== "reunion") return n;
-    const m = n.texto.match(NUM_REUNION);
-    if (!m) return n;
-    const linea = n.texto.replace(/^Reunión (#\d+)/, "$1");
-    const r = resumenes?.get(Number(m[1]))?.trim();
-    return { ...n, texto: r ? `${linea}\n${r}` : linea };
+    const r = porLinea.get(n.texto.trim());
+    if (!r) return n;
+    const resumen = (r.resumen || "").trim();
+    const linea = n.texto.trim().replace(/^Reunión (#\d+)/, "$1");
+    return { ...n, texto: resumen ? `${linea}\n${resumen}` : linea };
   });
 }

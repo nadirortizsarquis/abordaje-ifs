@@ -49,7 +49,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } from "./ownership.ts";
 import { type Nota, type NotesDelta, noteKeys, notesDelta, parseNote, parseNotes } from "./delta.ts";
 import { buildDescription, buildPayload, type ItemEnvio } from "./format.ts";
-import { conResumenes } from "./reuniones.ts";
+import { conResumenes, type ReunionAprobada } from "./reuniones.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -313,14 +313,14 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
 
   // Reuniones grabadas: la línea "Reunión #N — título" de la Bitácora viaja al CRM con el
   // resumen completo debajo (reuniones.ts).
-  const resumenes = new Map<string, Map<number, string>>();
+  const resumenes = new Map<string, ReunionAprobada[]>();
   if (tareasAll.length) {
     const { data: reus, error } = await supabase.from("reunion_transcripciones")
-      .select("tarea_id, numero, resumen").in("tarea_id", tareasAll.map((t) => t.id))
+      .select("tarea_id, numero, titulo, resumen").in("tarea_id", tareasAll.map((t) => t.id))
       .eq("estado", "aprobada").not("numero", "is", null);
     if (error) throw new HttpError(500, `No se pudieron leer las reuniones: ${error.message}`);
     for (const r of reus ?? []) {
-      (resumenes.get(r.tarea_id) ?? resumenes.set(r.tarea_id, new Map()).get(r.tarea_id)!).set(r.numero, r.resumen || "");
+      (resumenes.get(r.tarea_id) ?? resumenes.set(r.tarea_id, []).get(r.tarea_id)!).push(r);
     }
   }
 
