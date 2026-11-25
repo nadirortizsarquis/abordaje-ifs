@@ -16,6 +16,8 @@ export interface ReunionAprobada {
 export interface ReunionEnvio {
   title: string; summary: string; held_at: string; source: "universo"; source_id: string;
   numero: number;
+  tarea: string;   // título de la tarjeta y nota original: si el CRM rechaza la reunión,
+  nota: Nota;      // viaja como antes, en la bitácora
 }
 
 // La línea tiene que coincidir con número Y título de una reunión aprobada de ESTA tarjeta
@@ -25,7 +27,7 @@ export const lineaDe = (r: Pick<ReunionAprobada, "numero" | "titulo">) => `Reuni
 
 // El CRM muestra el resumen como texto plano: sin ** ni __ ni # de títulos de Markdown.
 export const sinMarkdown = (s: string) => s
-  .replace(/\*\*(.+?)\*\*/g, "$1").replace(/__(.+?)__/g, "$1")
+  .replace(/\*\*(.+?)\*\*/g, "$1").replace(/(^|[\s(])__(\S(?:.*?\S)?)__(?=$|[\s,;:!?)]|\.(?:\s|$))/gm, "$1$2")
   .replace(/^#{1,6}\s+/gm, "").trim();
 
 // Separa de las notas de una tarjeta las líneas de reuniones aprobadas con resumen: esas
@@ -33,7 +35,7 @@ export const sinMarkdown = (s: string) => s
 // re-vincula a otro cliente, la reunión se cree también ahí (el CRM es idempotente por
 // source + source_id: un reintento no la duplica).
 export function separarReuniones(
-  notas: Nota[], reuniones: ReunionAprobada[] | undefined, clientId: number,
+  notas: Nota[], reuniones: ReunionAprobada[] | undefined, clientId: number, tarea = "",
 ): { notas: Nota[]; reuniones: ReunionEnvio[] } {
   if (!reuniones?.length) return { notas, reuniones: [] };
   const porLinea = new Map(reuniones.map((r) => [lineaDe(r), r]));
@@ -44,12 +46,13 @@ export function separarReuniones(
     const resumen = sinMarkdown(r?.resumen || "");
     if (!r || !resumen) { quedan.push(n); continue; }
     envio.push({
-      title: ((r.titulo || "").trim() || `Reunión #${r.numero}`).slice(0, 120),
+      title: Array.from((r.titulo || "").trim() || `Reunión #${r.numero}`).slice(0, 120).join(""),
       summary: resumen,
       held_at: r.inicio || r.creado_at || new Date().toISOString(),
       source: "universo",
       source_id: `${r.id}:${clientId}`,
       numero: r.numero,
+      tarea, nota: n,
     });
   }
   return { notas: quedan, reuniones: envio };
