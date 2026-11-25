@@ -18,10 +18,11 @@ const reus = [
   { id: "r1", numero: 1, titulo: "Primera charla", resumen: "• Algo", inicio: null, creado_at: "2026-11-10T12:00:00Z" },
   { id: "r4", numero: 4, titulo: "Sin resumen", resumen: "  ", inicio: null, creado_at: "2026-11-14T11:00:00Z" },
 ];
-const out = separarReuniones(notas, reus, 77);
+const out = separarReuniones(notas, reus, 77, "Rebolini");
 eq(out.reuniones, [{
   title: "Propuesta vida IT", summary: "- Temas tratados: vida con ahorro\n- Próximos pasos: propuesta el viernes",
   held_at: "2026-11-18T13:30:00Z", source: "universo", source_id: "r2:77", numero: 2,
+  tarea: "Rebolini", nota: notas[0],
 }], "la reunión aprobada va a la sección Reuniones, sin Markdown y con el cliente en source_id");
 eq(out.notas.map((n) => n.texto), [
   "Le dejé mensaje", "Reunión #3 con el gerente",
@@ -30,3 +31,7 @@ eq(out.notas.map((n) => n.texto), [
 eq(separarReuniones(notas, undefined, 77), { notas, reuniones: [] }, "una tarjeta sin reuniones no cambia");
 eq(separarReuniones(notas, reus, 78).reuniones[0].source_id, "r2:78", "re-vinculada a otro cliente: otro source_id");
 eq(sinMarkdown("## Resumen\n- **a:** b __c__"), "Resumen\n- a: b c", "sinMarkdown saca negritas y títulos");
+eq(sinMarkdown("Plan__A__B y __init__.py"), "Plan__A__B y __init__.py", "no toca guiones bajos dentro de palabras");
+eq(Array.from(separarReuniones(parseNotes("[18/11/26 10:30 · Reunión] Reunión #9 — " + "x".repeat(119) + "😀😀"),
+  [{ id: "r9", numero: 9, titulo: "x".repeat(119) + "😀😀", resumen: "ok", inicio: null, creado_at: "2026-11-18T13:00:00Z" }], 1).reuniones[0].title).length,
+  120, "el título se corta en 120 caracteres sin romper un emoji");

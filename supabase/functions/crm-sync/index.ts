@@ -18,6 +18,10 @@
 //   Dedup:  GET  /clients/?document_number=<dni>        -> {count, results:[...]}
 //   Crear:  POST /clients/  {first_name,last_name,document_number,advisor_email,...}
 //   Log:    POST /clients/<id>/log/  {description, advisor_email, source:"abordaje"}
+//   Reunión: POST /clients/<id>/meetings/ {title, summary, held_at, source:"universo",
+//            source_id, advisor_email} (antilic/ifs-broker-api#45). Idempotente: un
+//            reintento con el mismo source_id devuelve 200 con la existente. El CRM la
+//            numera por cliente y escribe la línea "Reunión #N — título" en la bitácora.
 //   advisor_email es OBLIGATORIO y debe ser el email de un asesor activo del CRM;
 //   si no, el CRM responde 400 {detail} y NO escribe nada.
 //
@@ -333,8 +337,9 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   const reuniones: ReunionEnvio[] = [];
   const cnt = { contactos: 0, agendados: 0, tareas: 0, actualizaciones: 0, reuniones: 0 };
   // Saca de las notas de una tarjeta las reuniones que van aparte (sección Reuniones del CRM).
+  const tituloDe = new Map<string, string>(tareasAll.map((t) => [t.id, t.titulo || ""]));
   const aparte = (ns: Nota[], tareaId: string): Nota[] => {
-    const r = separarReuniones(ns, resumenes.get(tareaId), clientId);
+    const r = separarReuniones(ns, resumenes.get(tareaId), clientId, tituloDe.get(tareaId) || "");
     for (const x of r.reuniones) if (!reuniones.some((y) => y.source_id === x.source_id)) reuniones.push(x);
     return r.notas;
   };
@@ -404,6 +409,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   // Una actualización que solo traía reuniones (y sin cambio de columna) ya no tiene nada
   // para la bitácora: la reunión entra sola, con su propia línea.
   const conContenido = items.filter((it) => !it.actualizacion || it.notas.length || it.corregidas?.length || it.columnaAnterior);
+  cnt.actualizaciones = conContenido.filter((it) => it.actualizacion).length;
   reuniones.sort((a, b) => a.held_at.localeCompare(b.held_at) || a.numero - b.numero);
   cnt.reuniones = reuniones.length;
   return { items: conContenido, stamps, cnt, prospIds, reuniones };
@@ -437,11 +443,23 @@ async function syncCliente(
   }
   // Reuniones primero, de la más vieja a la más nueva (el CRM las numera en ese orden).
   // Son idempotentes (source + source_id): si algo falla después, el reintento no las duplica.
+  // Si el CRM rechaza una reunión (4xx: un dato que no valida), no se traba todo el
+  // cliente: esa reunión va como antes, la línea con el resumen en la bitácora. Un error
+  // del CRM o de red (5xx, timeout) sí corta: se reintenta entero en el próximo sync.
   for (const r of reuniones) {
-    const { numero: _n, ...body } = r;
-    await crm(`/clients/${o.clientId}/meetings/`, {
-      method: "POST", body: JSON.stringify({ ...body, advisor_email: o.actingEmail }),
-    });
+    const { numero: _n, tarea: _t, nota: _no, ...body } = r;
+    try {
+      await crm(`/clients/${o.clientId}/meetings/`, {
+        method: "POST", body: JSON.stringify({ ...body, advisor_email: o.actingEmail }),
+      });
+    } catch (e) {
+      const st = (e as any)?.status ?? 0;
+      if (st < 400 || st >= 500) throw e;
+      console.error(`crm-sync reunión rechazada (${st}) cliente ${o.clientId}: ${(e as any)?.message}`);
+      cnt.reuniones--;
+      items.push({ kind: "tarea", actualizacion: true, titulo: r.tarea, notas: [{ ...r.nota,
+        texto: `#${r.numero} — ${r.title}\n${r.summary}` }] });
+    }
   }
   let logId: number | null = null;
   if (items.length) {
