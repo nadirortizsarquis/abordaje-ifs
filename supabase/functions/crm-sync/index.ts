@@ -49,7 +49,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } from "./ownership.ts";
 import { type Nota, type NotesDelta, noteKeys, notesDelta, parseNote, parseNotes } from "./delta.ts";
 import { buildDescription, buildPayload, type ItemEnvio } from "./format.ts";
-import { conResumenes, type ReunionAprobada } from "./reuniones.ts";
+import { separarReuniones, type ReunionAprobada, type ReunionEnvio } from "./reuniones.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -311,12 +311,12 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     for (const col of cols ?? []) colName.set(col.id, col.titulo);
   }
 
-  // Reuniones grabadas: la línea "Reunión #N — título" de la Bitácora viaja al CRM con el
-  // resumen completo debajo (reuniones.ts).
+  // Reuniones grabadas: cada una aprobada va a la sección Reuniones del CRM y su línea
+  // "Reunión #N — título" sale del bloque de la tarjeta (reuniones.ts).
   const resumenes = new Map<string, ReunionAprobada[]>();
   if (tareasAll.length) {
     const { data: reus, error } = await supabase.from("reunion_transcripciones")
-      .select("tarea_id, numero, titulo, resumen").in("tarea_id", tareasAll.map((t) => t.id))
+      .select("id, tarea_id, numero, titulo, resumen, inicio, creado_at").in("tarea_id", tareasAll.map((t) => t.id))
       .eq("estado", "aprobada").not("numero", "is", null);
     if (error) throw new HttpError(500, `No se pudieron leer las reuniones: ${error.message}`);
     for (const r of reus ?? []) {
@@ -330,7 +330,14 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
 
   const items: ItemEnvio[] = [];
   const stamps: StampItem[] = [];
-  const cnt = { contactos: 0, agendados: 0, tareas: 0, actualizaciones: 0 };
+  const reuniones: ReunionEnvio[] = [];
+  const cnt = { contactos: 0, agendados: 0, tareas: 0, actualizaciones: 0, reuniones: 0 };
+  // Saca de las notas de una tarjeta las reuniones que van aparte (sección Reuniones del CRM).
+  const aparte = (ns: Nota[], tareaId: string): Nota[] => {
+    const r = separarReuniones(ns, resumenes.get(tareaId), clientId);
+    for (const x of r.reuniones) if (!reuniones.some((y) => y.source_id === x.source_id)) reuniones.push(x);
+    return r.notas;
+  };
   const stamp = (t: SyncTable, id: string, text: string | null, col: string | null = null) =>
     stamps.push({ t, id, keys: noteKeys(text), c: clientId, col });
 
@@ -358,7 +365,7 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
     recordatorio: t.fecha_recordatorio ? [dm(String(t.fecha_recordatorio)), t.hora_recordatorio ? fmtTime(t.hora_recordatorio) : ""].filter(Boolean).join(" ") : "",
   });
   for (const t of tareasAll.filter(pendiente)) {
-    items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: conResumenes(parseNotes(t.observacion), resumenes.get(t.id)) });
+    items.push({ kind: "tarea", actualizacion: false, titulo: t.titulo || "", ...metaTarea(t), notas: aparte(parseNotes(t.observacion), t.id) });
     stamp("abordaje_tareas", t.id, t.observacion, t.columna_id ?? null);
     cnt.tareas++;
   }
@@ -385,17 +392,21 @@ async function gatherByClient(supabase: any, clientId: number, agenteId: string)
   for (const t of tareasAll) {
     const m = metaTarea(t);
     const anterior = t.crm_synced_columna_id && t.crm_synced_columna_id !== t.columna_id ? colName.get(t.crm_synced_columna_id) || "" : "";
-    const rs = resumenes.get(t.id);
     upd(t, t.observacion, (d) => {
       const n = notas(d);
       return { kind: "tarea", actualizacion: true, titulo: t.titulo || "",
         columna: m.columna, columnaAnterior: anterior || undefined, compania: m.compania,
-        notas: conResumenes(n.notas, rs), corregidas: conResumenes(n.corregidas, rs) };
+        notas: aparte(n.notas, t.id), corregidas: aparte(n.corregidas, t.id) };
     },
       "abordaje_tareas", t.columna_id ?? null);
   }
 
-  return { items, stamps, cnt, prospIds };
+  // Una actualización que solo traía reuniones (y sin cambio de columna) ya no tiene nada
+  // para la bitácora: la reunión entra sola, con su propia línea.
+  const conContenido = items.filter((it) => !it.actualizacion || it.notas.length || it.corregidas?.length || it.columnaAnterior);
+  reuniones.sort((a, b) => a.held_at.localeCompare(b.held_at) || a.numero - b.numero);
+  cnt.reuniones = reuniones.length;
+  return { items: conContenido, stamps, cnt, prospIds, reuniones };
 }
 
 // Identificador estable del envío: mismo cliente + mismas notas = mismo id. El CRM
@@ -416,7 +427,7 @@ async function syncCliente(
   // Barrera real: crm_client_id puede venir del typeahead o setearse directo en la
   // fila (RLS deja editar la propia), sin pasar por `link`. Re-verificar SIEMPRE.
   // (Se chequea después de juntar: sin nada pendiente no hace falta consultar el CRM.)
-  const { items, stamps, cnt, prospIds } = await gatherByClient(supabase, o.clientId, o.agenteId);
+  const { items, stamps, cnt, prospIds, reuniones } = await gatherByClient(supabase, o.clientId, o.agenteId);
   const extra = { multi_prospecto: (prospIds?.length || 0) > 1, prospecto_count: prospIds?.length || 0 };
   if (!stamps.length) {
     return { status: 200, body: { ok: true, action: "noop", synced: 0, message: "No hay gestión nueva para volcar.", ...extra } };
@@ -424,17 +435,28 @@ async function syncCliente(
   if (!o.isAdmin && !(await clienteEsDelAsesor(crm, o.clientId, o.actingEmail))) {
     return { status: 403, body: { error: "client_not_owned", message: "El cliente vinculado no está en tu cartera del CRM. No se volcó nada; desvinculalo o pedile a un administrador." } };
   }
-  const log = await crm(`/clients/${o.clientId}/log/`, {
-    method: "POST",
-    body: JSON.stringify({
-      description: buildDescription(items, hoyYear()),
-      payload: buildPayload(items),
-      advisor_email: o.actingEmail,
-      source: "abordaje",
-      source_id: await sourceIdDe(o.clientId, stamps),
-    }),
-  });
-  const logId = log?.id ?? null;
+  // Reuniones primero, de la más vieja a la más nueva (el CRM las numera en ese orden).
+  // Son idempotentes (source + source_id): si algo falla después, el reintento no las duplica.
+  for (const r of reuniones) {
+    const { numero: _n, ...body } = r;
+    await crm(`/clients/${o.clientId}/meetings/`, {
+      method: "POST", body: JSON.stringify({ ...body, advisor_email: o.actingEmail }),
+    });
+  }
+  let logId: number | null = null;
+  if (items.length) {
+    const log = await crm(`/clients/${o.clientId}/log/`, {
+      method: "POST",
+      body: JSON.stringify({
+        description: buildDescription(items, hoyYear()),
+        payload: buildPayload(items),
+        advisor_email: o.actingEmail,
+        source: "abordaje",
+        source_id: await sourceIdDe(o.clientId, stamps),
+      }),
+    });
+    logId = log?.id ?? null;
+  }
   // Marcado atómico (RPC crm_sync_stamp): suma las notas enviadas a
   // crm_synced_blocks y guarda cliente y columna del envío.
   // El POST ya entró: se insiste con el marcado acá mismo (2 reintentos) antes de
@@ -450,7 +472,7 @@ async function syncCliente(
     if (!stampErr && stamped === stamps.length) break;
     console.error(`crm-sync stamp falló (intento ${intento + 1}):`, stampErr?.message ?? `${stamped}/${stamps.length}`);
   }
-  const synced = cnt.contactos + cnt.agendados + cnt.tareas + cnt.actualizaciones;
+  const synced = cnt.contactos + cnt.agendados + cnt.tareas + cnt.actualizaciones + cnt.reuniones;
   if (stampErr || stamped !== stamps.length) {
     return { status: 200, body: { ok: true, action: "synced_unmarked", retry_safe: true, crm_log_id: logId, synced, detalle: cnt,
       warning: "Se volcó al CRM pero no se pudo marcar como enviado. Reintentá ahora, antes de cargar notas nuevas en este cliente: así no se repite.", ...extra } };
