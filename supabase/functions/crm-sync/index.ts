@@ -34,6 +34,7 @@
 //   unlink                     -> suelta el vínculo del ancla (no toca el CRM)
 //   status                     -> conteo de ítems del cliente pendientes de volcar
 //   sync                       -> vuelca el delta del cliente a la bitácora del CRM
+//   birthdays {start?,days?,todos?} -> cumpleaños próximos de la cartera (sin ancla, solo lee)
 //
 // Notas agregadas después de un sync (nov 2026): cada ítem guarda en
 // crm_synced_blocks las notas (bloques "[dd/mm/aa hh:mm] ...") que ya llegaron
@@ -54,6 +55,7 @@ import { clienteEsDelAsesor, prospectoDelItem, puedeForzarCreate, soloSueltas } 
 import { type Nota, type NotesDelta, noteKeys, notesDelta, parseNote, parseNotes } from "./delta.ts";
 import { buildDescription, buildPayload, type ItemEnvio } from "./format.ts";
 import { separarReuniones, type ReunionAprobada, type ReunionEnvio } from "./reuniones.ts";
+import { birthdays } from "./birthdays.ts";
 
 // Keys nuevas (sb_secret_/sb_publishable_) llegan como JSON en SUPABASE_SECRET_KEYS /
 // SUPABASE_PUBLISHABLE_KEYS; fallback a las legacy mientras sigan activas (PM #111).
@@ -656,7 +658,7 @@ Deno.serve(async (req: Request) => {
     // `sync`, que exige habilitación + clienteEsDelAsesor antes de volcar nada.
     // unlink/status no hablan con el CRM pero tocan/leen el vínculo: mismo gate,
     // así un asesor deshabilitado no puede operar el vínculo por la función.
-    const CRM_OPS = new Set(["search", "lookup", "create", "link", "unlink", "status", "sync"]);
+    const CRM_OPS = new Set(["search", "lookup", "create", "link", "unlink", "status", "sync", "birthdays"]);
     if (CRM_OPS.has(op) && !crmEnabled) {
       return jsonResponse({ error: "Sincronización con CRM deshabilitada para tu usuario." }, 403);
     }
@@ -687,6 +689,20 @@ Deno.serve(async (req: Request) => {
       const crm = crmClient();
       const r = await crm(`/auth/verify-advisor/?email=${encodeURIComponent(email)}`);
       return jsonResponse({ ok: true, exists: !!r?.exists, active: !!r?.active, full_name: r?.full_name || "" });
+    }
+
+    // ── birthdays ── cumpleaños próximos de la cartera (tarjeta del Inicio). Solo lee.
+    // No-admin: siempre scopeado a su advisor_email (fail-closed sin email). Admin:
+    // lo suyo por defecto; `todos: true` ve los de toda la agencia. Ver birthdays.ts.
+    if (op === "birthdays") {
+      try {
+        return jsonResponse(await birthdays(crmClient(), {
+          start: body?.start, days: body?.days, todos: body?.todos, isAdmin, advisorEmail,
+        }));
+      } catch (e) {
+        if ((e as any)?.status === 400) return jsonResponse({ error: (e as Error).message }, 400);
+        throw e;
+      }
     }
 
     // Ancla: prospecto/tarea/agendado (compat: prospecto_id -> prospecto).
